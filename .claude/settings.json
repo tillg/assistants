@@ -1,0 +1,24 @@
+{
+  "enabledPlugins": {
+    "a12-knowledge-support@a12-plugin-marketplace": true,
+    "a12-knowledge-support-internal@a12-plugin-marketplace": true,
+    "a12-migration-support@a12-plugin-marketplace": true,
+    "a12-utilities@a12-plugin-marketplace": true,
+    "a12-modeling-support-2025.06@a12-plugin-marketplace": true,
+    "a12-feedback-capture@a12-plugin-marketplace": true,
+    "a12-test-data@a12-plugin-marketplace": true,
+    "a12-form-engine-2025-06@a12-plugin-marketplace": true,
+    "a12-widgets-2025-06@a12-plugin-marketplace": true,
+    "a12-project-setup@a12-plugin-marketplace": true,
+    "a12-solution-architect@a12-plugin-marketplace": true,
+    "a12-toon-support@a12-plugin-marketplace": true,
+    "a12-documentation-support@a12-plugin-marketplace-internal": true,
+    "a12-uat-support@a12-plugin-marketplace-internal": true,
+    "a12-tutorial-upgrade@a12-plugin-marketplace-internal": true,
+    "a12-test-support@a12-plugin-marketplace-internal": true,
+    "a12-token-optimization@a12-plugin-marketplace-internal": true,
+    "a12-professional-services@a12-plugin-marketplace-internal": true,
+    "a12-ticket-approval@a12-plugin-marketplace-internal": true,
+    "a12-feedback-triage@a12-plugin-marketplace-internal": true
+  }
+}
