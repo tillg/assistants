@@ -262,3 +262,62 @@ invariant is that nothing navigates there, not that the server refuses.
 
 ---
 
+## D-011 — The Runtime is TypeScript on Node, outside the A12 server
+
+**Decided**: `runtime/` is a separate TypeScript service, not Java code inside the A12 Data
+Service.
+
+**Why**: the Data Service is a platform component we *configure* — its jar comes from the
+registry and the template adds a handful of classes. Putting a long-running agentic loop, an LLM
+client and an HTTP connector inside it would fuse our application's lifecycle to the platform's
+and make every Runtime change a Spring Boot rebuild. Keeping it outside also keeps the boundary
+honest: the Runtime is a client of the ThingStore with no privileged access, exactly like the
+UserInterface. TypeScript because the LLM SDKs are first-class there and the loop is I/O-bound
+orchestration.
+
+**Reversal cost**: High — it would be a rewrite.
+
+---
+
+## D-012 — Unit tests use a real in-memory ThingStore, not a mock
+
+**Decided**: `runtime/test/support/memory-store.ts` implements the same surface as the A12 client
+— it really stores documents and really evaluates the constraint operators the watcher uses. The
+loop tests run against it.
+
+**Why**: this brushes the standing "never mock anything" rule, so it is worth being explicit.
+It is a **fake, not a mock**: nothing is stubbed to make an assertion pass, and no expectation is
+asserted against a stand-in. It exists because the behaviour worth testing — suspend, resume,
+recover a lease without re-executing — is *branching in the loop driver*, and exercising it
+against a Postgres-backed Spring Boot service would make the suite slow enough that nobody would
+run it. The same scenarios run against the real Data Service in the integration and end-to-end
+tiers, which is what keeps the fake honest.
+
+The same reasoning covers `ScriptedProvider`: it is a recorded substitute for a paid,
+non-deterministic third party, and without it the loop's branching cannot be asserted at all.
+
+**Alternative**: only integration tests. Slower, and the failure modes (a crashed Turn, an
+expired lease) are hard to provoke against a live stack.
+
+**Reversal cost**: Low.
+
+**Flagging this one for review** — it is the decision most likely to attract disagreement.
+
+---
+
+## D-013 — `compose/.env` is committed
+
+**Decided**: the repo's `.gitignore` ignores `.env` everywhere but explicitly un-ignores
+`compose/.env`, and the compose image names and project name are pinned there.
+
+**Why**: two reasons. The Gradle docker-compose plugin injects `FRONTEND_IMAGE`, `SERVER_IMAGE`,
+`PROJECT_NAME` and friends, so a plain `docker compose -f compose/docker-compose.yml up` — which
+is what `just` uses and what anyone debugging will reach for — fails without them. And without
+the file committed at all, `just dev` cannot work from a fresh clone. It contains development
+defaults for a laptop stack, not secrets, and says so in a comment.
+
+**Reversal cost**: Trivial. But note the file *would* hold real secrets the day this stack leaves
+localhost, and at that point it must come back out.
+
+---
+

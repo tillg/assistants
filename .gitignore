@@ -10,6 +10,9 @@
 **/developer.properties
 .env
 compose/.env.local
+# ...but compose/.env holds the local stack's development defaults and must be committed,
+# or `just dev` cannot work from a fresh clone. It contains no real secrets.
+!compose/.env
 
 # Build tools
 **/.gradle/

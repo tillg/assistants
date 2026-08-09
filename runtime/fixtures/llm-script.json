@@ -1,0 +1,105 @@
+[
+  {
+    "assistant": "receptionist",
+    "turn": 0,
+    "text": "This looks like a private medical invoice. Recording it as an Invoice Thing.",
+    "toolCalls": [
+      {
+        "name": "thingstore__create",
+        "arguments": {
+          "model": "Invoice_DM",
+          "fields": {
+            "invoiceNumber": "2026-118",
+            "issuerName": "Gemeinschaftspraxis Dr. med. A. Meyer & Kollegen",
+            "issueDate": "2026-08-01",
+            "dueDate": "2026-08-31",
+            "serviceDate": "2026-07-24",
+            "amountGross": 96.5,
+            "currency": "EUR",
+            "subject": "Consultation and dressing change, 24 July",
+            "recipientName": "Till Gartner",
+            "notes": "Extracted from an arriving document by the Receptionist."
+          }
+        }
+      }
+    ]
+  },
+  {
+    "assistant": "receptionist",
+    "turn": 1,
+    "text": "Handing it to the accountant.",
+    "toolCalls": [
+      {
+        "name": "assistant__call__accountant",
+        "arguments": {
+          "prompt": "A new medical invoice has been extracted from an arriving document. Please check it and book it. Invoice 2026-118, 96.50 EUR, Praxis Dr. Meyer.",
+          "awaitMode": "wait"
+        }
+      }
+    ]
+  },
+  {
+    "assistant": "receptionist",
+    "turn": 2,
+    "text": "The accountant has dealt with it. The document was a private medical invoice and is now recorded and booked.",
+    "finishReason": "answered"
+  },
+  {
+    "assistant": "accountant",
+    "turn": 0,
+    "text": "Let me see which accounts exist before I decide anything.",
+    "toolCalls": [
+      {
+        "name": "bookkeeping__listAccounts",
+        "arguments": {}
+      }
+    ]
+  },
+  {
+    "assistant": "accountant",
+    "turn": 1,
+    "text": "I have the chart of accounts. Asking the User to approve the booking.",
+    "toolCalls": [
+      {
+        "name": "ui__askUser",
+        "arguments": {
+          "kind": "confirm",
+          "prompt": "**Book this invoice?**\n\n| | |\n|---|---|\n| Issuer | Praxis Dr. Meyer |\n| Invoice | 2026-118 |\n| Amount | **96.50 EUR** |\n| For | Consultation and dressing change, 24 July |\n\nI propose booking it to `Expenses:Health` against `Payables`.\n\nThis does not pay anything — it only records that we owe it."
+        }
+      }
+    ]
+  },
+  {
+    "assistant": "accountant",
+    "turn": 2,
+    "text": "Thank you — booking it now.",
+    "toolCalls": [
+      {
+        "name": "bookkeeping__postTransaction",
+        "arguments": {
+          "groupTitle": "Praxis Dr. Meyer 2026-118",
+          "splits": [
+            {
+              "type": "withdrawal",
+              "date": "2026-08-01",
+              "amount": "96.50",
+              "description": "Consultation and dressing change, 24 July",
+              "sourceAccount": "Payables",
+              "destinationAccount": "Expenses:Health"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "assistant": "accountant",
+    "turn": 3,
+    "text": "Booked. 96.50 EUR is recorded against Expenses:Health and shows as owed on Payables. Nothing has been paid yet.",
+    "finishReason": "answered"
+  },
+  {
+    "text": "I have nothing further to do here.",
+    "finishReason": "answered"
+  }
+]

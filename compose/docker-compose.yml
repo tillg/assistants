@@ -204,6 +204,57 @@ services:
     networks:
       - a12_compose
 
+  runtime:
+    # The Runtime: trigger watcher + loop driver.
+    #
+    # EXACTLY ONE REPLICA. A12 has no compare-and-swap, so `leaseUntil` on a Conversation is
+    # crash recovery, not mutual exclusion -- two replicas would both claim an expired lease.
+    # This is a constraint of the design, not a deployment convenience.
+    build:
+      context: ../runtime
+      dockerfile: Dockerfile
+    image: ${PROJECT_NAME:-assistants}/runtime:${PROJECT_VERSION:-dev}
+    container_name: ${PROJECT_NAME:-assistants}_runtime
+    restart: unless-stopped
+    environment:
+      THINGSTORE_URL: http://server:8080
+      THINGSTORE_USER: runtime
+      THINGSTORE_PASSWORD: assistants-runtime-dev
+      FIREFLY_URL: http://firefly:8080
+      FIREFLY_TOKEN_FILE: /run/firefly/pat.txt
+      UI_BASE_URL: http://localhost:8081
+
+      # `scripted` keeps the stack free and deterministic, which is what lets the end-to-end
+      # tier drive the REAL Runtime, ThingStore, Firefly and UI. Set LLM_PROVIDER=openai (and
+      # LLM_API_KEY) to run it against a live model.
+      LLM_PROVIDER: ${LLM_PROVIDER:-scripted}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_SCRIPT_FILE: /run/fixtures/llm-script.json
+
+      SCAN_INTERVAL_MS: ${SCAN_INTERVAL_MS:-2000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - firefly_token:/run/firefly:ro
+      - ../runtime/fixtures:/run/fixtures:ro
+    depends_on:
+      server:
+        condition: service_started
+      firefly-bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      # A stale heartbeat is the only visible symptom of a wedged watcher: the terminal-failure
+      # path writes an Open Question, but that write shares fate with whatever broke. So the
+      # health of this service is "did the last scan finish", not "is the process alive".
+      test: ["CMD", "node", "dist/src/health.js"]
+      interval: 15s
+      timeout: 10s
+      retries: 4
+      start_period: 90s
+    networks:
+      - a12_compose
+
 networks:
   a12_compose:
     driver: bridge

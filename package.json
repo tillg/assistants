@@ -1,20 +1,18 @@
 {
-  "name": "@com.mgmtp.a12.projecttemplate/project-template-local-auth",
-  "version": "202606.0.1",
-  "description": "Assistants",
+  "name": "@assistants/root",
+  "version": "0.1.0",
+  "description": "Assistants \u2014 a personal system of LLM-driven assistants, on A12",
   "repository": {
     "type": "git",
-    "url": "<YOUR_REPO_URL>,"
-  },
-  "publishConfig": {
-    "registry": "<YOUR_PUBLISH_CONFIG_REGISTRY>"
+    "url": "https://github.com/tillg/assistents.git"
   },
   "keywords": [
     "a12",
-    "project",
-    "template"
+    "assistants",
+    "agents",
+    "household"
   ],
-  "author": "mgm technology partners",
+  "author": "Till Gartner",
   "license": "(EUPL-1.2 OR LicenseRef-commercial)",
   "scripts": {
     "prepack": "cat .gitignore >> .npmignore;"
