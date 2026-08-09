@@ -123,3 +123,26 @@ a second authority for pending work, and a live process holding state.
 convention shows up in the form models.
 
 ---
+
+## D-006 — Artefact registries are pinned in the repository, not inherited from the machine
+
+**Decided**: The repo commits its own `.npmrc` (all 17 `@com.mgmtp.a12.*` scopes →
+`https://artifacts.geta12.com/artifactory/api/npm/a12-community-npm/`) and its own Gradle
+`pluginManagement` / `dependencyResolutionManagement` repositories in `settings.gradle`
+(`gradlePluginPortal`, `mavenCentral`, `https://artifacts.geta12.com/artifactory/a12-community-maven/`).
+
+**Why**: Neither the A12 project template nor `w12-on-a12` carries this configuration — both
+inherit it from `~/.npmrc` and `~/.gradle/init.d/repositories.gradle`, which point at
+`artifacts.mgm-tp.com`. That host resolves only over the corporate VPN, so a repo that relies
+on it cannot be built by anyone who is not on it, including CI and including this machine
+when the VPN drops. The public community registry serves the same 2026.06 artefacts
+anonymously (verified: HTTP 200 for `dataservices-server-app-39.0.2.pom`).
+
+The machine-global config stays additive — on VPN both resolve, off VPN only ours does.
+
+**Alternative**: follow the template and rely on machine setup. Rejected as a reproducibility
+trap.
+
+**Reversal cost**: Trivial.
+
+---
