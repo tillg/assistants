@@ -183,3 +183,47 @@ exclusion list (pointless).
 
 ---
 
+## D-009 — What the grilling changed
+
+Two rounds of adversarial grilling by a fresh agent, eighteen questions. Seventeen accepted,
+one rejected on evidence, one accepted in part. The design changes worth knowing about:
+
+- **Round 1 Q1 was rejected on evidence.** The griller argued the markdown editor was on the
+  2025.06 A12 line and would need a major-version port. It was reading a stale local checkout at
+  `/Users/tgartner/git/w12-on-a12` (`c2df35b`, 2025.06). The remote HEAD `6b8df45` is 2026.06 —
+  `formengine-core 39.0.0`, `widgets-core 39.0.2`, `lexical ^0.44.0` — which I re-cloned and
+  verified. D-003 stands and the editor stays in scope. Worth recording because the *stale
+  checkout* is a trap anyone could fall into again.
+- **No `Answer` Thing; the Open Question *is* the Thing.** The Runtime creates an
+  `OpenQuestion` when it suspends (the only moment it knows the `conversationId`) and never
+  touches it again; the User completes it. A12 has no way to open a create-form pre-filled from
+  the row you came from, so a separate Answer Model would have made the User copy a ThingID by
+  hand.
+- **A12 has no optimistic locking at all** — no version, ETag or revision. Any document written
+  by two parties silently loses one party's work. Hence: every document has exactly one writer
+  at any instant, the Conversation form is read-only, and `leaseUntil` is crash *recovery*, not
+  a lock. Compose runs exactly one Runtime replica, and that is a constraint.
+- **The Conversation is an intent log.** The tool call and its idempotency key are written
+  *before* the Operation executes, so lease recovery asks the Connector whether the key landed
+  instead of re-executing. Without this, a crash between "Firefly returned 200" and "the
+  Conversation was written" books €184.30 twice.
+- **Enumeration fields are indexed by localised display text**, so every field the watcher
+  filters on is a String carrying a code. This one would have been found the hard way.
+- **Birth is exactly-once by query**, not by timing: no birth where a Conversation already
+  exists for `(assistantKey, subjectThingId)`. The Accountant has no `thing-materialised`
+  trigger at all in this change — the Receptionist calls it, and that is the only route.
+- **Nothing may end silently.** Terminal failures raise an Open Question rather than setting
+  `failed`, so a stuck Conversation appears in the same view as everything else. `failed` now
+  means only "the User abandoned it".
+- **The demo loader is a script, not a platform feature**, and it pauses the Runtime, writes
+  history, advances the watermark past its own output and unpauses — otherwise loading demo data
+  would immediately fire a dozen real LLM conversations.
+- **`LLM_PROVIDER` is a compose-level environment variable**, so the end-to-end tier drives the
+  real Runtime, ThingStore, Firefly and UI with a deterministic scripted model, for free.
+- **Scope kept against advice**: the griller recommended cutting `Party` and `Process` and the
+  Email Manual Connector. I kept them. They are the cheapest items in the plan and they carry
+  the renovation scenario the README leads with. This is scope I chose to carry, not scope the
+  design requires — flagging it as the most likely place to trim if time runs short.
+
+---
+

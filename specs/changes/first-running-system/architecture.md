@@ -76,72 +76,146 @@ every Gradle task the template provides.
 
 ## Models
 
-Six Models, each with a document model (`_DM`), a form model (`_FM`) and an overview model
-(`_OM`), plus one application model (`_AM`) for navigation. The template's form models bind
-**directly** to their document model (`purpose: "data binding"`) — no composed-document layer is
-needed, because references between Things are plain ThingID strings (domain.md).
+Eight Models, each with a document model (`_DM`), a form model (`_FM`) and, where users browse
+them, an overview model (`_OM`), plus one application model (`_AM`) for navigation. Form models
+bind **directly** to their document model (`purpose: "data binding"`) — no composed-document
+layer, because references between Things are plain ThingID strings (domain.md).
 
 | Model | Authority | Purpose |
 |---|---|---|
 | `Assistant_DM` | ThingStore | An Assistant's definition: prompts, Skills, Triggers, Tools (ADR-0003) |
-| `Conversation_DM` | ThingStore | One run of one Assistant; its own state (ADR-0004) |
+| `Conversation_DM` | ThingStore | One run of one Assistant; Runtime-owned, never user-edited (ADR-0004) |
+| `OpenQuestion_DM` | ThingStore | A question put to the User, and the User's answer to it |
 | `Document_DM` | ThingStore | An arrived, not-yet-understood item |
 | `Invoice_DM` | ThingStore *(document facts only)* | The extracted invoice; **no payment status** (ADR-0006) |
 | `Process_DM` | ThingStore | The routing slip; passive (AGENTIC_LOOP.md Q4) |
 | `Party_DM` | ThingStore *(provisional)* | People and organisations we deal with |
+| `RuntimeState_DM` | ThingStore | Singleton: the watcher's watermark, the pause flag, the birth counter |
+
+### Four modelling rules the query API forces on us
+
+The A12 query API is narrower than it looks, and the watcher's scans are the system's hot path.
+Four rules, applied at model-design time rather than discovered later:
+
+1. **Every machine-filtered field is a `String` carrying a code, never an `Enum`.** A12 indexes
+   enumeration fields by their *localised display text*, so `exact_match` on `"waiting"` returns
+   nothing while `"Waiting"`/`"Wartend"` would — a locale-dependent core query. `status`,
+   `waitingFor`, `finishReason`, `kind` are therefore Strings; the form model still renders a
+   dropdown, but the index sees ASCII.
+2. **Never filter on a path inside a repeating group.** No evidence exists that constraints can
+   address inside one. Anything the watcher needs is a top-level scalar; the two Assistants are
+   loaded whole and their `triggers[]` matched in the Runtime.
+3. **Every watcher-filtered field carries the `indexed` annotation.** Only indexed fields are
+   queryable at all.
+4. **Every Model carries our own `createdAt` / `updatedAt` and an `idempotencyKey`.**
+   `__meta.createdAt` has second granularity and inclusive range bounds, which double-counts the
+   boundary; and the idempotency key is what makes creation safe to retry (below).
+
+The one pattern worth naming, because it is used twice: "set but not yet processed" is
+`and(not(undefined_match(x)), undefined_match(y))`.
 
 ### Assistant_DM
 
 ```
-key            String   unique, stable — how Triggers and calls name it
-name           String
-description    String
-systemPrompt   String   lineBreaksPermitted, widget=markdown-editor
-llmModel       String
-enabled        Boolean
-skills[]       Group    name : String, instructions : String (markdown)
-triggers[]     Group    kind : Enum(thing-materialised | assistant-call | schedule | user-request),
-                        modelFilter : String, cron : String
-tools[]        Group    operation : String   ← the declaration ADR-0010 requires
+key                String   indexed, unique, stable — how Triggers and calls name it
+name               String
+description        String
+systemPrompt       String   lineBreaksPermitted, widget=markdown-editor
+llmModel           String
+enabled            Boolean  false stops births AND continuations
+maxTurns           Number   integer, default 20
+skills[]           Group    name : String, instructions : String (markdown)
+triggers[]         Group    kind : String (thing-materialised | assistant-call | schedule),
+                            modelFilter : String, cron : String
+tools[]            Group    operation : String   ← the declaration ADR-0010 requires
+idempotencyKey, createdAt, updatedAt
 ```
 
-Tools are declared as a repeating group of Operation names. Nothing outside that list is
-reachable, and the list is visible by reading the Assistant — which is exactly the argument in
-ADR-0010.
+Tools are declared as Operation names, and a call to another Assistant is declared as
+`assistant.call:<assistantKey>` — one row per permitted callee. A bare `assistant.call` would let
+an Assistant reach every Assistant including itself, which would empty ADR-0010's promise that
+"reading an Assistant tells you what it can reach". Self-calls are rejected at registry level.
 
-### Conversation_DM
+### Conversation_DM — Runtime-owned
 
 ```
-assistantKey       String
-title              String
-subjectThingId     String        the Thing this run is about
-subjectModel       String        the other half of the ThingRef
-status             Enum          running | waiting | done | failed
-waitingFor         Enum          user | tool | assistant          (never `llm` — domain.md)
-finishReason       Enum          answered | wants-tools | length | error
-wakeAt             DateTime
-leaseUntil         DateTime      guards against two Runtimes advancing one Conversation
-parentConversationId String      set when another Assistant called this one (ADR-0007)
-openQuestionKind   Enum          free-text | confirm | choice | perform
-openQuestion       String        markdown
-openQuestionOptions[] Group      value : String
-answer             String        ← the User edits this in the ordinary A12 form
-answeredAt         DateTime
-entries[]          Group         seq, role, kind, text, toolName, toolArgs, toolResult, at
+assistantKey         String    indexed
+subjectThingId       String    indexed   the Thing this run is about
+subjectModel         String              the other half of the ThingRef
+status               String    indexed   running | waiting | done | failed
+waitingFor           String    indexed   user | tool | assistant
+finishReason         String              answered | wants-tools | length | limit | error
+turnCount            Number
+wakeAt               DateTime  indexed
+leaseUntil           DateTime  indexed
+parentConversationId String    indexed
+resultDeliveredAt    DateTime  indexed   guards scan #5 against re-delivery
+createdByConversationId String indexed
+entries[]            Group     seq, role, kind, text, toolName, toolArgs, toolResult,
+                               idempotencyKey, at
+idempotencyKey, createdAt, updatedAt
 ```
 
-The `answer` field is the whole integration between the UserInterface and the Runtime (D-005).
-The User opens a waiting Conversation, types into `answer`, presses Save; the watcher notices.
+The User never writes this document. Its form is read-only, which is what keeps A12's
+**last-write-wins** semantics harmless: A12 has no version, ETag or revision concept anywhere, so
+any document written by two parties would silently lose one party's work. Every document in this
+design has exactly one writer at any instant.
 
-### Invoice_DM has no `paid` field
+For the same reason `leaseUntil` is documented as **crash recovery, not mutual exclusion** — with
+no compare-and-swap there is no lock to be had. Compose therefore declares exactly **one** Runtime
+replica, and that is a constraint, not an implementation detail.
 
-Deliberately. ADR-0006 makes Bookkeeping the Authority for whether an invoice is owed, paid,
-claimed or reimbursed. The Invoice Thing carries the document's facts (issuer, number, dates,
-amount, subject) and a `bookkeepingRef` pointing at the Firefly transaction group. Anything about
-money owed is a question asked of Firefly.
+### OpenQuestion_DM — the one document with two writers, in sequence
 
-This is the one place the design will feel awkward in the UI, and that awkwardness is the ADR
-working.
+```
+conversationId   String   indexed
+seq              Number   which entry of the Conversation raised it
+kind             String   free-text | confirm | choice | perform
+prompt           String   markdown, read-only to the User
+options[]        Group    value : String        (for kind=choice)
+idempotencyKey   String   indexed
+--- the User fills these in ---
+text             String
+choice           String
+confirmed        Boolean
+answeredAt       DateTime indexed
+createdAt, updatedAt
+```
+
+The **Runtime creates it** at the moment it suspends — that is the only moment when the
+`conversationId` is known — writes it once, and never touches it again. The **User completes it**
+through the ordinary A12 instance form. Two writers, never concurrent.
+
+This is why there is no separate `Answer` Model. A12 navigation is scene-based, matched on
+`module` + `instance`, with no way to open a create-form pre-filled from the row you came from; an
+Answer Thing would have forced the User to copy a ThingID by hand, or forced us into the custom
+client code D-005 exists to avoid.
+
+The Open Questions view is then a plain overview over one Model filtered
+`undefined_match(answeredAt)` — which is ADR-0004's demand that "awaiting the User must be a
+queryable state", satisfied literally.
+
+**Late answers**: `wakeAt` may fire while the User is typing. The rule is that an answer whose
+`seq` is behind the Conversation's current position is appended as an entry and otherwise ignored
+— the same rule as a late child result (below).
+
+### Invoice_DM has neither a `paid` field nor a `bookkeepingRef`
+
+No `paid`, because ADR-0006 makes Bookkeeping the Authority for whether an invoice is owed, paid,
+claimed or reimbursed.
+
+And no `bookkeepingRef` either, which is the less obvious half. A reference stored on the Thing
+would be a **cached foreign fact**, and ADR-0006's consequences say plainly: "Assistants must not
+cache foreign facts as Thing fields." The User works directly in Firefly and may re-split or
+delete a transaction at any time, at which point our copy is a lie. The link therefore lives only
+in the Authority: Firefly carries the Invoice's ThingID as a tag `thing:<thingId>` and a deep link
+in `external_url`. "How was this Invoice booked?" is a search, exactly like "is it paid?".
+
+### RuntimeState_DM
+
+A singleton holding what the watcher needs between scans and what a human needs to stop it:
+`watermark` (DateTime), `watermarkDocRefs[]` (the docRefs already seen at the boundary second),
+`paused` (Boolean — the kill switch), `birthsThisHour`, `birthWindowStartedAt`.
 
 ## The Runtime
 
@@ -152,67 +226,130 @@ One function with no state of its own, exactly as AGENTIC_LOOP.md concludes:
 ```
 advance(conversationId):
     conv = thingStore.get(conversationId)
-    if not claimLease(conv): return          # someone else is advancing it
-    context = buildContext(conv)             # system prompt + skills + entries
+    if conv.status not in (running, waiting) or not claimLease(conv): return
+    if conv.turnCount >= assistant.maxTurns: raiseTerminal(conv, 'limit'); return
+    context = buildContext(conv)              # system prompt + skills + entries
     response = llm.complete(context, toolsOf(conv.assistant))
-    append(conv, response)
+    append(conv, response); conv.turnCount++
     if response.finishReason != 'wants-tools':
-        conv.status = 'done'  (or return the result to the parent Conversation)
+        finish(conv)                          # done, or deliver the result to the parent
         write(conv); return
     for call in response.toolCalls:
-        result = tools.execute(call, conv)
+        key = conv.id + ':' + nextSeq(conv)
+        append(conv, intent(call, key))
+        write(conv)                           # ← INTENT IS WRITTEN BEFORE EXECUTION
+        result = tools.execute(call, conv, key)
         if result.pending:
-            append(conv, pendingCall(call))
             conv.status = 'waiting'; conv.waitingFor = result.waitingFor
             conv.wakeAt = result.wakeAt
-            write(conv); return              # the process now holds nothing
+            write(conv); return               # the process now holds nothing
         append(conv, toolResult(call, result))
     write(conv)
-    # the next scan picks it up and runs the next Turn
 ```
 
-Two properties are load-bearing:
+Three properties are load-bearing:
 
-1. **One call, one Turn.** `advance` never loops internally. Continuing is re-entry, and re-entry
-   is the *same* door birth uses — which is the claim ADR-0005 makes and all three surveyed
-   systems confirm.
+1. **One call, one Turn.** `advance` never loops internally. Continuing is re-entry, through the
+   same door birth uses — the claim ADR-0005 makes and all three surveyed systems confirm.
 2. **The pending path is the normal path.** Every Tool may answer `pending`. That single
    generalisation is what turns a coding-agent loop into ours.
+3. **The Conversation is an intent log, not a result log.** The intent — including its
+   idempotency key — is written *before* the Operation runs. This is what makes lease recovery
+   safe: see below.
+
+### Idempotency, and why it is the difference between a bug and a lost €184.30
+
+If the Runtime dies after `bookkeeping.postTransaction` returns 200 and before the Conversation is
+written, a naive recovery re-runs the Turn against real books. The contract that prevents it:
+
+> **Every Operation is either read-only or idempotent under a caller-supplied key. No Operation
+> may be both mutating and unkeyed.** Where the Authority offers no unique constraint, keyed
+> idempotency is achieved by **search-then-act**.
+
+The key is `<conversationId>:<entrySeq>` — deterministic across a re-run of the same Turn.
+Recovery finds an intent entry with no matching result and *asks* the Connector whether that key
+landed; it never re-executes blind.
+
+- **Firefly**: the key goes in `external_id`; recovery is an `external_id_is:` search, with
+  `error_if_duplicate_hash` as a belt.
+- **ThingStore**: `ADD_DOCUMENT` assigns the docRef, so the client cannot choose an identifier.
+  Hence the `idempotencyKey` field on every Model, and `thingstore.create` is defined as
+  *search-then-create*: `exact_match` on `idempotencyKey`, return the existing docRef if found,
+  otherwise add. One extra query per create, which at this scale is free — and it is the same
+  primitive that makes the demo loader re-runnable.
+- **Manual Connectors**: the key is carried on the `OpenQuestion`, so a re-run finds the question
+  already asked rather than asking twice.
+
+### When things go wrong
+
+`status = failed` must never be somewhere a Conversation *falls*. One policy, three tiers:
+
+| Tier | Examples | Response |
+|---|---|---|
+| **Transient** | LLM timeout, 429, 5xx | Bounded retry with backoff inside the Turn; each attempt recorded as an entry |
+| **Recoverable by the model** | Malformed tool-call JSON, undeclared Tool requested, 422 from a Connector, ThingStore validation error | Append the error **as a tool result** and let the next Turn see it — this is how the model self-corrects, and it costs nothing |
+| **Terminal** | Retries exhausted, `maxTurns` reached, an Authority refusing repeatedly | **Never silent**: `status = waiting`, `waitingFor = user`, and an `OpenQuestion` of kind `perform` carrying the error |
+
+So a stuck Conversation surfaces in the same view as everything else, and `failed` comes to mean
+only "the User abandoned it" — a state a human chose rather than one the system fell into. Losing
+work silently is exactly what ADR-0004 exists to forbid.
 
 ### The trigger watcher
 
-A scan every two seconds, in one transaction-free pass:
+A scan every two seconds. It does nothing at all while `RuntimeState.paused` is true.
 
-| Query | Action |
-|---|---|
-| Things created since the high-water mark, whose Model matches some Assistant's `thing-materialised` Trigger | birth a Conversation |
-| Conversations `status=waiting, waitingFor=user`, `answer` non-empty, `answeredAt` unset | append the answer, continue |
-| Conversations `status=waiting`, `wakeAt` in the past | append a timeout entry, continue |
-| Conversations `status=running`, `leaseUntil` in the past | the Runtime died mid-Turn; continue |
-| Conversations `status=done` with a `parentConversationId` not yet notified | deliver the result to the parent, continue it |
-| Assistants with a `schedule` Trigger that is due | birth a Conversation |
+| Scan | Query | Action |
+|---|---|---|
+| 1 | Things of a **trigger-eligible Model** created after the watermark, for which no Conversation exists with `(assistantKey, subjectThingId)` | birth |
+| 2 | `OpenQuestion` with `answeredAt` set, whose Conversation is still `waiting` | append the answer, continue |
+| 3 | Conversations `waiting` with `wakeAt` in the past | append a timeout entry, continue |
+| 4 | Conversations `running` with `leaseUntil` in the past | recover per the intent log, continue |
+| 5 | Conversations `done` with a `parentConversationId` and no `resultDeliveredAt` | deliver to the parent, stamp, continue |
+| 6 | Assistants with a due `schedule` Trigger | birth |
 
-Polling rather than webhooks because the ThingStore is the only authority for pending work
-(D-005), and a two-second scan of a single household's data costs nothing. Restart is a
-non-event: the high-water mark is itself stored.
+Scan 1's "no Conversation exists with `(assistantKey, subjectThingId)`" is two indexed
+`exact_match`es, and it is what makes birth **exactly once** rather than *probably* once. It also
+subsumes — but does not replace — the rule that nothing is birthed from a Thing whose creating
+Conversation is still running.
+
+### Guards against a runaway
+
+An LLM loop with a two-second scan and a credit card needs bounds that the surveyed coding agents
+do not, because they have a human watching every turn and we do not:
+
+- **A trigger-eligible allow-list** — `Document`, `Invoice`, `Process`, `Party`. It structurally
+  excludes `Conversation`, `Assistant`, `OpenQuestion` and `RuntimeState`, because an Assistant is
+  a Thing and a Conversation is a Thing (ADR-0003), so without this the Runtime triggers on its
+  own output.
+- **`maxTurns`** (default 20) → `finishReason = limit` and an Open Question, not a silent stop.
+- **`createdByConversationId`** on everything an Assistant creates, and no birth from a Thing whose
+  creating Conversation is still running — this breaks the self-feeding loop without banning
+  legitimate chains.
+- **`RuntimeState.paused`** as a global kill switch, and a births-per-hour cap.
+- **`Assistant.enabled = false`** stops continuations as well as births.
 
 ### Tools
 
 An Assistant may call only the Operations its `tools[]` declares (ADR-0010); the registry filters
-the tool schemas offered to the LLM by that list, so an undeclared Operation is not merely
-refused — it is invisible.
+the schemas offered to the LLM by that list, so an undeclared Operation is not merely refused — it
+is invisible. (There is a unit test for the refusal anyway, precisely because filtering should make
+it unreachable.)
 
 | Operation | System | Kind |
 |---|---|---|
-| `thingstore.create` / `.get` / `.update` / `.search` | ThingStore | internal, immediate |
-| `ui.askUser` | UserInterface | internal, **pending** |
-| `assistant.call` | — | **pending** (ADR-0007) |
-| `bookkeeping.postTransaction` / `.getBalance` / `.listOpenItems` / `.getBudgetReport` / `.createAccount` | Firefly III | Connector, immediate |
-| `email.send` / `email.fetch`, `bank.sendMoney` | Email, Bank | **Manual Connector** — raises a `perform` Open Question |
+| `thingstore.create` / `.get` / `.update` / `.search` | ThingStore | internal; create is search-then-create |
+| `ui.askUser` | UserInterface | internal, **pending** — writes an `OpenQuestion` |
+| `assistant.call:<key>` | — | **pending** (ADR-0007), `awaitMode: wait \| chase \| detach` |
+| `bookkeeping.postTransaction` / `.getBalance` / `.listOpenItems` / `.getBudgetReport` / `.createAccount` | Firefly III | Connector; posting is keyed |
+| `document.requestText` | — | **Manual Connector** — asks the User to paste the text |
+| `email.send` / `email.fetch`, `bank.sendMoney` | Email, Bank | **Manual Connector** |
 
 A Manual Connector is not a special mechanism: it returns `pending` with `waitingFor: tool` and
-writes an Open Question of kind `perform`. The Assistant cannot tell the difference, which is
-what CONTEXT.md asserts and what makes automating one later a Connector-only change.
+writes an `OpenQuestion` of kind `perform`. The Assistant cannot tell the difference, which is what
+CONTEXT.md asserts and what makes automating one later a Connector-only change.
+
+**Late child results**: a result arriving for a Conversation that is already `done` is appended as
+an entry and changes nothing. A log line, never a resurrection.
 
 ### The LLM provider
 
@@ -222,9 +359,10 @@ interface LlmProvider {
 }
 ```
 
-Three implementations: `OpenAiProvider` (default — this machine has `OPENAI_API_KEY`, D-002),
-`AnthropicProvider`, and `ScriptedProvider`, which replays a recorded list of responses. The
-scripted one is what makes the loop testable at all; see Testing.
+`OpenAiProvider` (default — D-002), `AnthropicProvider`, and `ScriptedProvider`, which replays
+recorded responses. Crucially the choice is made by the **`LLM_PROVIDER` environment variable on
+the compose service**, not only by a constructor argument: that is what lets the end-to-end tier
+drive the *real* Runtime, ThingStore, Firefly and UI deterministically and for free.
 
 ## Lifting the markdown editor
 

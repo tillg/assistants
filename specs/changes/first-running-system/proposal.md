@@ -84,6 +84,14 @@ got wrong.
   is needed to run the slice.
 - **Multi-user, production auth.** The A12 local-auth variant is development-grade by design.
 - **Anything Temporal-shaped.** AGENTIC_LOOP.md Q5 already recommends against it.
+- **Text extraction from the arriving item.** A Document's `extractedText` is supplied by whoever
+  creates the Document — the demo loader, or the User pasting text into the A12 create form. OCR
+  and PDF parsing are a later change; until then `document.requestText` is a Manual Connector,
+  which is exactly the pattern ADR-0004 says the whole system must survive.
+- **Transcript presentation.** A Conversation's `entries[]` render as a read-only inline repeat,
+  which is a data grid rather than a transcript view. `just logs runtime` is the debugging
+  surface for this change; a proper viewer would be custom client code, which is what D-005
+  exists to avoid.
 
 ## Expected outcome
 
