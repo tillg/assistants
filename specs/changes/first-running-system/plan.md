@@ -84,12 +84,12 @@ filters are Strings not Enums, own `createdAt`/`updatedAt`/`idempotencyKey`.
 - [x] Model validation, **both directions**: `elementRef` → field fails the build; field → `elementRef` warns about data-model fields no form model references, with an allow-list for the deliberately machine-owned ones (`idempotencyKey`, `leaseUntil`, …). This is the ADR-0008 hint, implemented — otherwise ADR-0008 is the only ADR this change leaves unexercised
 - [x] Model validation: every `indexed` field the watcher uses exists
 - [x] Runtime unit: birth, one Turn, tool dispatch, **tool gating (undeclared Tool)**, suspension on `askUser`, continuation on answer, `wakeAt` timeout, lease recovery **without re-execution**, one Invoice → exactly one Accountant Conversation, `maxTurns` → Open Question, late child result is a log line, self-call rejected
-- [ ] Integration against the live stack: A12 client CRUD + query, search-then-create idempotency, the Firefly connector, every watcher query
+- [x] Integration against the live stack: A12 client CRUD + query, search-then-create idempotency, the Firefly connector, every watcher query
 - [x] Playwright e2e with `LLM_PROVIDER=scripted`: log in, browse each overview, create an Invoice, edit an Assistant prompt in the markdown editor, answer an Open Question, confirm the transaction in Firefly
 - [x] Heartbeat test: a scan that throws leaves the previous `heartbeatAt` stale, and the compose healthcheck goes unhealthy — silence must be recorded silence
 - [x] Restart test (serial): suspend on an Open Question, `docker compose restart`, confirm it survives and still continues (ADR-0004)
-- [ ] Opt-in live-LLM tier, skipped without a key
-- [ ] `just test` runs every tier and is green
+- [x] Opt-in live-LLM tier, skipped without a key
+- [x] `just test` runs every tier and is green
 
 ## Phase 8 — Documentation and wrap-up
 
@@ -97,5 +97,5 @@ filters are Strings not Enums, own `createdAt`/`updatedAt`/`idempotencyKey`.
 - [x] Update `CONTEXT.md` with the terms domain.md added
 - [x] New ADRs: the Runtime as a polling client; Party replacing Person; the local-auth template and public registries; the intent log and the idempotency contract
 - [x] Record what the build settled in `MARKDOWN_FIELDS.md` and `AGENTIC_LOOP.md`
-- [ ] Adversarial code review, then fix what it finds
-- [ ] Present `DECISIONS.md`
+- [x] Adversarial code review, then fix what it finds
+- [x] Present `DECISIONS.md`

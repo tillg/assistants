@@ -487,3 +487,28 @@ has to be a full `down -v` cycle: no smaller reset is symmetric across two Autho
 
 ---
 
+## D-019 — The end-to-end suite, and the regression it caught
+
+21 Playwright specs, green against the live stack: login, all eight modules, Party CRUD through
+the UI, a markdown round trip in the lifted editor, the whole invoice slice driven through the
+browser, and the ADR-0004 restart.
+
+**It immediately earned its keep.** Removing the `rowActionGroup` key to drop a delete button
+(the safe-looking half of a security fix) broke three overviews completely: the A12 overview
+engine dereferences `content.rowActionGroup.actions` without guarding it, so an absent key is a
+`TypeError` and the table never renders. Open Questions — the application's landing page — was
+blank. The change had been "verified" against the server's `model` table, which is the right
+check at the wrong altitude for a client-side crash. `{"actions": []}` is how you say "no row
+actions"; there is now a validator check for it, proven to bite.
+
+**The restart spec needed two fixes to go green, and neither was a product bug**: the test fixture
+replayed a session token minted by the server it had just restarted, and the loading wait used
+the default five seconds while a freshly restarted client refetches its whole model graph. Both
+are honest facts about restarting a stack, now written into the tests.
+
+What the restart spec actually proves is the claim ADR-0004 exists for: an Open Question survives
+a full restart of both the Runtime and the store, and answering it afterwards still moves the
+Conversation on.
+
+---
+
