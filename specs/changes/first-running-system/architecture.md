@@ -27,7 +27,7 @@ flowchart LR
     FB --> FF
 ```
 
-Six services plus two one-shot init containers. No Keycloak (the A12 **local-auth** variant
+Five long-running services (frontend, server, postgres, firefly, runtime) plus two one-shot init containers (server-init, firefly-bootstrap). No Keycloak (the A12 **local-auth** variant
 authenticates against YAML user files — D-003), no second database (Firefly runs on SQLite —
 D-004), no message broker, no workflow engine (AGENTIC_LOOP.md Q5).
 
@@ -61,14 +61,16 @@ every Gradle task the template provides.
 ├── import/
 │   ├── models/               ← our A12 models, one folder per Thing
 │   ├── auth/                 ← roles.yaml + users/*.yaml (local auth)
-│   └── data/demo/            ← demo data as JSON-RPC request files
+│   └── validate-models.mjs   ← model validation, both directions
 ├── runtime/                  ← the Runtime (TypeScript)
 │   ├── src/a12/              ← JSON-RPC client for the ThingStore
 │   ├── src/llm/              ← provider interface + OpenAI/Anthropic/scripted
 │   ├── src/loop/             ← advance(conversation) — the loop driver
 │   ├── src/watcher/          ← the trigger watcher
 │   ├── src/tools/            ← the Tool registry
-│   └── src/connectors/       ← firefly, manual
+│   ├── src/connectors/       ← firefly
+│   ├── src/bootstrap/        ← the Assistants as seed data
+│   └── src/demo/             ← the demo household loader
 ├── compose/docker-compose.yml
 ├── e2e/                      ← Playwright
 └── specs/, docs/adr/, CONTEXT.md, DECISIONS.md
