@@ -358,9 +358,13 @@ Recorded so nothing here comes as a surprise.
   live-flow booking is linked only by its idempotency key.
 - **Text extraction does not exist.** A Document's `extractedText` is supplied by whoever creates
   it. `document.requestText` is a Manual Connector that asks the User to paste it.
-- **The content store runs embedded inside the server container** — that is the A12 template's own
-  `dev-env` profile, and it means attachment content does not survive `docker compose down`.
-  The documents themselves are in the external Postgres and do survive.
+- **The content store runs embedded inside the server container** (`dataservices-embedded_contentstore`)
+  — but on the external Postgres, not an embedded one. The compose stack runs the `local-db-env`
+  profile group, *not* `dev-env`: `dev-env` transitively activates `dataservices-embedded_postgres`
+  and `contentstore-embedded_postgres`, which win over an externally-listed `dataservices-external_postgres`
+  and put every Thing in the container's writable layer, where any rebuild or `--force-recreate`
+  destroys it. Under `local-db-env` both the documents and the attachment content live in the
+  `postgres` container's volume and survive `docker compose down`.
 - **A Conversation's transcript renders as a data grid**, not as a transcript. `just logs runtime`
   is the debugging surface. Building a viewer would be exactly the custom client code D-005 exists
   to avoid.
