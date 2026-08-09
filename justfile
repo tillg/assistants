@@ -5,7 +5,11 @@
 set shell := ["bash", "-uc"]
 
 compose := "docker compose -p assistants -f compose/docker-compose.yml --env-file compose/.env"
-gradle  := "gradle --no-daemon"
+
+# Recipes run under bash, which does not source the interactive shell profile — so tools managed
+# by sdkman and nvm are not on PATH the way they are in a terminal. Resolve them explicitly, and
+# fall back to the version manager's current selection.
+gradle  := '"$(command -v gradle || echo "$HOME/.sdkman/candidates/gradle/current/bin/gradle")" --no-daemon'
 
 # Show the available commands.
 default:
@@ -97,8 +101,9 @@ resume:
 
 # ---------------------------------------------------------------------------- tests
 
-# Everything: models, runtime, client, and end-to-end through the real UI.
-test: test-models test-runtime test-client test-e2e
+# Everything: models, runtime units, the live-stack integration tier, the client, and
+# end-to-end through the real UI.
+test: test-models test-runtime test-integration test-client test-e2e
 
 # Both directions of form-model validation, including the ADR-0008 hint.
 test-models:
@@ -108,6 +113,11 @@ test-models:
 # The loop driver's branching: suspension, continuation, recovery, tool gating.
 test-runtime:
     @cd runtime && npm test
+
+# Against the LIVE stack: the A12 client, the watcher's queries, the Firefly connector. Skipped
+# rather than failed when the stack is down. The tier that catches what the unit fakes cannot.
+test-integration:
+    @cd runtime && npm run --silent test:integration
 
 # The markdown editor and the client's own units.
 test-client:
