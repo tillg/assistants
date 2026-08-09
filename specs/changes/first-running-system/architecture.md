@@ -149,7 +149,9 @@ turnCount            Number
 wakeAt               DateTime  indexed
 leaseUntil           DateTime  indexed
 parentConversationId String    indexed
+currentQuestionId    String    indexed   the OpenQuestion this run is waiting on
 resultDeliveredAt    DateTime  indexed   guards scan #5 against re-delivery
+escalationCount      Number              terminal escalations so far; capped at 3
 createdByConversationId String indexed
 entries[]            Group     seq, role, kind, text, toolName, toolArgs, toolResult,
                                idempotencyKey, at
@@ -215,7 +217,17 @@ in `external_url`. "How was this Invoice booked?" is a search, exactly like "is 
 
 A singleton holding what the watcher needs between scans and what a human needs to stop it:
 `watermark` (DateTime), `watermarkDocRefs[]` (the docRefs already seen at the boundary second),
-`paused` (Boolean — the kill switch), `birthsThisHour`, `birthWindowStartedAt`.
+`paused` (Boolean — the kill switch), `birthsThisHour`, `birthWindowStartedAt`, and
+`heartbeatAt`, stamped at the end of every successful scan.
+
+`heartbeatAt` is what makes silence visible. The terminal-failure tier below writes an Open
+Question so nothing ends quietly — but that escalation *shares fate* with the failures it is
+meant to report: if the ThingStore is unreachable, the token flow is broken or the scan loop has
+thrown, the escalation is itself the operation that is failing, and the only symptom is that
+nothing happens. For a system whose promise is "drop an invoice in and a question appears within
+seconds", that is the one failure the User cannot detect. So the `runtime` service carries a
+compose **healthcheck that fails when the last heartbeat is stale**, and a scan that throws
+deliberately leaves the previous heartbeat untouched — silence must be *recorded* silence.
 
 ## The Runtime
 
@@ -288,7 +300,7 @@ landed; it never re-executes blind.
 |---|---|---|
 | **Transient** | LLM timeout, 429, 5xx | Bounded retry with backoff inside the Turn; each attempt recorded as an entry |
 | **Recoverable by the model** | Malformed tool-call JSON, undeclared Tool requested, 422 from a Connector, ThingStore validation error | Append the error **as a tool result** and let the next Turn see it — this is how the model self-corrects, and it costs nothing |
-| **Terminal** | Retries exhausted, `maxTurns` reached, an Authority refusing repeatedly | **Never silent**: `status = waiting`, `waitingFor = user`, and an `OpenQuestion` of kind `perform` carrying the error |
+| **Terminal** | Retries exhausted, `maxTurns` reached, an Authority refusing repeatedly | **Never silent**: `status = waiting`, `waitingFor = user`, and an `OpenQuestion` of kind `perform` carrying the error. Capped at three escalations per Conversation, so a persistent outage answered with "retry" cannot produce a question per attempt |
 
 So a stuck Conversation surfaces in the same view as everything else, and `failed` comes to mean
 only "the User abandoned it" — a state a human chose rather than one the system fell into. Losing
@@ -301,11 +313,20 @@ A scan every two seconds. It does nothing at all while `RuntimeState.paused` is 
 | Scan | Query | Action |
 |---|---|---|
 | 1 | Things of a **trigger-eligible Model** created after the watermark, for which no Conversation exists with `(assistantKey, subjectThingId)` | birth |
-| 2 | `OpenQuestion` with `answeredAt` set, whose Conversation is still `waiting` | append the answer, continue |
+| 2 | Conversations `waiting` on `user` whose `currentQuestionId` resolves to an `OpenQuestion` with `answeredAt` set | append the answer, continue |
 | 3 | Conversations `waiting` with `wakeAt` in the past | append a timeout entry, continue |
 | 4 | Conversations `running` with `leaseUntil` in the past | recover per the intent log, continue |
 | 5 | Conversations `done` with a `parentConversationId` and no `resultDeliveredAt` | deliver to the parent, stamp, continue |
 | 6 | Assistants with a due `schedule` Trigger | birth |
+
+Scan 2 deserves a note, because it is where the single-writer invariant could have been lost. The
+answer has to be *consumed* exactly once, and the obvious mechanism — stamping `consumedAt` on the
+OpenQuestion — would give that document a second Runtime write, at the worst possible moment,
+while the User may still be editing it. So consumption happens on the **Conversation**, which the
+Runtime owns exclusively: continuing clears `waitingFor`, and the Conversation therefore stops
+matching the scan. The OpenQuestion is never touched twice. This also disposes of the User
+re-editing an answered question — the Conversation has moved on, so nothing happens. It is the
+same rule as a late child result and a stale `seq`: three cases, one shape.
 
 Scan 1's "no Conversation exists with `(assistantKey, subjectThingId)`" is two indexed
 `exact_match`es, and it is what makes birth **exactly once** rather than *probably* once. It also
@@ -424,6 +445,23 @@ and `QUERY` — **not** `MODEL_MANAGE`, and **not** `DOCUMENT_DELETE`. An Assist
 a delete gets a 403 instead of losing an invoice.
 
 ## Bookkeeping connector
+
+Firefly **auto-creates an expense or revenue account when it is given a name it does not know**.
+The Accountant's job is precisely to decide which accounts an invoice hits, and it decides by
+emitting a name — so `Expenses:Helth` would not fail, it would succeed, silently creating a second
+account and quietly corrupting a balance no test would catch. ADR-0006 makes that worse rather
+than better: Bookkeeping is the Authority and nothing else holds a copy, so there is no second
+opinion to disagree.
+
+Therefore the Connector **never passes `source_name`/`destination_name`**. It resolves names to
+IDs against `GET /accounts` (cached per scan); an unresolvable name comes back as a tool error,
+which under the middle failure tier is appended as a tool result so the next Turn self-corrects
+against the real chart. The Accountant also declares the read-only `bookkeeping.listAccounts`, so
+it can *see* the chart rather than guess at it — and `bookkeeping.createAccount` is a separately
+declared Operation that **the Accountant is not granted in this change**. That is exactly the
+granularity ADR-0010 argued for, and the chart of accounts is a structural decision the User
+should be making.
+
 
 Firefly III 6.6.6 on SQLite. A one-shot `firefly-bootstrap` container registers the first user
 and mints a Personal Access Token over Firefly's own web endpoints (no artisan command can do

@@ -73,17 +73,20 @@ filters are Strings not Enums, own `createdAt`/`updatedAt`/`idempotencyKey`.
 
 - [ ] The **Receptionist** as a Thing: prompt, skills (classify, extract invoice fields), `thing-materialised` trigger on `Document`, tools
 - [ ] The **Accountant** as a Thing: prompt, skills (check an invoice, choose accounts, chase unpaid claims), **no `thing-materialised` trigger** — reached only by `assistant.call`
-- [ ] `runtime/src/demo/` — a TypeScript loader, not a platform feature: pause → create in dependency order with authored `idempotencyKey`s → write the demo Conversations and OpenQuestions → advance the watermark past everything it created → unpause
+- [ ] `runtime/src/bootstrap/` — loads what the system **is**: the two Assistants and the `RuntimeState` singleton. Idempotent. `just dev` runs it, so a fresh stack is alive and empty rather than inert
+- [ ] `runtime/src/demo/` — loads what the household **has**. A TypeScript loader, not a platform feature: pause → create in dependency order with authored `idempotencyKey`s → write the demo Conversations and OpenQuestions → advance the watermark past everything it created → unpause
 - [ ] Demo Things: parties, a renovation Process, a doctor's-invoice Process, Documents and Invoices in several states, one unanswered Open Question
 - [ ] Demo books: Firefly accounts, budgets and limits, and the transactions matching the booked invoices
-- [ ] `just demo-data` (idempotent) and `just demo-reset`
+- [ ] `just demo-data` (idempotent); `just demo-reset` = `down -v` → `up` → `bootstrap` → `demo-data`, because Firefly has no bulk delete and its books live in a named volume — a full teardown is the only reset that is symmetric across two Authorities
 
 ## Phase 7 — Tests
 
-- [ ] Model validation: every model converts, every `elementRef` resolves, every `indexed` field the watcher uses exists
+- [ ] Model validation, **both directions**: `elementRef` → field fails the build; field → `elementRef` warns about data-model fields no form model references, with an allow-list for the deliberately machine-owned ones (`idempotencyKey`, `leaseUntil`, …). This is the ADR-0008 hint, implemented — otherwise ADR-0008 is the only ADR this change leaves unexercised
+- [ ] Model validation: every `indexed` field the watcher uses exists
 - [ ] Runtime unit: birth, one Turn, tool dispatch, **tool gating (undeclared Tool)**, suspension on `askUser`, continuation on answer, `wakeAt` timeout, lease recovery **without re-execution**, one Invoice → exactly one Accountant Conversation, `maxTurns` → Open Question, late child result is a log line, self-call rejected
 - [ ] Integration against the live stack: A12 client CRUD + query, search-then-create idempotency, the Firefly connector, every watcher query
 - [ ] Playwright e2e with `LLM_PROVIDER=scripted`: log in, browse each overview, create an Invoice, edit an Assistant prompt in the markdown editor, answer an Open Question, confirm the transaction in Firefly
+- [ ] Heartbeat test: a scan that throws leaves the previous `heartbeatAt` stale, and the compose healthcheck goes unhealthy — silence must be recorded silence
 - [ ] Restart test (serial): suspend on an Open Question, `docker compose restart`, confirm it survives and still continues (ADR-0004)
 - [ ] Opt-in live-LLM tier, skipped without a key
 - [ ] `just test` runs every tier and is green

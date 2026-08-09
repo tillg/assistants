@@ -227,3 +227,38 @@ one rejected on evidence, one accepted in part. The design changes worth knowing
 
 ---
 
+## D-010 — The template's creator-scoped authorization policies are removed
+
+**Decided**: `import/auth/childAuthorizationDefinition.json` keeps only *"User Has Actuator Path
+Access"* and *"Reload Authorization Rules by System-Admin"*. The three creator-scoped rules —
+delete-own, update-own, and the **repositoryPolicy** that injects
+`exact_match /__meta/creator == principal.username` into every QUERY for non-admins — are deleted,
+along with their `permissions` entries.
+
+**Why**: they encode a multi-tenant assumption — *a document belongs to whoever created it* —
+that is precisely false here. This is one household with one human, and the entire point of the
+system is that the Runtime and the User work on the same Things. Left in place, and combined with
+D-007 (the Runtime has its own `runtime` identity), a User logged in as `user1` could neither
+answer an Open Question the Runtime created nor even **see** it: the Open Questions overview is a
+QUERY, and the repository policy would silently filter it to documents the User created. Every
+Invoice the Receptionist produced would be invisible too. The whole UserInterface half of the
+slice would return empty.
+
+This is easy to miss because the template's own e2e suite logs in as `admin`, for whom all three
+policies are bypassed.
+
+**What is deliberately kept**: the User stays `user` and the Runtime stays `runtime` with reduced
+access rights, so D-007's two real benefits survive — `__meta.creator` still distinguishes Runtime
+writes from human ones, and the Runtime still has no `DOCUMENT_DELETE` and no `MODEL_MANAGE`.
+Neither depended on these policies.
+
+**Honest caveat**: making the Conversation form read-only is a UI affordance, not an
+authorization boundary. The User retains `DOCUMENT_UPDATE` on Conversations; what protects the
+invariant is that nothing navigates there, not that the server refuses.
+
+**Alternative**: run the User as `admin` (bypasses all policy, loses the provenance distinction).
+
+**Reversal cost**: Trivial, but reversing it breaks the UI.
+
+---
+
