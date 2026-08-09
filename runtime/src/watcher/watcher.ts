@@ -537,11 +537,16 @@ export class Watcher {
             2,
         );
         if (found[0]) return found[0];
+        // Seeded with a watermark, exactly as `just bootstrap` does. The runtime container starts
+        // before bootstrap runs and therefore always wins this race; without the watermark the
+        // first materialised scan would have no date bound and birth a Conversation for every
+        // pre-existing Thing in the store.
         return this.deps.things.create<Record<string, unknown>>(SPECS.RuntimeState_DM, {
             singletonKey: RUNTIME_STATE_KEY,
             paused: false,
             birthsThisHour: 0,
             birthWindowStartedAt: nowIso(),
+            watermark: nowIso(),
             idempotencyKey: `runtime-state:${RUNTIME_STATE_KEY}`,
         }) as Promise<Stored<RuntimeState>>;
     }
@@ -562,10 +567,29 @@ export class Watcher {
      * the scan loop has thrown, the escalation is itself the operation that is failing, and the
      * only symptom is that nothing happens. A stale heartbeat turns that into a visible state,
      * which is why a scan that throws must deliberately leave it untouched.
+     *
+     * **Re-reads before writing.** `scan()` loads the state at the top of a pass that takes
+     * seconds; writing the whole in-memory copy back at the end would silently undo a `just
+     * pause` issued in between — the global kill switch, lost, with nothing saying so. A12 has no
+     * compare-and-swap to lean on, so the least-bad thing available is to re-read and carry
+     * forward the fields a human owns.
      */
     private async stampHeartbeat(state: Stored<RuntimeState>): Promise<void> {
+        let humanOwned: Partial<RuntimeState> = {};
+        try {
+            const fresh = await this.deps.things.get<RuntimeState>(
+                SPECS.RuntimeState_DM,
+                state.docRef,
+            );
+            humanOwned = { paused: fresh.data.paused };
+        } catch {
+            // If it cannot be re-read, do not write either — a stale heartbeat is the honest
+            // outcome, and the health probe will say so.
+            return;
+        }
         state.data.heartbeatAt = nowIso();
-        await this.saveState(state);
+        await this.saveState({ ...state, data: { ...state.data, ...humanOwned } });
+        state.data.paused = humanOwned.paused ?? state.data.paused;
     }
 }
 

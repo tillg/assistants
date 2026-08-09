@@ -221,9 +221,12 @@ button (`scope: HIDDEN_IN_EDIT_MODE`). A **read-only** form (Conversation) omits
 
 `content.columns[]` entries are `{id, label[], width, elementRef, sortable, preferredSorting}`.
 Keep overviews to scalars — never a column into a repeating group. Include a `rowActionGroup`
-with a confirmed `delete` action and a `subHeaderBox` with an Add button, except where creation is
-the Runtime's job (`Conversation`, `RuntimeState`, `OpenQuestion` — those carry
-`"leftSlot": []`).
+with a confirmed `delete` action and a `subHeaderBox` with an Add button, except where the
+Runtime, not the User, owns the lifecycle (`Conversation`, `RuntimeState`, `OpenQuestion`).
+Those three omit **both**: they carry `"leftSlot": []` and no `rowActionGroup` at all. The
+`user` role holds `DOCUMENT_DELETE` and there are no ownership policies, so a delete action on
+these is a delete: removing the RuntimeState silently disengages the global pause and resets
+the watermark, and removing an OpenQuestion strands its Conversation forever.
 
 ## Query models — the only way to give an overview a default constraint
 
