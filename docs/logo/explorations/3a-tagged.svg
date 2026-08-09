@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Assistents — tag with a ThingID hash">
+      <path d="M22 12H49A3 3 0 0 1 52 15V49A3 3 0 0 1 49 52H22L11 34A3.5 3.5 0 0 1 11 30Z"
+            fill="none" stroke="currentColor" stroke-width="2.8" stroke-linejoin="round"/>
+      <circle cx="20.5" cy="32" r="3.2" fill="none" stroke="currentColor" stroke-width="2.4"/>
+      <g fill="none" stroke="#4A3FB5" stroke-width="2.8" stroke-linecap="round">
+        <path d="M33 22 31 42"/>
+        <path d="M41 22 39 42"/>
+        <path d="M29.2 28.5H43.2"/>
+        <path d="M28.2 35.5H42.2"/>
+      </g>
+</svg>

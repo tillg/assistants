@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Assistents — ticked routing slip">
+  <g fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="12" y="7" width="40" height="50" rx="3.5"/>
+    <rect x="19" y="19.5" width="7.5" height="7.5" rx="1.5"/>
+    <rect x="19" y="31.5" width="7.5" height="7.5" rx="1.5"/>
+    <rect x="19" y="43.5" width="7.5" height="7.5" rx="1.5"/>
+    <path d="M31 23.2h14"/>
+    <path d="M31 35.2h10"/>
+    <path d="M31 47.2h12"/>
+  </g>
+  <g fill="none" stroke="#4A3FB5" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20.8 23.4l2 2.2 4-4.8"/>
+    <path d="M20.8 35.4l2 2.2 4-4.8"/>
+  </g>
+</svg>

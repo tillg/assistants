@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Assistents — letter A as a roof">
+      <path d="M13 52 32 12 51 52" fill="none" stroke="currentColor" stroke-width="4.6"
+            stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M24 30H40" fill="none" stroke="currentColor" stroke-width="4.6" stroke-linecap="round"/>
+      <path d="M26 52V43A6 6 0 0 1 38 43V52Z" fill="#4A3FB5" stroke="none"/>
+</svg>

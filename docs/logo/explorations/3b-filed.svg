@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Assistents — index tab on a folder">
+      <rect x="9" y="18" width="46" height="36" rx="3.5" fill="none"
+            stroke="currentColor" stroke-width="2.8"/>
+      <g fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round">
+        <path d="M18 31h26"/>
+        <path d="M18 39h19"/>
+        <path d="M18 47h12"/>
+      </g>
+      <path d="M10 19V14.5A3.5 3.5 0 0 1 13.5 11H26.5A3.5 3.5 0 0 1 30 14.5V19Z"
+            fill="#4A3FB5" stroke="none"/>
+</svg>

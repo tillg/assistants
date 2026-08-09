@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Assistents — agentic loop around a thing">
+  <path d="M39.18 51.73A21 21 0 1 0 24.82 51.73" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round"/>
+  <path d="M30.93 53.95 21.84 55.54 24.98 46.9Z" fill="#4A3FB5" stroke="none"/>
+  <rect x="24" y="19.5" width="16" height="21" rx="2.5" fill="none" stroke="currentColor" stroke-width="2.6"/>
+  <g fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+    <path d="M28.5 26h7"/>
+    <path d="M28.5 31h7"/>
+    <path d="M28.5 36h4"/>
+  </g>
+</svg>

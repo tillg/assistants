@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Assistents — frameless routing slip">
+  <g fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round">
+    <path d="M8 16h34"/>
+    <path d="M8 30h28"/>
+    <path d="M8 44h22"/>
+  </g>
+  <path d="M34 45l7.5 8L58 15" fill="none" stroke="#4A3FB5" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
