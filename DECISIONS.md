@@ -364,9 +364,11 @@ Recorded so nothing here comes as a surprise.
 - **A Conversation's transcript renders as a data grid**, not as a transcript. `just logs runtime`
   is the debugging surface. Building a viewer would be exactly the custom client code D-005 exists
   to avoid.
-- **`RuntimeState_FM` still has Edit and Save buttons** while `CONVENTIONS.md` describes the model
-  as Runtime-owned. That is deliberate for the `paused` kill switch, but the form lets a human
-  edit the watermark too, which they should not.
+- **`RuntimeState_FM` has Edit and Save buttons** while `CONVENTIONS.md` describes the model as
+  Runtime-owned. That is deliberate: `paused` is the kill switch and a human must be able to
+  toggle it. Every other Control on that form carries `readonly: true`, so the watermark and the
+  heartbeat cannot be edited by hand — I checked, having first written this bullet the other way
+  round.
 
 ---
 

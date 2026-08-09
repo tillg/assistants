@@ -11,25 +11,6 @@ await page.fill("#password", "A12PT-admintest");
 await page.press("#password", "Enter");
 await page.waitForTimeout(6000);
 
-// ---------- autocomplete behaviour ----------
-await page.locator("[data-role=menu-item]").filter({ hasText: "Parties" }).click();
-await page.waitForTimeout(2500);
-await page.getByRole("button", { name: "Add" }).click();
-await page.waitForTimeout(2500);
-
-const form = page.getByRole("form");
-const byLabel = form.getByLabel(/^Role\s*\*?$/);
-console.log("getByLabel Role count:", await byLabel.count());
-await byLabel.fill("doctor");
-await page.waitForTimeout(400);
-console.log("after fill, combobox role count:", await form.getByRole("combobox", { name: /^Role\s*\*?$/ }).count());
-console.log("DOM after fill:", JSON.stringify(await page.evaluate(() => [...document.querySelectorAll("input")].map((el) => ({ id: el.id, role: el.getAttribute("role"), aria: el.getAttribute("aria-label"), lbl: el.id ? document.querySelector(`label[for="${el.id}"]`)?.textContent : null, val: el.value }))), null, 1));
-await page.locator("#a12-Role-f_role").press("Escape");
-await page.waitForTimeout(400);
-console.log("after escape:", JSON.stringify(await page.evaluate(() => { const el = document.getElementById("a12-Role-f_role"); return el ? { role: el.getAttribute("role"), val: el.value } : null; })));
-await page.getByRole("button", { name: "Cancel" }).click();
-await page.waitForTimeout(1500);
-
 // ---------- assistant instance form ----------
 await page.locator("[data-role=menu-item]").filter({ hasText: "Assistants" }).click();
 await page.waitForTimeout(2500);
