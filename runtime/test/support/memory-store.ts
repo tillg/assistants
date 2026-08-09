@@ -101,7 +101,8 @@ function matches(document: A12Document, constraint: Constraint | undefined): boo
         case "or":
             return (constraint["operands"] as Constraint[]).some((operand) => matches(document, operand));
         case "not":
-            return !matches(document, (constraint["operands"] as Constraint[])[0]);
+            // Singular `operand`, matching the real API.
+            return !matches(document, constraint["operand"] as Constraint);
         case "exact_match": {
             const actual = valueAt(document, String(constraint["field"]));
             return actual !== undefined && String(actual) === String(constraint["value"]);

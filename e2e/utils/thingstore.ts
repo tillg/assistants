@@ -64,8 +64,11 @@ export interface ThingEntry {
 interface RpcResponse {
     id: string;
     result?: unknown;
-    error?: { code: number; message: string };
+    error?: { code: number; message: string; data?: { description?: { default?: string } } };
 }
+
+/** The store rejects anything larger, and says so only in the error's `data`. */
+const MAX_PAGE_SIZE = 100;
 
 /** `Document_DM/1234-…` → `1234-…`. A ThingID is the docRef without its Model. */
 export function thingIdOf(docRef: string): string {
@@ -138,6 +141,11 @@ export class ThingStore {
                 method: "POST",
                 headers: {
                     Accept: "application/json",
+                    // Not optional. The query engine resolves the request locale from this header
+                    // and refuses anything that is not exactly one of the Model's locales —
+                    // Node's `fetch` defaults to `*`, and `QUERY` then fails with
+                    // "unsupported locale: *". A weighted list like `en-US,en;q=0.9` fails too.
+                    "Accept-Language": "en",
                     "Content-Type": "application/json;charset=utf8",
                     Authorization: `UAABearer ${this.token}`
                 },
@@ -159,7 +167,9 @@ export class ThingStore {
             throw new Error(`${method} returned no response`);
         }
         if (result.error) {
-            throw new Error(`${method} failed: ${result.error.message} (${result.error.code})`);
+            // The message is always the same sentence; the useful half is in `data.description`.
+            const detail = result.error.data?.description?.default ?? "";
+            throw new Error(`${method} failed: ${result.error.message} (${result.error.code}) ${detail}`.trim());
         }
         return result.result as T;
     }
@@ -186,11 +196,11 @@ export class ThingStore {
         await this.rpc<void>("del", "DELETE_DOCUMENT", { docRef, locale: "en" });
     }
 
-    async query(model: string, constraint?: Constraint, pageSize = 200): Promise<ThingEntry[]> {
+    async query(model: string, constraint?: Constraint, pageSize = MAX_PAGE_SIZE): Promise<ThingEntry[]> {
         const query: Record<string, unknown> = {
             targetDocumentModel: model,
             projectionName: "document",
-            paging: { pageNumber: 0, pageSize }
+            paging: { pageNumber: 0, pageSize: Math.min(pageSize, MAX_PAGE_SIZE) }
         };
         if (constraint) {
             query["constraint"] = constraint;

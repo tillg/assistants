@@ -66,6 +66,9 @@ if [ -s "$TOKEN_FILE" ]; then
   if curl -fsS -o /dev/null \
        -H "Authorization: Bearer $(cat "$TOKEN_FILE")" \
        -H 'Accept: application/json' "$BASE/api/v1/about"; then
+    # Re-apply the mode even on the reuse path: a token minted by an older build is 0600 and
+    # the Runtime (unprivileged) cannot read it.
+    chmod 0644 "$TOKEN_FILE" 2>/dev/null || true
     echo "token:      reusing existing valid token from $TOKEN_FILE"
     exit 0
   fi
@@ -131,7 +134,11 @@ path = os.environ['TOKEN_FILE']
 os.makedirs(os.path.dirname(path), exist_ok=True)
 with open(path, 'w') as fh:
     fh.write(d['accessToken'])
-os.chmod(path, 0o600)
+# 0644, not 0600: this file is handed to the Runtime container through a shared volume, and the
+# Runtime deliberately runs as an unprivileged user, so a root-owned 0600 file is unreadable to it
+# (EACCES, which surfaces as every bookkeeping call failing). The volume is internal to the compose
+# stack, and the token is a development one.
+os.chmod(path, 0o644)
 print('accessTokenId:', d['accessTokenId'])
 print('expiresIn    :', d['expiresIn'], 's')
 print('-> %s (%d chars)' % (path, len(d['accessToken'])))

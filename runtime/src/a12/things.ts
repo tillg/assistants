@@ -280,7 +280,12 @@ export const eq = (field: string, value: string | number | boolean): Constraint 
 
 export const unset = (field: string): Constraint => ({ operator: "undefined_match", field });
 
-export const not = (operand: Constraint): Constraint => ({ operator: "not", operands: [operand] });
+/**
+ * NOTE the singular `operand`. `and` and `or` take `operands` (plural, an array); `not` takes
+ * `operand` (singular). Getting it wrong is rejected with "Please provide operand for not
+ * operator", which the watcher only discovers at runtime.
+ */
+export const not = (operand: Constraint): Constraint => ({ operator: "not", operand });
 
 export const and = (...operands: Constraint[]): Constraint => ({ operator: "and", operands });
 

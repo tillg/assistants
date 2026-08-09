@@ -54,10 +54,16 @@ async function main(): Promise<void> {
             consecutiveFailures += 1;
             // Deliberately does NOT stamp the heartbeat: silence has to be recorded silence, and a
             // stale heartbeat is what the compose healthcheck and the User both look at.
-            log.error("scan failed", {
-                consecutiveFailures,
-                error: describeError(error),
-            });
+            //
+            // A broken store fails every scan, so at one line per two seconds the log becomes
+            // unreadable exactly when someone needs to read it. Full detail on the first failure
+            // and then once a minute; a single line in between.
+            const noisy = consecutiveFailures === 1 || consecutiveFailures % 30 === 0;
+            if (noisy) {
+                log.error("scan failed", { consecutiveFailures, error: describeError(error) });
+            } else {
+                log.warn("scan failed again", { consecutiveFailures });
+            }
         }
         await sleep(config.scanIntervalMs);
     }
