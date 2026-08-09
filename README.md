@@ -189,7 +189,7 @@ a compose-level environment variable rather than a constructor argument, on purp
 |---|---|---|
 | `just bootstrap` | Loads what the system **is**: the Receptionist, the Accountant and the `RuntimeState` singleton. Idempotent | Called by `dev`. Re-run after editing the seeded Assistant definitions |
 | `just demo-data` | Loads what the household **has**: parties, processes, documents, invoices, and the Firefly books. Pauses the Runtime while loading | A realistic system to look at, without spending anything |
-| `just demo-reset` | `clean` → `up` → `wait` → `bootstrap` → `demo-data`. Takes the books with it | When the demo state has drifted. Firefly has no bulk delete and its data lives in a named volume, so a full teardown is the only reset symmetric across both Authorities |
+| `just demo-reset` | `clean` → `build` → `up` → `wait` → `bootstrap` → `demo-data`. Takes the books with it | When the demo state has drifted. Firefly has no bulk delete and its data lives in a named volume, so a full teardown is the only reset symmetric across both Authorities |
 | `just firefly-token` | Prints the Firefly personal access token from the shared volume | Talking to the Firefly API by hand |
 | `just pause` | Sets `RuntimeState.paused` — the global kill switch | An Assistant is doing something you did not expect |
 | `just resume` | Clears it | After you have looked |
@@ -224,6 +224,10 @@ a compose-level environment variable rather than a constructor argument, on purp
 | `firefly` | 8084 | Bookkeeping — Firefly III 6.6.6 on SQLite |
 | `runtime` | — | The Runtime; no port, it only makes outbound calls |
 | `server-init`, `firefly-bootstrap` | — | One-shot init containers |
+
+Every host port is published on `127.0.0.1` only. `compose/.env` is committed (D-013) and carries
+the database passwords and the Firefly credentials, so the stack must not be reachable from the
+network it happens to be on.
 
 **ThingStore** (`server/`, `import/models/`) — an A12 Data Service holding every Thing and
 exposing A12's JSON-RPC interface. It is the only integration surface in the system: the

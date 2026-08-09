@@ -72,18 +72,18 @@ bootstrap:
 # Pauses the Runtime while loading so the demo set lands as history, not as a work queue.
 demo-data:
     @cd runtime && THINGSTORE_URL=http://localhost:8082 FIREFLY_URL=http://localhost:8084 \
-        FIREFLY_TOKEN="$(just --quiet firefly-token)" npm run --silent demo
+        FIREFLY_TOKEN="$(just firefly-token)" npm run --silent demo
 
 # Wipe everything and rebuild from scratch, including the books.
-# Firefly has no bulk delete and its data lives in a named volume, so a full teardown is the
-# only reset that is symmetric across both Authorities (ADR-0006, as an operational consequence).
 # `build` is not optional here: `clean` deletes build/wcf-output/data/models, which `up`
 # bind-mounts -- Docker would recreate it empty and the server would import zero models.
+# Firefly has no bulk delete and its data lives in a named volume, so a full teardown is the
+# only reset that is symmetric across both Authorities (ADR-0006, as an operational consequence).
 demo-reset: clean build up wait bootstrap demo-data
 
-# Print the Firefly personal access token the bootstrap container minted.
 # Read it through the Runtime, which already has the token volume mounted -- no volume name to
 # guess and no second, differently-prefixed spelling of it to keep in sync.
+# Print the Firefly personal access token the bootstrap container minted.
 firefly-token:
     @{{compose}} exec -T runtime cat /run/firefly/pat.txt
 

@@ -46,7 +46,6 @@ import { DataType } from "../types";
 import { TestID } from "../types/testIds";
 import type { RaisedQuestion } from "../utils/agents";
 import { getByLabelWithOptionalAsterisk } from "../utils/locators";
-import { nowIso, sleep } from "../utils/thingstore";
 
 import { FormPage } from "./FormPage";
 import { OverviewPage } from "./OverviewPage";
@@ -62,27 +61,21 @@ export class OpenQuestionPage extends FormPage {
     /**
      * Open one particular question in the Open Questions overview.
      *
-     * Deep links are off in this application (`deepLinking.onlyWelcomePage`), so a specific row
-     * has to be found in the table. `conversationId` is an indexed String and unique per run, so
-     * the full-text search narrows to it; the fallback matches the second the question was
-     * created in, which is what the overview renders in its first column.
+     * Deep links are off in this application (`deepLinking.onlyWelcomePage`), so the row has to be
+     * found in the table — and every run's question carries the same prompt, so the only thing
+     * that tells them apart is the Conversation that raised it. `conversationId` is an indexed
+     * String, and the overview's search becomes a server-side `simple_search` over exactly those.
      */
     async openQuestion(question: RaisedQuestion) {
         await this.gotoHome();
         await this.clickMenuItem("Open Questions");
 
         await this.overview.search(question.conversationThingId);
-        await sleep(1_000);
 
         const rows = this.page.getByTestId(TestID.TABLE_BODY_ROW);
-        if ((await rows.count()) === 1) {
-            await rows.first().click();
-            await this.finishedLoading();
-        } else {
-            await this.overview.search("");
-            await expect(this.overview.getRow(question.createdAt)).toHaveCount(1);
-            await this.overview.openDocument(question.createdAt);
-        }
+        await expect(rows, `searching for conversation ${question.conversationThingId}`).toHaveCount(1);
+        await rows.first().click();
+        await this.finishedLoading();
 
         await this.toBeVisible();
         // The right row, not merely a row: the form's Conversation is the one that is waiting.
@@ -102,19 +95,33 @@ export class OpenQuestionPage extends FormPage {
             type: DataType.Select
         });
         await this.typeMarkdown("Answer", input.text);
-        await this.setAnsweredAt(nowIso());
+        await this.setAnsweredAt(new Date());
 
         await this.saveEdits();
     }
 
     /**
-     * The date-time control parses on blur against the model's own format
-     * (`yyyy-MM-dd'T'HH:mm:ss`), so the value surviving the blur is the proof that it parsed.
+     * The date-time control parses on blur and accepts only the localised `MM/dd/yyyy hh:mm AM/PM`
+     * form — anything else raises "Only dates in the format … are allowed" and the save is refused.
+     * The value surviving the blur is the proof that it parsed.
      */
-    private async setAnsweredAt(value: string) {
+    private async setAnsweredAt(when: Date) {
+        const value = formatAnsweredAt(when);
         const input = getByLabelWithOptionalAsterisk(this.form, "Answered at", DataType.String);
         await input.fill(value);
         await input.press("Tab");
         await expect(input).toHaveValue(value);
     }
+}
+
+/** `MM/dd/yyyy hh:mm AM/PM`, in UTC — every document model in this application declares `UTC`. */
+function formatAnsweredAt(date: Date): string {
+    const pad = (value: number) => String(value).padStart(2, "0");
+    const hours24 = date.getUTCHours();
+    const period = hours24 < 12 ? "AM" : "PM";
+    const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
+    return (
+        `${pad(date.getUTCMonth() + 1)}/${pad(date.getUTCDate())}/${date.getUTCFullYear()} ` +
+        `${pad(hours12)}:${pad(date.getUTCMinutes())} ${period}`
+    );
 }

@@ -405,3 +405,56 @@ Firefly's. That is the argument for the tier, in one example.
 
 ---
 
+## D-017 — What the adversarial review changed
+
+A read-only review against the ADRs and the architecture document produced 39 findings. The
+headline one is worth stating plainly, because it was the design's sharpest claim:
+
+**The intent log was written and never read.** `advance()` dutifully wrote each tool call down
+before executing it, and nothing anywhere ever looked for an intent without a result. Lease
+recovery simply called the model again — and because the unanswered intent was itself in the
+transcript, the re-issued call got a **new** idempotency key. That is precisely the double
+booking ADR-0012 exists to prevent, and the test named "recovers an expired lease without booking
+the same transaction twice" did not catch it because the crash it simulated happened *after* the
+result was written, so the recovered turn issued no tool call at all.
+
+Fixed by adding `reconcile()` to the tool contract: on recovery the Runtime **asks** the Connector
+whether the call landed, under the original key, and never re-executes. A mutating tool that
+cannot answer forces an escalation to the User rather than a guess. The recovery test now
+truncates the transcript at the intent, which is what a crash actually looks like.
+
+Two more that would have made the system not work at all:
+
+- **Every Manual Connector was stranded forever.** They suspend with `waitingFor: "tool"`, and the
+  answered-scan filtered on `"user"`. No other scan can reach a waiting Conversation either, so
+  `email.send`, `bank.sendMoney` and `document.requestText` were terminal and silent — with the
+  heartbeat still green. Invisible because the scripted fixture never exercises that path.
+- **A resumed transcript was invalid to both real LLM providers.** A suspended Turn left a tool
+  call with no tool result, which OpenAI and Anthropic both reject. Every `ui.askUser` — the core
+  interaction of the whole system — would have failed on resume with `LLM_PROVIDER=openai`.
+  Invisible because the compose default is `scripted`, which ignores message shape.
+
+And a data-loss one: `ThingRepository.update` built the outgoing document from the Runtime's field
+map, but `MODIFY_DOCUMENT` is a whole-document replace and the map does not cover `Document_DM`'s
+attachment group. An Assistant setting a classification deleted the User's uploaded scan, silently.
+It now merges onto the raw stored document, which protects every field the map does not know about.
+
+The rest, in one line each: a child that ends `failed` never told its parent; `resultDeliveredAt`
+was stamped even when delivery threw; scan 6 took a second Turn on Conversations scans 2–5 had just
+advanced; a disabled Assistant's Conversation spun at the scan interval forever; a deleted
+OpenQuestion stranded its Conversation; the watermark advanced past Things it had deliberately
+skipped; the scripted provider reported success when it ran off the end of the fixture; the Firefly
+idempotency probe read its own failure as "nothing there"; no outbound request had a timeout; the
+health probe returned green in three of the states it exists to catch; `just clean` ran `just dev`
+through an unescaped backtick; and the ports were published on all interfaces with the passwords
+committed next to them.
+
+**The lesson worth keeping**: every one of the three worst findings was invisible to the test
+suite because the suite exercised the happy path with a substitute at exactly the point where the
+bug lived. The unit tier's fake Firefly matched keys with `Array.find`, so it could not see that
+Firefly's search grammar breaks on a colon; the scripted provider ignores message shape, so it
+could not see an invalid transcript; the fixture never calls a Manual Connector, so it could not
+see them strand. Green tests were evidence about the fake, not about the system.
+
+---
+
