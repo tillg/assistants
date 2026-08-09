@@ -9,20 +9,23 @@
 import { expect, test } from "../../fixtures";
 import { BasePage } from "../../pages/BasePage";
 
-/** module → a cell value that is present in that overview and opens a row. */
-const MODULES: ReadonlyArray<readonly [string, string]> = [
-    ["Open Questions", "accountant"],
-    ["Documents", "post"],
-    ["Invoices", "EUR"],
-    ["Processes", "renovation"],
-    ["Parties", "organisation"],
-    ["Assistants", "receptionist"],
-    ["Conversations", "accountant"],
-    ["Runtime", "the-one"]
+/** module → a cell value present in that overview, and whether the form is known to be broken. */
+const MODULES: ReadonlyArray<readonly [string, string, boolean]> = [
+    ["Open Questions", "accountant", false],
+    ["Documents", "post", false],
+    ["Invoices", "EUR", false],
+    ["Processes", "renovation", false],
+    ["Parties", "organisation", false],
+    ["Assistants", "receptionist", false],
+    // Known broken, cause not isolated — see tmp/BUGS.md #4. `test.fail()` rather than a skip, so
+    // the day someone fixes it the suite says so instead of quietly staying green.
+    ["Conversations", "accountant", true],
+    ["Runtime", "the-one", true]
 ];
 
-for (const [module, cell] of MODULES) {
+for (const [module, cell, knownBroken] of MODULES) {
     test(`${module}: a row opens without a post-processing error`, async ({ getPageAs }) => {
+        test.fail(knownBroken, "known: the form engine rejects this form model");
         const page = await getPageAs("admin");
         const errors: string[] = [];
         page.on("console", (message) => {

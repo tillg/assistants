@@ -93,7 +93,10 @@ test.describe("Markdown editor", () => {
         await expect(editor).toHaveAttribute("contenteditable", "true");
         await expect(editor).toHaveAttribute("data-lexical-editor", "true");
         expect(await editor.evaluate((element) => element.tagName)).not.toBe("TEXTAREA");
-        await expect(form.markdownToolbar()).toBeVisible();
+        // `.first()`: the Skills inline repeat renders a markdown editor per row, so an
+        // Assistant with two skills has three toolbars on the form. Asserting on the unscoped
+        // locator was a strict-mode violation waiting for the seed data to grow a skill.
+        await expect(form.markdownToolbar().first()).toBeVisible();
 
         // --- type markdown -------------------------------------------------------------------
         await form.typeMarkdown(LABEL, MARKDOWN);
