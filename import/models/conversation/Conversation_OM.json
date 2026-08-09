@@ -120,6 +120,9 @@
         "sortable": true
       }
     ],
+    "rowActionGroup": {
+      "actions": []
+    },
     "subHeaderBox": {
       "leftSlot": [],
       "rightSlot": [

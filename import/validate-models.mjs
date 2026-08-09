@@ -213,6 +213,17 @@ for (const [id, { file, model }] of models) {
         }
     });
 
+    if (isOverview) {
+        // The overview engine reads `content.rowActionGroup.actions` without guarding it, so an
+        // absent key is not "no row actions" — it is a TypeError and a table that never renders.
+        // An empty `actions` array is how you say "no row actions". Learned by breaking three
+        // modules at once.
+        const group = model.content?.rowActionGroup;
+        if (!group || !Array.isArray(group.actions)) {
+            errors.push(`${where}: every overview model needs "rowActionGroup": {"actions": [...]}, even when empty — the overview engine dereferences .actions unguarded and the table will not render`);
+        }
+    }
+
     if (isForm) {
         const configured = (model.content?.fieldConfiguration?.field ?? []).map((f) => f.elementRef);
         const seen = new Set();

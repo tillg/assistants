@@ -71,7 +71,8 @@ export function fireflyToken(): string {
 
     const attempts: Array<[string, string[]]> = [
         ["docker", [...COMPOSE_ARGS, "exec", "-T", "runtime", "cat", "/run/firefly/pat.txt"]],
-        ["just", ["--quiet", "firefly-token"]]
+        // Not `--quiet`: it suppresses the recipe's stdout, which is the token.
+        ["just", ["firefly-token"]]
     ];
 
     const failures: string[] = [];

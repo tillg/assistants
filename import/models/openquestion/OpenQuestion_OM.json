@@ -129,6 +129,9 @@
         "preferredSorting": "DESC"
       }
     ],
+    "rowActionGroup": {
+      "actions": []
+    },
     "subHeaderBox": {
       "leftSlot": [],
       "rightSlot": [
