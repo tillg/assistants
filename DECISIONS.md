@@ -146,3 +146,40 @@ trap.
 **Reversal cost**: Trivial.
 
 ---
+## D-007 — The Runtime gets its own identity, deliberately weaker than `admin`
+
+**Decided**: A dedicated `runtime` user and `runtime` role with exactly `DOCUMENT_CREATE`,
+`DOCUMENT_UPDATE`, `DOCUMENT_PARTIAL_UPDATE`, `QUERY`. No `MODEL_MANAGE`, no `DOCUMENT_DELETE`,
+and explicitly not `admin`.
+
+**Why**: raised during grilling and it is a genuinely good catch. The template's
+`childAuthorizationDefinition.json` bypasses every ownership policy for the `admin` role, so
+running the LLM-driven half of the system as `admin` would hand it the one identity that can
+edit and delete anything — the opposite of ADR-0010. And because `__meta.creator` is the only
+provenance the store records, an `admin` Runtime would make its writes indistinguishable from
+the human's. Withholding `DOCUMENT_DELETE` also turns a hallucinated delete into a 403 rather
+than a lost invoice.
+
+**Alternative**: reuse `admin` (one less file, and wrong).
+
+**Reversal cost**: Trivial — two YAML files.
+
+---
+
+## D-008 — The template's copyright-header gate is removed
+
+**Decided**: `copyright/copyright.gradle` and its `check.dependsOn('validateCopyrightHeaders')`
+wiring are deleted. Vendored A12 files keep their EUPL/commercial dual-licence headers exactly
+as shipped; `LICENSE`, `NOTICE` and `THIRD_PARTY_NOTICES` are kept.
+
+**Why**: that script is mgm's own release tooling and it enforces the **mgm copyright header on
+every source file in the project**. Stamping our own new files with mgm's copyright would be
+inaccurate, and it failed the build the moment we added files of our own.
+
+**Alternative**: keep it and add mgm headers to our code (wrong), or keep it and add a growing
+exclusion list (pointless).
+
+**Reversal cost**: Trivial.
+
+---
+

@@ -1,2 +1,46 @@
+# Tools / IDE
+.classpath
+.project
+.settings
+.idea
+**/*.iml
+.vscode/
+
+# Dev configs
+**/developer.properties
+.env
+compose/.env.local
+
+# Build tools
+**/.gradle/
+gradle-app.setting
+
+# Build directories
+**/build
+**/bin
+**/out
+**/target
+**/node_modules
+**/lib
+**/.npm
+
+# Log files
+*.log
+*.gz
+*.tgz
+
+# Scratch / test output
 tmp/
 .playwright-mcp/
+e2e/test-results/
+e2e/playwright-report/
+e2e/.auth/
+runtime/coverage/
+
+# Firefly III bootstrap output (a secret)
+compose/secrets/
+
+# Other
+**/*.bak
+.DS_Store
+/server/postgres/

@@ -256,6 +256,35 @@ annotation" mechanism MARKDOWN_FIELDS.md describes, using native A12 features on
 **Constraint**: `lexical` must resolve to a single instance shared with `widgets-core`, or
 Lexical's `$`-functions break. Verified in the build with `npm ls lexical`.
 
+## Who the Runtime is
+
+The Runtime authenticates against UAA `LOCAL` like any other client:
+
+```
+POST /api/user/local/login   {"username": "...", "password": "..."}
+→ 200, JWT in the **response headers**: access_token, access_token_expiration,
+                                        token_renew_in_seconds
+subsequent calls:  Authorization: UAABearer <token>     ← UAABearer, not Bearer
+```
+
+Tokens last 1800 s and there is no refresh token and no client-credentials grant. The Runtime
+caches the token in memory and re-logs-in lazily on the first 401 — a process that talks to the
+store every two seconds does not need PKCE renewal.
+
+It logs in as a **dedicated `runtime` user with a dedicated `runtime` role**, never as `admin`.
+Two reasons, both sharp:
+
+- `import/auth/childAuthorizationDefinition.json` deliberately **bypasses every ownership policy
+  for the `admin` role** (`"target": "!containsAnyRole('admin')"`). Handing the LLM-driven half of
+  the system the one identity that can edit and delete anything regardless of ownership would
+  contradict ADR-0010's whole argument that capability is declared, not assumed.
+- `__meta.creator` is the only provenance the ThingStore records. If the Runtime were `admin`,
+  its writes would be indistinguishable from the human's edits in the UI.
+
+The `runtime` role gets exactly `DOCUMENT_CREATE`, `DOCUMENT_UPDATE`, `DOCUMENT_PARTIAL_UPDATE`
+and `QUERY` — **not** `MODEL_MANAGE`, and **not** `DOCUMENT_DELETE`. An Assistant that hallucinates
+a delete gets a 403 instead of losing an invoice.
+
 ## Bookkeeping connector
 
 Firefly III 6.6.6 on SQLite. A one-shot `firefly-bootstrap` container registers the first user

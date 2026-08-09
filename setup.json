@@ -1,0 +1,90 @@
+{
+  "serverPackage": {
+    "current": "com.mgmtp.assistants.server",
+    "alternative": "com.mgmtp.assistants.server"
+  },
+  "serverApplication": {
+    "current": "AssistantsServerApplication",
+    "alternative": "AssistantsServerApplication"
+  },
+  "initApplication": {
+    "current": "AssistantsInitApplication",
+    "alternative": "AssistantsInitApplication"
+  },
+  "projectProperties": {
+    "current": "mgmtp.assistants.server",
+    "alternative": "mgmtp.assistants.server"
+  },
+  "projectGroup": {
+    "current": "com.mgmtp.assistants",
+    "alternative": "com.mgmtp.assistants"
+  },
+  "projectName": {
+    "current": "assistants",
+    "alternative": "assistants"
+  },
+  "projectImportsArtifact": {
+    "current": "assistants-imports",
+    "alternative": "assistants-imports"
+  },
+  "sonarProjectKey": {
+    "current": "Assistants",
+    "alternative": "Assistants"
+  },
+  "projectDisplayName": {
+    "current": "Assistants",
+    "alternative": "Assistants"
+  },
+  "appModelName": {
+    "current": "AssistantsAppModel_AM",
+    "alternative": "AssistantsAppModel_AM"
+  },
+  "title": {
+    "current": "Assistants",
+    "alternative": "Assistants"
+  },
+  "dsDatabaseName": {
+    "current": "assistants-ds",
+    "alternative": "assistants-ds"
+  },
+  "dsDatabaseUsername": {
+    "current": "assistants-ds-user",
+    "alternative": "assistants-ds-user"
+  },
+  "dsDatabasePassword": {
+    "current": "assistants-ds-pw",
+    "alternative": "assistants-ds-pw"
+  },
+  "csDatabaseName": {
+    "current": "assistants-cs",
+    "alternative": "assistants-cs"
+  },
+  "csDatabaseUsername": {
+    "current": "assistants-cs-user",
+    "alternative": "assistants-cs-user"
+  },
+  "csDatabasePassword": {
+    "current": "assistants-cs-pw",
+    "alternative": "assistants-cs-pw"
+  },
+  "postgresDatabasePassword": {
+    "current": "assistants-postgres-pw",
+    "alternative": "assistants-postgres-pw"
+  },
+  "keycloakDatabaseName": {
+    "current": "assistants-keycloak",
+    "alternative": "assistants-keycloak"
+  },
+  "keycloakDatabaseUsername": {
+    "current": "assistants-keycloak-user",
+    "alternative": "assistants-keycloak-user"
+  },
+  "keycloakDatabasePassword": {
+    "current": "assistants-keycloak-pw",
+    "alternative": "assistants-keycloak-pw"
+  },
+  "nginxServerBaseUrlVarName": {
+    "current": "NGINX_ASSISTANTS_SERVER_BASE_URL",
+    "alternative": "NGINX_ASSISTANTS_SERVER_BASE_URL"
+  }
+}
