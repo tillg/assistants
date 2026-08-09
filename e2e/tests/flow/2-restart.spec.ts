@@ -45,6 +45,7 @@
  */
 
 import { expect, test } from "../../fixtures";
+import type { Browser, Page } from "@playwright/test";
 import { OpenQuestionPage } from "../../pages/OpenQuestionPage";
 import {
     createArrivingDocument,
@@ -55,10 +56,33 @@ import {
 import { AGENT_TIMEOUT_MS } from "../../utils/config";
 import { restartServices, waitForStack } from "../../utils/stack";
 import { ThingStore, waitFor } from "../../utils/thingstore";
+import { BASE_URL } from "../../utils/config";
+import users from "../../fixtures/users.json" with { type: "json" };
+
+/**
+ * A page authenticated *after* the restart.
+ *
+ * The `getPageAs` fixture caches each user's session data for the whole worker and replays it
+ * into `sessionStorage`. That token was minted by the server we just restarted, so replaying it
+ * lands on the login screen and every locator times out. Logging in again is not a workaround —
+ * it is what a human would do, and ADR-0004's claim is about the Open Question surviving in the
+ * store, not about a browser session surviving a server restart.
+ */
+async function loginFreshly(browser: Browser, username: string, password: string): Promise<Page> {
+    const context = await browser.newContext({ storageState: undefined });
+    const page = await context.newPage();
+    await page.goto(BASE_URL);
+    await page.getByRole("textbox", { name: "Username" }).fill(username);
+    await page.getByRole("textbox", { name: "Password" }).fill(password);
+    await page.getByRole("button", { name: "Login" }).click();
+    await expect(page.getByRole("link", { name: "Open Questions" })).toBeVisible({ timeout: 60_000 });
+    return page;
+}
 
 test.describe.serial("Surviving a restart", () => {
     test("should keep an Open Question, and continue it, across a restart of the Runtime and the store", async ({
-        getPageAs
+        getPageAs,
+        browser
     }) => {
         // A document restart takes as long as the stack takes to come up, twice over.
         test.setTimeout(AGENT_TIMEOUT_MS * 4);
@@ -95,7 +119,8 @@ test.describe.serial("Surviving a restart", () => {
         expect(await questionIsPending(store, question)).toBe(true);
 
         // and it is still in the view a human would look at
-        const page = await getPageAs("admin");
+        const admin = users.admin;
+        const page = await loginFreshly(browser, admin.username, admin.password);
         const openQuestion = new OpenQuestionPage(page);
         await openQuestion.openQuestion(question);
 

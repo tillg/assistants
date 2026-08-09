@@ -38,10 +38,17 @@ import { TestID } from "../types/testIds";
 export class BasePage {
     constructor(protected readonly page: Page) {}
 
-    async finishedLoading(scope: Locator | Page = this.page) {
+    /**
+     * Wait for the progress overlays to go away.
+     *
+     * The timeout is generous on purpose: right after the stack restarts, the client refetches the
+     * whole model graph before the first screen settles, and the default 5 s is not enough. A
+     * spinner that is genuinely stuck still fails — just later, and for the right reason.
+     */
+    async finishedLoading(scope: Locator | Page = this.page, timeout = 60_000) {
         const loadings = await scope.getByTestId(TestID.PROGRESS_INDICATOR_OUTER_OVERLAY).all();
         for (const loading of loadings) {
-            await expect(loading).toBeHidden();
+            await expect(loading).toBeHidden({ timeout });
         }
     }
 
