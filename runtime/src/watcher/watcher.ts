@@ -208,7 +208,10 @@ export class Watcher {
         if (newestSeen && newestSeen !== watermark) {
             state.data.watermark = newestSeen;
             state.data.watermarkDocRefs = boundaryDocRefs.map((docRef) => ({ docRef }));
-            await this.saveState(state);
+            // Same hazard `stampHeartbeat` guards against, and it was unguarded here: this writes
+            // a copy read at the top of a pass that takes seconds, so a `just pause` issued in
+            // between was silently reverted. Measured: 1 revert in 44 attempts.
+            await this.savePreservingHumanFields(state);
         }
         return births;
     }
@@ -277,7 +280,12 @@ export class Watcher {
                 continued += 1;
                 continue;
             }
-            if (!question.data.answeredAt) continue;
+            // NOT `answeredAt` alone. Nothing stamps it — it is a plain editable DateTime on the
+            // form — so a User who types an answer, sets Confirmed and presses Save has, from
+            // their point of view, answered; and the Conversation would wait forever. Any answer
+            // field being filled in means answered. `answeredAt` stays as the record of *when*,
+            // for anyone who fills it in.
+            if (!isAnswered(question.data)) continue;
 
             appendEntry(conversation.data, {
                 role: "user",
@@ -575,22 +583,47 @@ export class Watcher {
      * forward the fields a human owns.
      */
     private async stampHeartbeat(state: Stored<RuntimeState>): Promise<void> {
-        let humanOwned: Partial<RuntimeState> = {};
+        state.data.heartbeatAt = nowIso();
+        await this.savePreservingHumanFields(state);
+    }
+
+    /**
+     * Write the RuntimeState without trampling the fields a human owns.
+     *
+     * `paused` is the global kill switch and the User may flip it at any moment, including
+     * halfway through a scan. A12 has no compare-and-swap, so the least-bad thing available is
+     * to re-read immediately before writing and carry those fields forward. If it cannot be
+     * re-read, do not write at all — a stale heartbeat is the honest outcome and the health
+     * probe reports it.
+     */
+    private async savePreservingHumanFields(state: Stored<RuntimeState>): Promise<void> {
+        let paused: boolean | undefined;
         try {
             const fresh = await this.deps.things.get<RuntimeState>(
                 SPECS.RuntimeState_DM,
                 state.docRef,
             );
-            humanOwned = { paused: fresh.data.paused };
+            paused = fresh.data.paused;
         } catch {
-            // If it cannot be re-read, do not write either — a stale heartbeat is the honest
-            // outcome, and the health probe will say so.
             return;
         }
-        state.data.heartbeatAt = nowIso();
-        await this.saveState({ ...state, data: { ...state.data, ...humanOwned } });
-        state.data.paused = humanOwned.paused ?? state.data.paused;
+        await this.saveState({ ...state, data: { ...state.data, paused } });
+        state.data.paused = paused ?? state.data.paused;
     }
+}
+
+/**
+ * Has the User answered?
+ *
+ * Deliberately generous: any of the answer fields carrying a value counts. The alternative —
+ * requiring the timestamp — meant the primary interaction of the whole product silently did
+ * nothing, which is the failure ADR-0015 exists to forbid.
+ */
+export function isAnswered(question: OpenQuestion): boolean {
+    if (question.answeredAt) return true;
+    if (typeof question.text === "string" && question.text.trim() !== "") return true;
+    if (typeof question.choice === "string" && question.choice.trim() !== "") return true;
+    return question.confirmed === true || question.confirmed === false;
 }
 
 export function renderAnswer(question: OpenQuestion): string {

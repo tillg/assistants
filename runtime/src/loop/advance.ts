@@ -296,10 +296,15 @@ export class LoopDriver {
         const granted = this.deps.registry.grantedTo(assistant.data);
 
         for (const call of response.toolCalls) {
-            const operation = operationFromLlm(call.name);
             const tool =
                 granted.find((candidate) => toolNameForLlm(candidate.name) === call.name) ??
-                granted.find((candidate) => candidate.name === operation);
+                granted.find((candidate) => candidate.name === operationFromLlm(call.name));
+            // Record the tool's OWN name, not the reverse-mapped wire name. `__` maps back to `.`
+            // unconditionally, so `assistant.call:accountant` became `assistant.call.accountant` —
+            // a name no tool has. Recovery then looked it up, failed, and told the model the call
+            // "did not take effect", when in fact the child Conversation had already been born.
+            // The model's natural response is to call again: two Accountants on one invoice.
+            const operation = tool?.name ?? operationFromLlm(call.name);
 
             const seq = nextSeq(conversation);
             const idempotencyKey = `${stored.thingId}:${seq}`;
@@ -529,11 +534,22 @@ export class LoopDriver {
 
         if (escalations > this.deps.maxEscalations) {
             conversation.status = "failed";
+            conversation.finishReason = reason;
             conversation.leaseUntil = "";
+            conversation.currentQuestionId = "";
+            // The cap stops the loop, which is right — but it used to stop it *silently*: no
+            // question, so the Conversation disappeared from the Open Questions view and the
+            // User had no way to learn it had given up. `lastError` now says so in the words a
+            // human needs, and the Conversation is still findable by its `failed` status.
+            conversation.lastError =
+                `${message}\n\nI have asked ${this.deps.maxEscalations} times and stopped. ` +
+                `This conversation will not continue on its own — start a new one if the work ` +
+                `still needs doing.`;
             await this.write(stored);
             log.error("conversation failed after repeated escalation", {
                 conversationId: stored.thingId,
                 escalations,
+                reason,
             });
             return;
         }

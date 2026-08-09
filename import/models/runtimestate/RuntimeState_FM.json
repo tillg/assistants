@@ -319,10 +319,6 @@
         {
           "elementRef": "f_paused",
           "exposition": "SWITCH"
-        },
-        {
-          "elementRef": "f_wm_docRef",
-          "readonly": true
         }
       ]
     },

@@ -32,6 +32,11 @@ async function main(): Promise<void> {
         log.info(`runtime ${argument}d`);
         return;
     }
+    if (argument !== undefined) {
+        // A typo in the kill-switch command used to fall through to a full bootstrap and report
+        // success — `pausee` did the opposite of pausing, cheerfully.
+        throw new Error(`Unknown argument "${argument}". Expected "pause", "resume", or nothing.`);
+    }
 
     const result = await bootstrap(things);
     log.info("bootstrap complete", { created: result.created, alreadyPresent: result.kept });

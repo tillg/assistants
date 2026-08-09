@@ -28,7 +28,12 @@ dev: build up wait bootstrap
     @echo "        just logs runtime  — watch the Assistants work"
 
 # Build the models, the server jars, the client bundle and all images.
+#
+# `npm ci` in runtime/ is not redundant with the Dockerfile: the image installs its own copy, but
+# `just bootstrap`, `demo-data`, `pause`, `resume` and the test tiers all run from the HOST, and
+# on a fresh clone there is no node_modules for them to run from.
 build:
+    @cd runtime && npm ci --no-audit --no-fund
     {{gradle}} convertModels
     {{gradle}} buildImages
     {{compose}} build runtime
@@ -160,7 +165,8 @@ clean:
 clean-all: clean
     rm -rf runtime/node_modules client/node_modules e2e/node_modules
 
-# Install the toolchain's dependencies (usually not needed; the builds do it).
+# Install every workspace's dependencies. `just build` covers runtime/ and client/; e2e/ is only
+# needed to run the end-to-end tier.
 install:
     @cd runtime && npm install
     @cd client && npm install

@@ -72,3 +72,13 @@ export async function setPaused(things: ThingRepository, paused: boolean): Promi
     if (!state) throw new Error("No RuntimeState — run `just bootstrap` first.");
     await things.update(SPECS.RuntimeState_DM, state.docRef, { ...state.data, paused });
 }
+
+/** Is the Runtime currently paused? Used by the demo loader so it can restore what it found. */
+export async function isPaused(things: ThingRepository): Promise<boolean> {
+    const found = await things.search<Record<string, unknown>>(
+        SPECS.RuntimeState_DM,
+        eq(fieldPath(SPECS.RuntimeState_DM, "singletonKey"), RUNTIME_STATE_KEY),
+        2,
+    );
+    return found[0]?.data["paused"] === true;
+}

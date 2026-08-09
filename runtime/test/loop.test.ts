@@ -376,6 +376,103 @@ describe("guards", () => {
     });
 });
 
+describe("answering", () => {
+    it("continues when the User fills in the answer but not the timestamp", async () => {
+        // The form has no default for `answeredAt` and nothing stamps it. Requiring it meant a
+        // User could answer, save successfully, and have the system never notice — silently, on
+        // the single most important interaction in the product.
+        const harness = buildHarness([
+            {
+                turn: 0,
+                toolCalls: [{ name: "ui__askUser", arguments: { kind: "confirm", prompt: "Book it?" } }],
+            },
+            { turn: 1, text: "Booked.", finishReason: "answered" },
+        ]);
+        const assistant = await harness.seedAssistant();
+        const docRef = await harness.birth({ assistant });
+        await harness.driver.advance(docRef);
+
+        const [question] = await harness.questions();
+        // Exactly what the UI produces: text and confirmed set, answeredAt untouched.
+        await harness.answer(question!.thingId, {
+            confirmed: true,
+            text: "Yes, go ahead.",
+            answeredAt: "",
+        });
+
+        await harness.watcher.scan();
+
+        const conversation = await harness.conversation(docRef);
+        expect(conversation.data.status).toBe("done");
+    });
+
+    it("treats a bare 'no' as an answer", async () => {
+        const harness = buildHarness([
+            {
+                turn: 0,
+                toolCalls: [{ name: "ui__askUser", arguments: { kind: "confirm", prompt: "Book it?" } }],
+            },
+            { turn: 1, text: "Understood, leaving it.", finishReason: "answered" },
+        ]);
+        const assistant = await harness.seedAssistant();
+        const docRef = await harness.birth({ assistant });
+        await harness.driver.advance(docRef);
+
+        const [question] = await harness.questions();
+        await harness.answer(question!.thingId, { confirmed: false, answeredAt: "" });
+        await harness.watcher.scan();
+
+        expect((await harness.conversation(docRef)).data.status).toBe("done");
+    });
+
+    it("does not continue while the question is genuinely unanswered", async () => {
+        const harness = buildHarness([
+            {
+                turn: 0,
+                toolCalls: [{ name: "ui__askUser", arguments: { kind: "confirm", prompt: "Book it?" } }],
+            },
+        ]);
+        const assistant = await harness.seedAssistant();
+        const docRef = await harness.birth({ assistant });
+        await harness.driver.advance(docRef);
+
+        await harness.watcher.scan();
+
+        const conversation = await harness.conversation(docRef);
+        expect(conversation.data.status).toBe("waiting");
+        expect(conversation.data.waitingFor).toBe("user");
+    });
+});
+
+describe("recording tool names", () => {
+    it("records a per-callee assistant.call under its real name, not the wire name", async () => {
+        // `__` maps back to `.` unconditionally, so the transcript used to say
+        // `assistant.call.accountant` — a name no tool has. Recovery then concluded the call had
+        // not happened, when the child Conversation was already born.
+        const harness = buildHarness([
+            {
+                assistant: "receptionist",
+                turn: 0,
+                toolCalls: [
+                    { name: "assistant__call__accountant", arguments: { prompt: "check this" } },
+                ],
+            },
+        ]);
+        const receptionist = await harness.seedAssistant({
+            key: "receptionist",
+            tools: [{ operation: "assistant.call:accountant" }],
+        });
+        await harness.seedAssistant({ key: "accountant", tools: [{ operation: "thingstore.get" }] });
+
+        const docRef = await harness.birth({ assistant: receptionist });
+        await harness.driver.advance(docRef);
+
+        const conversation = await harness.conversation(docRef);
+        const intent = (conversation.data.entries ?? []).find((entry) => entry.kind === "tool-intent");
+        expect(intent?.toolName).toBe("assistant.call:accountant");
+    });
+});
+
 describe("assistant-to-assistant calls (ADR-0007)", () => {
     it("suspends the caller and delivers the callee's result exactly once", async () => {
         const harness = buildHarness([

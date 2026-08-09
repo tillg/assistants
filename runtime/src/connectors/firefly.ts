@@ -308,9 +308,14 @@ export class FireflyConnector {
     async listOpenItems(): Promise<FireflyAccount[]> {
         const accounts = await this.listAccounts(true);
         return accounts.filter((account) => {
+            // Firefly's *write* API takes `type: "liability"`; its *read* API answers
+            // `"liabilities"`. Matching only the singular made this return an empty list while
+            // thousands were owed — and the Accountant's skill says to report from this call and
+            // nothing else, so it stated confidently that nothing was outstanding.
+            const type = account.type.toLowerCase();
             const isOpenItemAccount =
                 /payable|receivable/i.test(account.name) &&
-                (account.type === "liability" || account.type === "asset" || account.type === "debt");
+                (type.startsWith("liabilit") || type === "asset" || type === "debt");
             const balance = Number(account.currentBalance ?? "0");
             return isOpenItemAccount && Number.isFinite(balance) && Math.abs(balance) > 0.0001;
         });

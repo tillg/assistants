@@ -566,7 +566,7 @@
                 "id": "f_entries",
                 "name": "Entries",
                 "Group": {
-                  "repeatability": 500,
+                  "repeatability": 100,
                   "elements": [
                     {
                       "type": "Field",

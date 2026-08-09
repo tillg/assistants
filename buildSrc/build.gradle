@@ -30,6 +30,14 @@
  * LEGALLY INVALID. SEE THE RESPECTIVE LICENSE TEXT FOR DETAILS.
  */
 
+// buildSrc is a separate nested build: the root settings.gradle's
+// dependencyResolutionManagement does NOT reach it. Without this it resolves nothing on a
+// machine that has no ~/.gradle init script injecting a repository — which is every machine but
+// the one this was written on. See DECISIONS.md D-006.
+repositories {
+    mavenCentral()
+}
+
 dependencies {
     // For versions comparison
     implementation 'org.semver4j:semver4j:5.4.1'

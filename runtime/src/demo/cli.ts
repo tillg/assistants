@@ -22,7 +22,7 @@ import { A12Client } from "../a12/client.js";
 import { eq, nowIso, path as fieldPath, SPECS, ThingRepository } from "../a12/things.js";
 import { FireflyConnector } from "../connectors/firefly.js";
 import { RUNTIME_STATE_KEY } from "../watcher/watcher.js";
-import { setPaused } from "../bootstrap/bootstrap.js";
+import { isPaused, setPaused } from "../bootstrap/bootstrap.js";
 import { sleep } from "../loop/advance.js";
 import {
     DEMO_ACCOUNTS,
@@ -59,8 +59,11 @@ export async function loadDemo(
         questions: 0,
     };
 
+    // Remember whether the User had already paused it: unconditionally resuming at the end
+    // revoked their kill switch, which is the opposite of what they asked for.
+    const wasPaused = await isPaused(things);
     await setPaused(things, true);
-    log.info("runtime paused for the demo load");
+    log.info("runtime paused for the demo load", { wasAlreadyPaused: wasPaused });
 
     try {
         const partyIds = new Map<string, string>();
@@ -239,8 +242,8 @@ export async function loadDemo(
             });
         }
     } finally {
-        await setPaused(things, false);
-        log.info("runtime resumed");
+        await setPaused(things, wasPaused);
+        log.info(wasPaused ? "runtime left paused, as it was before" : "runtime resumed");
     }
 
     return report;

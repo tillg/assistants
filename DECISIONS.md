@@ -533,3 +533,108 @@ right and the stack was wrong.
 
 ---
 
+
+## D-021 — A bug hunt, and the decisions taken to run it
+
+The task was "test the system until you find at least ten bugs, track activities and decisions in
+the existing .md file, write the bugs in a BUGS.md". **43 defects, every one reproduced**, are in
+[BUGS.md](BUGS.md). What follows is how that was arrived at and what I decided without asking.
+
+**Scope: find and document, not fix.** The instruction names BUGS.md as the deliverable, so nothing
+here is repaired. No product file was modified for the hunt; `git status` over `client/`,
+`runtime/src/`, `server/`, `import/`, `compose/`, `e2e/` and the justfile stayed clean throughout.
+The two exceptions are deliberate and listed under "what the hunt left behind" below.
+
+**"The existing .md file" was read as this one.** Six top-level `.md` files were candidates;
+DECISIONS.md is the only one whose stated purpose is recording decisions taken while the user is
+away, so D-021 continues it rather than starting a seventh file.
+
+**Five hunters in parallel, against the stack that was already up.** The surfaces are independent —
+the web application through a real browser, the ThingStore's JSON-RPC and the Runtime's tool layer,
+the loop and watcher under vitest against the real modules, the Firefly connector against live
+Firefly, and the models plus validator plus the project's own prose. I kept the browser myself and
+gave the other four a written contract (`tmp/hunt/CONTRACT.md`). Running against the live stack
+rather than a fresh one was a deliberate trade: it cost some isolation — several hunters were
+writing Things at once — and bought the ability to catch concurrency defects that a quiet stack
+hides. BUG-07 and BUG-22 are both of that kind.
+
+**The contract's load-bearing clause was rule 3: reproduce, never infer.** Reading code and
+reasoning "this looks wrong" was defined as a *hypothesis*, publishable only after something was
+executed that demonstrated the wrong behaviour, with the output pasted. Everything that could not be
+executed went to a separate "unverified suspicions" section and is excluded from BUGS.md. Rule 4
+forbade faking the component under test — D-017's lesson, and it earned its place twice: BUG-02 and
+BUG-04 are both invisible to the unit tier because `FakeFirefly` implements the two methods as
+`return []`, so the fake agrees with the bug.
+
+**Destructive operations were forbidden to everyone.** `just clean`, `clean-all`, `down`,
+`demo-reset`, `restart`, `docker compose down`, `docker volume rm`. With four agents and a browser
+on one stack, any of those would have destroyed another hunter's evidence mid-run. `just pause`
+without a resume was also forbidden, which is why the pause-race test (BUG-07) always resumes.
+
+**I re-ran four findings myself before publishing them.** Aggregating another agent's claims without
+checking them is how a report acquires a wrong entry. BUG-01, BUG-02, BUG-05 and BUG-07 — the ones
+whose consequences are money, data loss or the kill switch — were re-executed independently and
+reproduced exactly. BUG-07 reproduced at a *different* rate on the second run (3 of 25 rather than
+2 of 25), which is what a race should do and is itself corroboration.
+
+**One candidate was dropped after its control failed.** The Parties search box appeared to miss a
+Party whose name contained the search term. The control — the same search against a Party known to
+exist — showed the row had been deleted by another hunter minutes earlier. There was no bug. It is
+recorded here because a report is only as good as the things kept out of it.
+
+**BUG-15 is published without a root cause, on purpose.** Two of the eight detail forms cannot be
+opened and fail silently. I established that the server serves models byte-identical to the source,
+that every `elementRef` resolves, that model versions are uniform, that the validator passes them,
+and that the `InlineRepeat` shape is not the trigger — and then stopped, because pinning A12's
+internal post-processing further was worth less than the twenty findings not yet made. BUGS.md lists
+what was ruled out so the next person does not repeat it. The honest state is: the defect is
+confirmed and reproducible, the cause is not.
+
+**Severity means user impact, not effort.** Critical is reserved for one finding. BUG-01 is that the
+core interaction of the product — the User answering an Open Question in the web application — does
+not work: the form leaves `answeredAt` unset, the watcher requires it, and the Conversation waits
+for ever with a green heartbeat. Stamping that one field revives it within one scan, which is the
+positive control that makes it a fact rather than a theory. The e2e suite does not catch it because
+`OpenQuestionPage.ts` sets `answeredAt` itself before saving — the test knows something the User is
+never told.
+
+**Two documentation findings were reported by two hunters independently** (BUG-26, the
+`CONVENTIONS.md` paragraph that instructs the reader to reintroduce the D-019 overview crash). I
+merged them rather than counting twice.
+
+**The subagents' harness refused to let them write their own findings files**, so I persisted all
+four verbatim to `tmp/hunt/findings-*.md` and wrote BUGS.md from them. `tmp/` is gitignored, so
+BUGS.md is self-contained and the scratch scripts behind each repro are not committed.
+
+### What the hunt left behind
+
+- **The demo data is dirty.** Roughly 90 Parties, many Invoices and Documents named `HUNT …` or
+  `SRCH-…`, and their Conversations and Open Questions. Firefly carries six `HUNT …` accounts, about
+  forty `hunt …` transactions and a stray `Medcal` category, so the `Payables` balance is inflated
+  well beyond the demo household's. `just demo-reset` is the way back, and it takes the books with
+  it — which is the ADR-0006 consequence D-018 already records.
+- **The Receptionist's system prompt was edited and restored byte-exactly.** A markdown round-trip
+  probe (table, hard break, nested lists, fenced code, rule, escapes, block quote) was appended,
+  saved through both the source tab and the Lexical visual editor, and compared against the seed:
+  identical apart from `|---|---|` normalising to `| --- | --- |`. The editor is sound. Restoring it
+  had to be done by hand against `ASSISTANT_SEEDS`, because `just bootstrap` will not do it —
+  which is BUG-30, found by trying.
+- **One test Party was deleted through the UI** to confirm the delete confirmation dialog. It was a
+  hunter's own row.
+- **The stack is left running, unpaused, healthy.** `Paused: false`, heartbeat fresh.
+
+### The pattern worth keeping
+
+D-017 ended with "green tests were evidence about the fake, not about the system". This hunt is that
+sentence again, from the other side. The suite is green — 40 runtime, 288 client, 26 models, 21
+end-to-end — and the User still cannot answer a question, the Accountant still reports no unpaid
+invoices while €3 850.30 sits unpaid, and the kill switch still fails one time in ten. Every one of
+those was found by *using* the system rather than by testing it, and each is invisible to the tier
+that should own it: BUG-01 because the page object fills in a field the User is not told about,
+BUG-02 and BUG-04 because the fake returns `[]`, BUG-07 because a race needs a second writer and the
+tests have one.
+
+The three highest-value things to do next, if the ranking is useful: BUG-01, because the product does
+not work without it; BUG-02, because an Accountant that answers "nothing outstanding" is worse than
+one that says nothing; and BUG-15, because a Conversation you cannot open is a system you cannot
+debug — and it is the surface every other finding here would be diagnosed from.

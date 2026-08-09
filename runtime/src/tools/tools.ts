@@ -50,22 +50,10 @@ function specFor(model: string): ModelSpec {
 }
 
 /**
- * The fields carrying the `indexed` annotation, per Model. Only these can be filtered on — see
- * `import/models/CONVENTIONS.md`. Kept here rather than derived because the Runtime does not read
- * the model JSON at runtime; `test/model-mapping.test.ts` holds it to the models.
+ * Models an Assistant may **read**. Everything the Runtime knows about — including its own
+ * machinery, which an Assistant may inspect but never write.
  */
-const INDEXED: Record<string, string[]> = {
-    Party_DM: ["kind", "role", "name", "idempotencyKey", "createdByConversationId", "createdAt", "updatedAt"],
-    Document_DM: [
-        "title", "source", "classification", "classifiedThingId",
-        "idempotencyKey", "createdByConversationId", "createdAt", "updatedAt",
-    ],
-    Invoice_DM: [
-        "invoiceNumber", "issuedByPartyThingId", "issuerName", "documentThingId", "processThingId",
-        "idempotencyKey", "createdByConversationId", "createdAt", "updatedAt",
-    ],
-    Process_DM: ["title", "kind", "status", "idempotencyKey", "createdByConversationId", "createdAt", "updatedAt"],
-};
+const READABLE_MODELS: readonly string[] = Object.keys(SPECS);
 
 /** Models an Assistant may create or edit. Never its own machinery. */
 const WRITABLE_MODELS: readonly string[] = ["Party_DM", "Document_DM", "Invoice_DM", "Process_DM"];
@@ -201,15 +189,17 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             const spec = specFor(model);
             const field = args["field"] ? String(args["field"]) : undefined;
             const limit = Math.min(Number(args["limit"] ?? 25) || 25, 100);
-            if (field !== undefined && !INDEXED[model]?.includes(field)) {
-                // Only indexed fields are queryable in A12; an unindexed one errors or silently
-                // returns nothing, and "no overdue invoices" is a dangerous thing to conclude by
-                // accident. Told plainly, the next Turn can pick a field that works.
+            if (field !== undefined && !spec.fields[field]) {
+                // The only search that genuinely cannot work is one naming a field the Model does
+                // not have — that is an RPC error the model cannot recover from. An earlier
+                // version rejected anything without the `indexed` annotation, which was measured
+                // to be wrong: `exact_match` filters correctly on unindexed scalars too, and the
+                // check refused 25 legitimate searches, including "which invoices are overdue".
                 return {
                     kind: "error",
                     message:
-                        `"${field}" cannot be searched on ${model}. Searchable fields: ` +
-                        `${(INDEXED[model] ?? []).join(", ")}.`,
+                        `"${field}" is not a field of ${model}. Fields: ` +
+                        `${Object.keys(spec.fields).join(", ")}.`,
                 };
             }
             const constraint =
