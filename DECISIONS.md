@@ -512,3 +512,24 @@ Conversation on.
 
 ---
 
+## D-020 — Restarting the server alone breaks the frontend
+
+The last thing the end-to-end suite found, and it is an operational fact worth knowing rather
+than a bug in anything we wrote.
+
+**nginx resolves its upstreams once, at startup.** Restarting the `server` container gives it a
+new IP, and the frontend then proxies every `/api/**` call to an address nobody is listening on.
+The symptom is a login form that never renders and a console full of `502 Bad Gateway` — which
+looks like an application fault and is not one.
+
+So `just restart server` now takes the frontend with it, and the e2e restart helper does the
+same. The alternative fix — an nginx `resolver` directive with a variable upstream, so the name
+is re-resolved per request — is the better long-term answer and belongs with whoever owns the
+frontend image; it is noted here rather than done.
+
+This is also why the suite failed twice in a row after appearing to pass: the restart spec left
+the stack in exactly this state, and the next run's login could not reach the API. The tests were
+right and the stack was wrong.
+
+---
+

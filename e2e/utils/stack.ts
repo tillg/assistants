@@ -43,8 +43,16 @@ import { BASE_URL, COMPOSE_ARGS, REPO_ROOT, THINGSTORE_URL } from "./config";
 import { sleep } from "./thingstore";
 
 /** `docker compose … restart <services>` — the same invocation `just restart` uses. */
+/**
+ * Restart services, always taking the frontend with them.
+ *
+ * nginx resolves its upstreams once, at startup. Restarting `server` gives it a new container IP,
+ * and the frontend then proxies `/api/**` to an address nobody is listening on — every call comes
+ * back 502 and the login form never renders. The frontend has to come along.
+ */
 export function restartServices(services: string[]): void {
-    execFileSync("docker", [...COMPOSE_ARGS, "restart", ...services], {
+    const withFrontend = services.includes("frontend") ? services : [...services, "frontend"];
+    execFileSync("docker", [...COMPOSE_ARGS, "restart", ...withFrontend], {
         cwd: REPO_ROOT,
         encoding: "utf-8",
         stdio: "pipe",

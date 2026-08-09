@@ -54,9 +54,19 @@ wait:
 down:
     {{compose}} --profile server-init down
 
-# Restart one service, or all of them. Used by the ADR-0004 restart test.
+# Restart one service, or all of them.
+#
+# Restarting `server` on its own is a trap: nginx in the frontend resolves its upstreams once at
+# startup, so the server's new container IP leaves every /api call answering 502 and the login
+# form never renders. Restarting the server therefore takes the frontend with it.
 restart service="":
-    {{compose}} restart {{service}}
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if [ "{{service}}" = "server" ]; then
+        {{compose}} restart server frontend
+    else
+        {{compose}} restart {{service}}
+    fi
 
 # Show what is running.
 ps:
