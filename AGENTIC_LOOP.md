@@ -54,3 +54,85 @@ Points to examine:
 - A Temporal workflow maps naturally onto a Conversation, an activity onto a tool or Connector call, a signal onto the User answering an Open Question, and a timer onto both the schedule and the timeout from Q3.
 - But ADR-0004 puts a Conversation's state in the **ThingStore**, whereas Temporal keeps its own event history. That is two Authorities for the same state, which ADR-0006 forbids — so the split has to be worked out deliberately, not inherited.
 - Weigh the operational cost (a Temporal cluster) against what it replaces for a single-household system.
+
+---
+
+# Findings — the survey (2026-08-09)
+
+Survey of three implementations: [Opencode](https://github.com/anomalyco/opencode) (read from source, `dev` branch), [Pi](https://github.com/earendil-works/pi) (read from source, `main`, plus the author's [design write-up](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/)) and the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/agent-loop.md) (official documentation).
+
+## What the agentic loop is
+
+All three agree on the irreducible core, and Pi's author states it plainest: *processing user messages, executing tool calls, feeding results back to the LLM, and repeating until the model produces a response without tool calls.* As pseudocode:
+
+```
+loop:
+    context  = build from stored Conversation
+    response = LLM(context)                 # streamed
+    append response to Conversation
+    if response has no tool calls: stop     # the only exit
+    for each tool call:
+        result = execute(tool call)
+        append result to Conversation
+```
+
+One iteration — one LLM response plus the execution of its tool calls — is a **turn** in all three systems; the word is worth importing. The loop has no step limit anywhere: it terminates when the model answers without asking for tools (Pi: "the loop just loops until the agent says it's done"; Opencode exits when the finish reason is not `tool-calls` and no tool call is unresolved; the SDK exits on `stop_reason: end_turn`).
+
+Equally telling is what all three agree the loop is *not*: it is not a workflow engine. None of the three has a scheduler, timers, or clock-driven continuation of any kind. All three are born from a human typing a prompt.
+
+## How each one implements it
+
+| | Pi | Opencode | Claude Agent SDK |
+|---|---|---|---|
+| The loop lives in | `agent-loop.ts`, one ~800-line stateless function | `SessionPrompt.runLoop`, a `while(true)` in a client/server system | `query()`, closed-source binary behind an SDK |
+| Loop runner called | `Agent` (wraps the stateless loop) | `SessionPrompt` + a per-session `Runner` | the `query` itself |
+| Conversation called | Session | Session | Session |
+| Stored as | JSONL file, entries form a **tree** (branching in place) | SQLite rows (session / message / part), every stream delta persisted | JSONL transcript per session |
+| Resume after restart | `-c`, `--session <id>`, `--fork` | `--continue`, `--session`, `--fork` | `continue`, `resume: id`, `forkSession` |
+| Waiting for the User | loop not running; file is the state | loop not running; runner discarded, status `idle`, DB rows are the state | loop not running; transcript is the state |
+| UI coupling | none — UI subscribes to an event stream | none — server publishes SSE events, TUI is just a client | none — caller consumes a message stream |
+| Sub-agents | rejected (spawn `pi` via bash instead) | child Session with `parentID`, run by the same loop | isolated context, background by default |
+| Tool gating | rejected ("game over anyway" — containerise instead) | per-agent allow/ask/deny rules per Operation | permission modes + allow/deny rules + callbacks |
+| Long-context strategy | compaction entries with a retained-tail checkpoint | auto-compaction as a loop step, plus pruning old tool outputs | auto-compaction with a `compact_boundary` marker |
+
+Three convergences stand out because they were reached independently:
+
+1. **The loop is stateless; the store is the truth.** Pi's loop is a pure function over a context snapshot; Opencode writes every delta to SQLite before the UI sees it; the SDK rebuilds everything from the transcript. Restarting is a non-event in all three — exactly ADR-0004, achieved everywhere with a dumb store and a re-entrant loop, never with a workflow engine.
+2. **"Waiting for the User" is the absence of a running loop.** In all three, when the turn ends the process holds nothing; a later user message *re-enters* the loop over the stored transcript. Birth and continuation go through the same door (Opencode's `prompt()` both creates and continues; the SDK's `query()` likewise) — which independently confirms ADR-0005's claim that continuation needs no second mechanism, only a stored Conversation to append to.
+3. **The durable transcript and the ephemeral event stream are separate.** All three publish fine-grained events (message deltas, tool progress) for UIs to render, but no UI ever reads loop memory — truth is the store, events are a projection. Our UserInterface should attach the same way.
+
+And one warning worth recording: the *only* mid-loop wait for a human that exists in any of the three — Opencode's permission ask — is implemented as an in-memory promise and **does not survive a restart** (pending asks are auto-rejected on shutdown). That is the exact trap ADR-0004 exists to forbid.
+
+## Terms worth importing
+
+- **Turn** — one LLM response plus the execution of its tool calls. The natural unit of persistence, cost accounting and event granularity.
+- **Steering / follow-up** (Pi) — a user message injected into a *running* loop before the next turn, versus one delivered only after the loop would have stopped. We get follow-up for free (it is continuation); steering is a refinement we can defer.
+- **Part** (Opencode) — a typed fragment of a message: text, reasoning, tool call, tool result, file. The right granularity for the Conversation Model, finer than "message".
+- **Finish reason** — why the LLM stopped: done, wants tools, length, error, aborted. The loop's control variable; it belongs in the Conversation, not in code.
+- **Fork** (all three) — branching a Conversation from a point in its history. Cheap in every implementation because the transcript is append-only; worth keeping possible in the Conversation Model even if unused at first.
+- **Compaction** (all three) — replacing older history with a summary entry when context grows too large, recorded *in* the transcript as its own entry. A months-long permit Conversation will need this; that all three record it as a first-class transcript entry tells us how.
+
+## What this settles for Q1–Q5
+
+**Q1 — settled in favour of decomposition, and `Runtime` survives as the umbrella.** Every implementation separates a *stateless loop driver* from a *conversation store*, and none of them has our third piece — a *trigger watcher* — because all three are born from a human typing. So: the **ThingStore is the conversation store** (already decided), the **loop driver** is a re-entrant function that takes one Conversation one turn forward, and the **trigger watcher** is the genuinely novel component we must design ourselves. `Runtime` names the assembly of trigger watcher and loop driver.
+
+**Q2 — one conceptual state, two implementation regimes.** The survey sharpens the proposal rather than changing it. Waiting on the LLM or on a fast tool happens *inside* a live turn and may live in process memory — it is seconds long, retryable (Opencode wraps it in retry policies) and abortable. Waiting on the User or on another Assistant happens *between* turns, with no process holding anything. `waitingFor: llm | user | tool | assistant` stands as the queryable state, but the rule the survey adds is: **any wait that can outlive a turn must be written to the Conversation before the loop stops.** Opencode's non-durable permission ask shows what happens otherwise. And because our Tools include Manual Connectors, *any* tool wait can outlive a turn — see below.
+
+**Q3 — confirmed by absence.** None of the three has schedules or timeouts; the SDK docs explicitly punt to "the application layer". There is nothing to copy, and nothing contradicting the schedule/timeout split. The trigger watcher grows a clock: it scans for due schedules (birth) and expired `wakeAt` fields on waiting Conversations (continuation).
+
+**Q4 — indirectly supported.** Opencode's background sub-agents finish by injecting their result as a *synthetic user message* into the parent's stored session — a response continuing a Conversation, exactly ADR-0007's shape. Nobody models anything like a Process, which supports keeping it passive: it is not a loop concern at all, just a Thing whose change is a Trigger.
+
+**Q5 — recommendation: no Temporal.** The strongest finding of the survey. Three mature systems achieve durable, restartable, days-long-suspendable conversations with an append-only transcript in a dumb store plus a stateless re-entrant loop. Temporal would buy timers and retries; retries are a few lines around the LLM call (Opencode's are), and timers are a `wakeAt` field plus a periodic scan — which we need the trigger watcher for anyway. Against that stands a cluster to operate and the ADR-0006 violation of a second event history next to the ThingStore. Drop it.
+
+## The concept we should implement
+
+The loop driver is one function, `advance(conversation)`, with no state of its own:
+
+1. Load the Conversation from the ThingStore and build the LLM context from its entries (respecting compaction checkpoints).
+2. Run one turn: call the LLM, append its response. Finish reason not `tool-calls` → set `waitingFor: user` (or return the result to the calling Assistant, per ADR-0007) and stop.
+3. Execute each tool call. A Tool answers in one of two ways:
+   - **immediately** — append the result and continue with the next turn;
+   - **pending** — the Operation cannot complete now (Manual Connector, `askUser`, a called Assistant). Append the pending call, set `waitingFor: tool | user | assistant` and optionally `wakeAt`, write the Conversation, stop. The process now holds nothing.
+4. A response arriving for a waiting Conversation (Connector delivers, User answers, callee returns, `wakeAt` expires) is appended as an entry and `advance` is called again. Continuation *is* re-entry; there is no second mechanism.
+
+The structural difference between our loop and all three surveyed systems sits in step 3. Coding agents assume every tool returns in seconds, so their loops block on tools inside the turn; our Tools are human-paced by design, so **every tool call is potentially suspending**, and the pending path is the normal path, not the exception. That single generalisation — a tool result may arrive in the same turn or in a later life of the Conversation — is what turns a coding-agent loop into our agentic loop. Everything else — statelessness, store-as-truth, turn granularity, events as projection, compaction in the transcript — we take from the survey as confirmed practice.
