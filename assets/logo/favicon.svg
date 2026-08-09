@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="9 8 47 47" width="47" height="47" role="img" aria-label="Assistents">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="9 8 47 47" width="47" height="47" role="img" aria-label="Assistants">
   <style>
     .ink { fill: #171A18 }
     @media (prefers-color-scheme: dark) { .ink { fill: #E6E8E1 } }

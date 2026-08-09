@@ -1,6 +1,6 @@
 # Accounting / BookKeeping
 
-The **BookKeeping** external system (see [README](README.md)) is the system our **Accountant** assistent talks to. This document describes what a simple bookkeeping system needs to provide — the core concepts and the operations — and gives a market overview of existing (open source, ideally CLI) systems we could use instead of building our own.
+The **BookKeeping** external system (see [README](README.md)) is the system our **Accountant** assistant talks to. This document describes what a simple bookkeeping system needs to provide — the core concepts and the operations — and gives a market overview of existing (open source, ideally CLI) systems we could use instead of building our own.
 
 [TOC]
 
@@ -82,7 +82,7 @@ Everything above becomes useful through a handful of queries:
 
 ## Operations the BookKeeping system must provide
 
-These are the ops the **Accountant** assistent needs, in the style of the README's external-system ops:
+These are the ops the **Accountant** assistant needs, in the style of the README's external-system ops:
 
 | Operation | Description |
 |---|---|
@@ -101,7 +101,7 @@ Nice to have, not required: multi-currency, invoice document generation (that's 
 
 ### What the Accountant does vs. what BookKeeping does
 
-The intelligence lives in the assistent, not in the bookkeeping system:
+The intelligence lives in the assistant, not in the bookkeeping system:
 
 * **Accountant** decides *which* accounts a doctor's invoice hits, matches statement lines to open invoices, chases unpaid claims.
 * **BookKeeping** only guarantees consistency (balanced transactions, correct balances) and answers queries fast.
@@ -136,7 +136,7 @@ Notes:
 
 ### CLI / plain-text accounting
 
-The [plain text accounting](https://plaintextaccounting.org) family: the "database" is a human-readable journal file, the tool is a single binary that validates it and computes reports. That maps beautifully onto our architecture — the journal itself can live in the ThingStore (or a git repo), and the Accountant assistent just appends transactions and runs queries.
+The [plain text accounting](https://plaintextaccounting.org) family: the "database" is a human-readable journal file, the tool is a single binary that validates it and computes reports. That maps beautifully onto our architecture — the journal itself can live in the ThingStore (or a git repo), and the Accountant assistant just appends transactions and runs queries.
 
 | Tool | GitHub | ~Stars | Language | License | Active | Machine-readable output |
 |---|---|---|---|---|---|---|
@@ -159,7 +159,7 @@ All of these are proper double-entry. Notes on the interesting ones:
 
 ### Recommendation
 
-Requirement: besides the API for the Accountant assistent, the system must have a **UI so the user can see (and work with) the books**. With that, the favorite is **Firefly III**:
+Requirement: besides the API for the Accountant assistant, the system must have a **UI so the user can see (and work with) the books**. With that, the favorite is **Firefly III**:
 
 1. **Proper double-entry underneath** — the invoice life cycle from the concepts section (payables, receivables, open items) works as described; unlike Actual Budget (envelope budgeting) or Akaunting (double-entry paywalled).
 2. **Complete, documented REST API** — published OpenAPI spec, personal access tokens; covers accounts, transactions, budgets, bills, rules. Every op in the table above maps onto it. Transactions support attachments, so they can carry the invoice PDF or a link back to the ThingStore thing.

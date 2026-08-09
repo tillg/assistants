@@ -1,6 +1,6 @@
 # Logo assets
 
-The mark is **three stacked cards with one marked in accent** — the set of assistents, with the one
+The mark is **three stacked cards with one marked in accent** — the set of assistants, with the one
 currently running picked out. Chosen from the exploration in
 [`docs/logo/explorations/`](../../docs/logo/explorations) (variant `4a`).
 
@@ -26,7 +26,7 @@ currently running picked out. Chosen from the exploration in
 | Accent (the dot) | `#6D5DE3` | `#6D5DE3` |
 | Paper (icon ground) | `#E8E9E3` | `#121513` |
 
-The accent is the only colour that carries meaning: it marks the active assistent. Don't recolour the
+The accent is the only colour that carries meaning: it marks the active assistant. Don't recolour the
 cards with it.
 
 The accent does **not** flip between themes, and that's deliberate. The dot sits on the front card,
