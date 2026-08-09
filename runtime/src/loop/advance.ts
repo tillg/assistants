@@ -46,7 +46,8 @@ export interface AdvanceDeps {
     /** Raise an Open Question — used by the terminal failure tier. */
     raiseQuestion(input: {
         conversation: Stored<Conversation>;
-        assistant: Stored<Assistant>;
+        /** The key, not the loaded Assistant: the unknown-assistant path has no Assistant to load. */
+        assistantKey: string;
         kind: "free-text" | "confirm" | "choice" | "perform";
         prompt: string;
         idempotencyKey: string;
@@ -167,11 +168,19 @@ export class LoopDriver {
 
         const assistant = await this.loadAssistant(conversation.assistantKey ?? "");
         if (!assistant) {
-            conversation.status = "failed";
-            conversation.finishReason = "error";
-            conversation.lastError = `No Assistant with key "${conversation.assistantKey}".`;
-            await this.write(stored);
-            return { status: "failed", turnsRun: 0, note: "unknown assistant" };
+            // Nothing ends silently, and this is the one path with no Assistant to escalate
+            // *through* — so it escalates by key. Without this the Conversation would sit in
+            // `failed` and never appear in the Open Questions view, which is exactly the
+            // disappearance ADR-0015 forbids.
+            await this.escalateByKey(
+                stored,
+                conversation.assistantKey ?? "(none)",
+                "error",
+                `This conversation names the Assistant "${conversation.assistantKey}", and no ` +
+                    `Assistant with that key exists. It was probably renamed or deleted. ` +
+                    `Restore it, or abandon this conversation.`,
+            );
+            return { status: conversation.status ?? "waiting", turnsRun: 0, note: "unknown assistant" };
         }
         if (assistant.data.enabled === false) {
             // enabled=false stops continuations as well as births.
@@ -352,11 +361,23 @@ export class LoopDriver {
     /**
      * The terminal tier. Nothing may end silently: a stuck Conversation becomes an Open Question,
      * so it surfaces in the same view as everything else and the User can answer, abandon or fix.
-     * `failed` therefore comes to mean only "the User abandoned it".
+     *
+     * `failed` therefore means one of two things, and only these: the User abandoned it, or it
+     * escalated more than `maxEscalations` times — at which point asking again is itself the
+     * noise, and the Conversation stops with `lastError` explaining why.
      */
     private async escalate(
         stored: Stored<Conversation>,
         assistant: Stored<Assistant>,
+        reason: FinishReason,
+        message: string,
+    ): Promise<void> {
+        await this.escalateByKey(stored, assistant.data.key ?? "", reason, message);
+    }
+
+    private async escalateByKey(
+        stored: Stored<Conversation>,
+        assistantKey: string,
         reason: FinishReason,
         message: string,
     ): Promise<void> {
@@ -383,7 +404,7 @@ export class LoopDriver {
         const idempotencyKey = `${stored.thingId}:escalation:${escalations}`;
         const questionId = await this.deps.raiseQuestion({
             conversation: stored,
-            assistant,
+            assistantKey,
             kind: "perform",
             prompt: [
                 `**This conversation is stuck and needs you.**`,

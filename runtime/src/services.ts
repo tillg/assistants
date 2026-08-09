@@ -71,7 +71,7 @@ export function buildRuntime(config: Config): Runtime {
     /** Create an Open Question. The Runtime writes it once here and never touches it again. */
     async function createQuestion(input: {
         conversation: Stored<Conversation>;
-        assistant: Stored<Assistant>;
+        assistantKey: string;
         kind: "free-text" | "confirm" | "choice" | "perform";
         prompt: string;
         options?: Array<{ value: string; label: string }>;
@@ -80,7 +80,7 @@ export function buildRuntime(config: Config): Runtime {
     }): Promise<string> {
         const created = await things.create<Record<string, unknown>>(SPECS.OpenQuestion_DM, {
             conversationId: input.conversation.thingId,
-            assistantKey: input.assistant.data.key ?? "",
+            assistantKey: input.assistantKey,
             seq: (input.conversation.data.entries ?? []).length,
             kind: input.kind,
             prompt: input.prompt,
@@ -152,7 +152,7 @@ export function buildRuntime(config: Config): Runtime {
         raiseQuestion: (input) =>
             createQuestion({
                 conversation: input.conversation,
-                assistant: input.assistant,
+                assistantKey: input.assistantKey,
                 kind: input.kind,
                 prompt: input.prompt,
                 idempotencyKey: input.idempotencyKey,
@@ -168,7 +168,7 @@ export function buildRuntime(config: Config): Runtime {
             raiseQuestion: (input) =>
                 createQuestion({
                     conversation: input.context.conversation,
-                    assistant: input.context.assistant,
+                    assistantKey: input.context.assistant.data.key ?? "",
                     kind: input.kind,
                     prompt: input.prompt,
                     options: input.options,

@@ -59,12 +59,35 @@ export class FormPage extends BasePage {
         await expect(this.form).toBeHidden();
     }
 
+    /**
+     * The input behind a control, by its label.
+     *
+     * Autocompletes need the detour: the form engine overwrites their `aria-label` with whatever
+     * is currently typed in them, so their accessible name stops being the field's label as soon
+     * as they hold a value — and both `getByRole(name)` and `getByLabel` stop finding them. The
+     * `<label for>` never moves, so it is the one stable way in.
+     */
+    protected async inputFor(label: string, type: DataType, locator: Locator = this.form): Promise<Locator> {
+        if (type !== DataType.Autocomplete) {
+            return getByLabelWithOptionalAsterisk(locator, label, type);
+        }
+        const id = await locator
+            .locator("label")
+            .filter({ hasText: new RegExp(`^${label}\\s*\\*?$`) })
+            .first()
+            .getAttribute("for");
+        if (!id) {
+            throw new Error(`No label '${label}' bound to an input in this form`);
+        }
+        return this.page.locator(`[id="${id}"]`);
+    }
+
     async assertFieldValue(testData: TestData, locator: Locator = this.form) {
         if (testData.type === DataType.File) {
             throw new Error(`Data type File not implemented`);
         }
         const { label, value, type } = testData;
-        const input = getByLabelWithOptionalAsterisk(locator, label, type);
+        const input = await this.inputFor(label, type, locator);
         switch (type) {
             case DataType.Select:
             case DataType.Autocomplete:
@@ -95,7 +118,7 @@ export class FormPage extends BasePage {
             return;
         }
         const { label, value, type } = testData;
-        const input = getByLabelWithOptionalAsterisk(locator, label, type);
+        const input = await this.inputFor(label, type, locator);
         let isChecked: boolean;
 
         switch (type) {
@@ -174,8 +197,11 @@ export class FormPage extends BasePage {
     }
 
     /**
-     * Instance forms open read-only. `Edit` is `HIDDEN_IN_EDIT_MODE` and `Save` is
-     * `HIDDEN_IN_READONLY_MODE`, so which of the two is on screen *is* the form's mode.
+     * Put the form in edit mode.
+     *
+     * `Edit` is `HIDDEN_IN_EDIT_MODE` and `Save` is `HIDDEN_IN_READONLY_MODE`, so which of the two
+     * is on screen *is* the form's mode. Instance forms in this application already open in edit
+     * mode, so the button is usually absent — the assertion on `Save` is what matters.
      */
     async startEditing() {
         const edit = this.form.getByRole("button", { name: "Edit" });
@@ -186,11 +212,21 @@ export class FormPage extends BasePage {
         await this.finishedLoading();
     }
 
-    /** Save an instance form and wait for it to fall back to read-only, which only a good save does. */
+    /**
+     * Save an instance form.
+     *
+     * The form stays in edit mode afterwards, so there is no visual signal to wait for; the honest
+     * one is the write itself reaching the store.
+     */
     async saveEdits() {
+        const written = waitForApiReponse({
+            page: this.page,
+            apiPath: API_PATH.RPC,
+            expectedStatusCode: 200
+        });
         await this.form.getByRole("button", { name: "Save", disabled: false }).click();
+        await written;
         await this.finishedLoading();
-        await expect(this.form.getByRole("button", { name: "Edit" })).toBeVisible();
     }
 
     /**
@@ -219,14 +255,16 @@ export class FormPage extends BasePage {
 
     async createDocument(data: TestData[]) {
         await this.inputFieldValues(data);
-        await this.saveForm();
+        // The form stays open on the freshly created document, so wait for the write, not for it
+        // to disappear.
+        await this.saveEdits();
     }
 
     async clearFieldValue(field: TestData) {
         if (field.type === DataType.File) {
             throw new Error(`Data type File not implemented`);
         }
-        await getByLabelWithOptionalAsterisk(this.form, field.label, field.type).clear();
+        await (await this.inputFor(field.label, field.type)).clear();
     }
 
     async updateDocument(fieldValues: TestData[]) {

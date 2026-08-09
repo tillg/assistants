@@ -90,7 +90,7 @@ export function buildHarness(steps: ScriptedStep[]): Harness {
 
     async function createQuestion(input: {
         conversation: Stored<Conversation>;
-        assistant: Stored<Assistant>;
+        assistantKey: string;
         kind: "free-text" | "confirm" | "choice" | "perform";
         prompt: string;
         options?: Array<{ value: string; label: string }>;
@@ -99,7 +99,7 @@ export function buildHarness(steps: ScriptedStep[]): Harness {
     }): Promise<string> {
         const created = await things.create<Record<string, unknown>>(SPECS.OpenQuestion_DM, {
             conversationId: input.conversation.thingId,
-            assistantKey: input.assistant.data.key ?? "",
+            assistantKey: input.assistantKey,
             kind: input.kind,
             prompt: input.prompt,
             options: input.options ?? [],
@@ -155,7 +155,7 @@ export function buildHarness(steps: ScriptedStep[]): Harness {
             raiseQuestion: (input) =>
                 createQuestion({
                     conversation: input.context.conversation,
-                    assistant: input.context.assistant,
+                    assistantKey: input.context.assistant.data.key ?? "",
                     kind: input.kind,
                     prompt: input.prompt,
                     options: input.options,

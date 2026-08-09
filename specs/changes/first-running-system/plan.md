@@ -34,7 +34,7 @@ filters are Strings not Enums, own `createdAt`/`updatedAt`/`idempotencyKey`.
 ## Phase 3 — The markdown editor ✅
 
 - [x] Copy the editor tree from `w12-on-a12` @ `6b8df45`, dropping the collaborative subsystem
-- [x] Also drop the CDD-coupled inline-attachment path (`AttachmentImage`, `ImageDialogPlugin`, `collectImageAttachments`, `attachmentSource`, the `attachments-root` annotation) — our forms bind straight to their DM and have no CDD
+- [x] Also drop the CDD-coupled inline-attachment path (`AttachmentImage`, `collectImageAttachments`, `attachmentSource`, the `attachments-root` annotation; `ImageDialogPlugin` survives, rewritten to external URLs only) — our forms bind straight to their DM and have no CDD
 - [x] Port `ModelElementBridge`, `widgetAnnotation`, `TextAreaStateless`, the colour-picker helper
 - [x] Port the `markdownEditor` localisation keys (en, de)
 - [x] Wire `formModelMap.Control` and `widgetMap.TextAreaStateless`; mount the global styles
@@ -94,8 +94,8 @@ filters are Strings not Enums, own `createdAt`/`updatedAt`/`idempotencyKey`.
 ## Phase 8 — Documentation and wrap-up
 
 - [x] README: what the system is, architecture diagram, prerequisites, quick start, **every `just` recipe documented**
-- [ ] Update `CONTEXT.md` with the terms domain.md added
-- [ ] New ADRs: the Runtime as a polling client; Party replacing Person; the local-auth template and public registries; the intent log and the idempotency contract
-- [ ] Record what the build settled in `MARKDOWN_FIELDS.md` and `AGENTIC_LOOP.md`
+- [x] Update `CONTEXT.md` with the terms domain.md added
+- [x] New ADRs: the Runtime as a polling client; Party replacing Person; the local-auth template and public registries; the intent log and the idempotency contract
+- [x] Record what the build settled in `MARKDOWN_FIELDS.md` and `AGENTIC_LOOP.md`
 - [ ] Adversarial code review, then fix what it finds
 - [ ] Present `DECISIONS.md`

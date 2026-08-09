@@ -30,7 +30,7 @@ Spelling throughout the project is British English.
 
 **Companion documents**: [CONTEXT.md](CONTEXT.md) (the glossary) ·
 [DECISIONS.md](DECISIONS.md) (decisions taken while building, with their alternatives and
-reversal costs) · [docs/adr/](docs/adr/) (ten architecture decisions) ·
+reversal costs) · [docs/adr/](docs/adr/) (fifteen architecture decisions) ·
 [ACCOUNTING.md](ACCOUNTING.md) (what Bookkeeping must provide, and why Firefly III) ·
 [AGENTIC_LOOP.md](AGENTIC_LOOP.md) (the loop's open questions, and a survey of how three existing
 agent systems answer them) · [MARKDOWN_FIELDS.md](MARKDOWN_FIELDS.md) (what is still undecided

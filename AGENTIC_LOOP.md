@@ -136,3 +136,44 @@ The loop driver is one function, `advance(conversation)`, with no state of its o
 4. A response arriving for a waiting Conversation (Connector delivers, User answers, callee returns, `wakeAt` expires) is appended as an entry and `advance` is called again. Continuation *is* re-entry; there is no second mechanism.
 
 The structural difference between our loop and all three surveyed systems sits in step 3. Coding agents assume every tool returns in seconds, so their loops block on tools inside the turn; our Tools are human-paced by design, so **every tool call is potentially suspending**, and the pending path is the normal path, not the exception. That single generalisation — a tool result may arrive in the same turn or in a later life of the Conversation — is what turns a coding-agent loop into our agentic loop. Everything else — statelessness, store-as-truth, turn granularity, events as projection, compaction in the transcript — we take from the survey as confirmed practice.
+
+---
+
+# What building it settled (2026-08-09)
+
+The loop above was built as written. Four places where reality differed from the survey's
+conclusions are worth recording.
+
+**`waitingFor: llm` never appears in the store.** Q2 proposed four values; only three are ever
+written. Waiting on the LLM happens *inside* a live Turn, and if the process dies there the
+Conversation is simply un-advanced — the next scan finds it and re-runs the Turn, and nothing was
+lost that needed a stored state to describe it. The rule the survey derived turns out to be the
+whole rule: **only a wait that outlives a Turn is written down.** The stored values are `user`,
+`tool` and `assistant`.
+
+**The trigger watcher was indeed the novel component, and the clock was the easy part of it.** Q1
+predicted that the piece none of the three surveyed systems has is the piece we would have to design
+ourselves, and that was right. What the prediction got wrong is where the difficulty sat. Scanning
+for due wake-ups is a range query on an indexed field, and it was written in an afternoon. The hard
+part was making **birth exactly once**: a Trigger that fires twice on the same Thing produces a
+second Conversation doing the same work, with the same money, in parallel with the first. The answer
+is not a timing heuristic and not a watermark — both are *probably* once — but a query, *no
+Conversation exists for `(assistantKey, subjectThingId)`*, which stays true across a restart, a
+re-scan and a replayed watermark.
+
+**The loop needs a step limit after all.** The survey found no step limit anywhere and concluded we
+would not need one. That conclusion holds for what was surveyed and not for what we built: all three
+are driven by a human who types a prompt, reads every turn and is present at the moment the work
+happens. Ours scans every two seconds, gives birth on its own, and can go a whole day with nobody
+looking. So bounds had to exist: `maxTurns` (twenty, reached as a finish reason and an Open Question
+rather than a silent stop), a cap on births per hour, an allow-list of the Models a Trigger may fire
+on — which is what structurally stops the Runtime triggering on its own Conversations and Assistants,
+both of which are Things ([ADR-0003](docs/adr/0003-assistants-are-things.md)) — and a global pause
+flag as a kill switch. None of these is a refinement. Without them the first bug is a bill.
+
+**The pending tool call held up exactly as predicted.** Any Tool may answer `pending` instead of
+returning a value; the Conversation records the call, what it is now waiting for and optionally when
+to give up, and the process holds nothing. Six of the sixteen Operations use it today — asking the
+User, calling another Assistant, and the four Manual Connectors — and an Assistant cannot tell which
+of its Tools are which, which is the point. That remains the whole structural difference between
+this loop and the three that were surveyed.

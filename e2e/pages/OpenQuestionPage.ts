@@ -85,7 +85,10 @@ export class OpenQuestionPage extends FormPage {
         }
 
         await this.toBeVisible();
-        await expect(this.form).toContainText(question.assistantKey);
+        // The right row, not merely a row: the form's Conversation is the one that is waiting.
+        await expect(getByLabelWithOptionalAsterisk(this.form, "Conversation", DataType.String)).toHaveValue(
+            question.conversationThingId
+        );
     }
 
     /** Answer it: confirm or refuse, say something, and stamp it as answered. */

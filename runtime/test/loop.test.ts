@@ -267,6 +267,30 @@ describe("guards", () => {
         expect(questions[0]!.data.prompt).toMatch(/stuck/i);
     });
 
+
+    it("escalates rather than dying when the Assistant it names no longer exists", async () => {
+        const harness = buildHarness([]);
+        const assistant = await harness.seedAssistant({ key: "receptionist" });
+        const docRef = await harness.birth({ assistant });
+
+        // The Assistant is renamed out from under a live Conversation.
+        await harness.things.update(SPECS.Assistant_DM, assistant.docRef, {
+            ...assistant.data,
+            key: "renamed",
+        });
+
+        await harness.driver.advance(docRef);
+
+        const conversation = await harness.conversation(docRef);
+        // It must NOT end silently in `failed` — it has to reach the User.
+        expect(conversation.data.status).toBe("waiting");
+        expect(conversation.data.waitingFor).toBe("user");
+
+        const questions = await harness.questions();
+        expect(questions).toHaveLength(1);
+        expect(questions[0]!.data.prompt).toMatch(/no Assistant with that key exists/i);
+    });
+
     it("stops continuing a disabled Assistant", async () => {
         const harness = buildHarness([{ text: "should not run", finishReason: "answered" }]);
         const assistant = await harness.seedAssistant({ enabled: false });

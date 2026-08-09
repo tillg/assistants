@@ -27,7 +27,7 @@ _Avoid_: bookkeeper, finance agent
 ### Data
 
 **Thing**:
-Anything in the system that has a Model and a ThingID — an invoice, a person, a payment, a process, a Conversation, an Assistant. Things are the only currency inside the system.
+Anything in the system that has a Model and a ThingID — an invoice, a Party, a payment, a process, a Conversation, an Assistant. Things are the only currency inside the system.
 _Avoid_: object, document, entity, record
 
 **Model**:
@@ -47,8 +47,16 @@ A ThingID together with the Thing's Model, used when passing a Thing between Ass
 _Avoid_: typed ID, handle
 
 **Authority**:
-The one system that owns the truth for a given fact. Each Model declares its Authority, and no fact has two. The Bank owns payments and balances, the address book owns people, Bookkeeping owns the books, the ThingStore owns documents, Processes, Conversations and Assistants.
+The one system that owns the truth for a given fact. Each Model declares its Authority, and no fact has two. The Bank owns payments and balances, the address book owns Parties, Bookkeeping owns the books, the ThingStore owns documents, Processes, Conversations and Assistants.
 _Avoid_: source of truth, master, owner
+
+**Document**:
+A Thing that has arrived but has not yet been understood — the item itself together with whatever text was extracted from it. Everything incoming becomes a Document first; classifying it creates the Invoice and links the two, and never changes the Document's ThingID.
+_Avoid_: inbox item, upload, raw thing, attachment
+
+**Party**:
+Anyone the household deals with, person or organisation. A Party says which of the two it is, and what role it plays for us — doctor, insurer, craftsman, authority. A practice, an insurer and a building firm are not people, and nothing in the system branches on the difference, so there is one term rather than two.
+_Avoid_: Person, contact, counterparty, entity
 
 ### Running work
 
@@ -56,17 +64,55 @@ _Avoid_: source of truth, master, owner
 One run of one Assistant — its prompts, exchanges and tool calls — and a Thing in its own right. A Conversation spends most of its life waiting for another actor to respond: the LLM, the User, or a called tool.
 _Avoid_: session, thread, history, run
 
+**Turn**:
+One LLM response together with the execution of the tool calls it asked for. It is the unit in which a Conversation moves forward, and the unit in which cost is counted.
+_Avoid_: step, iteration, cycle
+
+**Entry**:
+One appended item in a Conversation's history — a prompt, an LLM response, a tool call, a tool result, an error. A Conversation is an append-only list of Entries.
+_Avoid_: message, event, record
+
+**Finish Reason**:
+Why the LLM stopped at the end of a Turn: it answered, it wants tools, it ran out of length, it errored, or the Conversation reached its limit of Turns. It is what decides whether the Conversation continues, suspends or ends.
+_Avoid_: stop reason, status
+
 **Trigger**:
 An event that gives birth to a new Conversation — the User asking something, a Thing materialising in the system, or an Assistant calling another Assistant. A response that continues an existing Conversation is not a Trigger.
 _Avoid_: event, hook, webhook
 
+**Schedule**:
+A Trigger configured on an Assistant that fires by the clock and gives birth to a Conversation where none exists. Distinct from a **wakeAt**, which is state on a Conversation that already exists: one is configuration on a template, the other is state on an instance.
+_Avoid_: timer, cron job, timeout
+
+**Pending Tool Call**:
+A tool call that cannot complete inside the Turn that made it, because the Operation is human-paced — a Manual Connector, a question to the User, a call to another Assistant. The Conversation records the call and what it is now waiting for, and stops; the result arrives in a later life of the Conversation.
+_Avoid_: async call, deferred call, promise
+
+**wakeAt**:
+An instant recorded on a waiting Conversation, after which it is continued even though no answer arrived. It is what stops a Conversation waiting forever on an Assistant that died.
+_Avoid_: deadline, TTL, retry-at
+
 **Open Question**:
-Anything an Assistant has put to the User and is waiting on — a question or a request for confirmation, asked as free text or through a form. It is held as the current state of that Assistant's Conversation until the User answers, and is re-displayed after a restart; nothing is lost.
+A question an Assistant has put to the User and is waiting on, and a Thing in its own right: the Runtime creates one at the moment its Assistant suspends, and the User completes it by answering. It carries a kind — free text, a confirmation, a choice from a declared list, or a request to *perform* something by hand and report back — which is what says how the User is to be asked. Because it is stored rather than held, a restart loses nothing.
 _Avoid_: prompt, request, task, approval, suggestion
 
 **Skill**:
 Instructions for the LLM — judgement, procedure or knowledge, written as markdown — belonging to exactly one Assistant. Skills are never shared between Assistants; an Assistant that needs another's capability calls that Assistant.
 _Avoid_: tool, capability, instruction set
+
+### The Runtime
+
+**Runtime**:
+The component that watches for Triggers, gives birth to Conversations, drives the agentic loop, and continues a Conversation when the actor it was waiting for responds. It is deliberately not an External System: External Systems are what Assistants call, whereas the Runtime calls Assistants.
+_Avoid_: engine, orchestrator, scheduler, worker
+
+**Trigger Watcher**:
+The half of the Runtime that looks for work — Things that have materialised, Open Questions that have been answered, Conversations whose wakeAt has passed — and hands each to the Loop Driver.
+_Avoid_: poller, scheduler, dispatcher
+
+**Loop Driver**:
+The half of the Runtime that takes one Conversation one Turn forward and then returns. It holds no state of its own: everything it needs it reads from the Conversation, and everything it learns it writes back before returning.
+_Avoid_: executor, agent runner
 
 ### Systems
 

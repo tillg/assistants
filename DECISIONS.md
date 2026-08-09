@@ -213,8 +213,8 @@ one rejected on evidence, one accepted in part. The design changes worth knowing
   exists for `(assistantKey, subjectThingId)`. The Accountant has no `thing-materialised`
   trigger at all in this change — the Receptionist calls it, and that is the only route.
 - **Nothing may end silently.** Terminal failures raise an Open Question rather than setting
-  `failed`, so a stuck Conversation appears in the same view as everything else. `failed` now
-  means only "the User abandoned it".
+  `failed`, so a stuck Conversation appears in the same view as everything else. `failed` then
+  means the User abandoned it, or it escalated past the cap of three.
 - **The demo loader is a script, not a platform feature**, and it pauses the Runtime, writes
   history, advances the watermark past its own output and unpauses — otherwise loading demo data
   would immediately fire a dozen real LLM conversations.
