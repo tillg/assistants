@@ -50,6 +50,84 @@ export const en_US: LocalizationKeyTreeType = {
         de: "German (DE)"
     },
 
+    markdownEditor: {
+        mode: {
+            visual: "Visual",
+            markdown: "Markdown"
+        },
+        toc: {
+            ariaLabel: "Table of contents",
+            empty: "No headings in range",
+            settingsTitle: "Heading levels",
+            minLevel: "Min level",
+            maxLevel: "Max level"
+        },
+        block: {
+            paragraph: "Paragraph",
+            heading: "Heading $level$",
+            quote: "Quote",
+            code: "Code block",
+            typeMenu: "Block type",
+            bulletList: "Bullet list",
+            numberedList: "Numbered list",
+            checkList: "Check list"
+        },
+        format: {
+            bold: "Bold",
+            italic: "Italic",
+            strikethrough: "Strikethrough",
+            textColor: "Text color"
+        },
+        history: {
+            undo: "Undo",
+            redo: "Redo"
+        },
+        insert: {
+            menu: "Insert",
+            table: "Table",
+            image: "Image",
+            horizontalRule: "Horizontal rule",
+            tableOfContents: "Table of contents",
+            link: "Link"
+        },
+        panel: {
+            group: "Panel",
+            info: "Info",
+            warning: "Warning",
+            note: "Note",
+            tip: "Tip",
+            panel: "Panel"
+        },
+        table: {
+            insertRowAbove: "Insert row above",
+            insertRowBelow: "Insert row below",
+            insertColumnLeft: "Insert column left",
+            insertColumnRight: "Insert column right",
+            deleteRow: "Delete row",
+            deleteColumn: "Delete column",
+            deleteTable: "Delete table"
+        },
+        link: {
+            button: "Insert link",
+            text: "Link text",
+            url: "Link URL",
+            apply: "Apply",
+            cancel: "Cancel"
+        },
+        image: {
+            url: "Image URL",
+            alt: "Alt text",
+            insert: "Insert",
+            cancel: "Cancel"
+        },
+        color: {
+            hex: "Color (hex or name)",
+            apply: "Apply",
+            clear: "Clear color",
+            cancel: "Cancel"
+        }
+    },
+
     error: {
         security: {
             notAuthorized: {

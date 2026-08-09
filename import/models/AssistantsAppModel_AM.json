@@ -24,7 +24,7 @@
     "annotations": [
       {
         "name": "roles",
-        "value": "user"
+        "value": "user,runtime"
       }
     ],
     "modelReferences": []
@@ -32,36 +32,36 @@
   "content": {
     "modules": [
       {
-        "name": "PersonModule",
+        "name": "OpenQuestionModule",
         "menu": {
-          "name": "Person",
+          "name": "OpenQuestion",
           "label": [
             {
               "locale": "en",
-              "text": "Person"
+              "text": "Open Questions"
             },
             {
               "locale": "de",
-              "text": "Person"
+              "text": "Offene Fragen"
             }
           ],
           "initialActivity": {
             "descriptor": {
-              "module": "Person"
+              "module": "OpenQuestion"
             }
           }
         },
         "flows": [
           {
-            "name": "PersonFlow",
+            "name": "OpenQuestionFlow",
             "scenes": [
               {
-                "name": "PersonOverview",
-                "description": "Overview of Person Documents",
+                "name": "OpenQuestionOverview",
+                "description": "Overview of OpenQuestion Documents",
                 "matchConditions": [
                   {
                     "key": "module",
-                    "mustEqual": "Person"
+                    "mustEqual": "OpenQuestion"
                   },
                   {
                     "key": "instance",
@@ -82,7 +82,7 @@
                       "models": [
                         {
                           "modelType": "overview",
-                          "name": "Person_OM"
+                          "name": "OpenQuestion_OM"
                         }
                       ]
                     }
@@ -90,12 +90,12 @@
                 }
               },
               {
-                "name": "PersonForm",
-                "description": "Form showing on Person Document",
+                "name": "OpenQuestionForm",
+                "description": "Form showing on OpenQuestion Document",
                 "matchConditions": [
                   {
                     "key": "module",
-                    "mustEqual": "Person"
+                    "mustEqual": "OpenQuestion"
                   },
                   {
                     "key": "instance",
@@ -113,8 +113,666 @@
                       "models": [
                         {
                           "modelType": "form",
-                          "name": "Person_FM",
-                          "documentModel": "Person_DM"
+                          "name": "OpenQuestion_FM",
+                          "documentModel": "OpenQuestion_DM"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "DocumentModule",
+        "menu": {
+          "name": "Document",
+          "label": [
+            {
+              "locale": "en",
+              "text": "Documents"
+            },
+            {
+              "locale": "de",
+              "text": "Dokumente"
+            }
+          ],
+          "initialActivity": {
+            "descriptor": {
+              "module": "Document"
+            }
+          }
+        },
+        "flows": [
+          {
+            "name": "DocumentFlow",
+            "scenes": [
+              {
+                "name": "DocumentOverview",
+                "description": "Overview of Document Documents",
+                "matchConditions": [
+                  {
+                    "key": "module",
+                    "mustEqual": "Document"
+                  },
+                  {
+                    "key": "instance",
+                    "isSet": false
+                  }
+                ],
+                "sceneChange": {
+                  "onEnter": [
+                    {
+                      "layout": {
+                        "name": "MasterDetail"
+                      },
+                      "type": "REGION_CLEAR"
+                    },
+                    {
+                      "type": "VIEW_ADD",
+                      "name": "OverviewEngine",
+                      "models": [
+                        {
+                          "modelType": "overview",
+                          "name": "Document_OM"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "DocumentForm",
+                "description": "Form showing on Document Document",
+                "matchConditions": [
+                  {
+                    "key": "module",
+                    "mustEqual": "Document"
+                  },
+                  {
+                    "key": "instance",
+                    "isSet": true
+                  }
+                ],
+                "sceneChange": {
+                  "onEnter": [
+                    {
+                      "type": "VIEW_ADD",
+                      "name": "FormEngine",
+                      "constraints": {
+                        "type": "MasterDetail"
+                      },
+                      "models": [
+                        {
+                          "modelType": "form",
+                          "name": "Document_FM",
+                          "documentModel": "Document_DM"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "InvoiceModule",
+        "menu": {
+          "name": "Invoice",
+          "label": [
+            {
+              "locale": "en",
+              "text": "Invoices"
+            },
+            {
+              "locale": "de",
+              "text": "Rechnungen"
+            }
+          ],
+          "initialActivity": {
+            "descriptor": {
+              "module": "Invoice"
+            }
+          }
+        },
+        "flows": [
+          {
+            "name": "InvoiceFlow",
+            "scenes": [
+              {
+                "name": "InvoiceOverview",
+                "description": "Overview of Invoice Documents",
+                "matchConditions": [
+                  {
+                    "key": "module",
+                    "mustEqual": "Invoice"
+                  },
+                  {
+                    "key": "instance",
+                    "isSet": false
+                  }
+                ],
+                "sceneChange": {
+                  "onEnter": [
+                    {
+                      "layout": {
+                        "name": "MasterDetail"
+                      },
+                      "type": "REGION_CLEAR"
+                    },
+                    {
+                      "type": "VIEW_ADD",
+                      "name": "OverviewEngine",
+                      "models": [
+                        {
+                          "modelType": "overview",
+                          "name": "Invoice_OM"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "InvoiceForm",
+                "description": "Form showing on Invoice Document",
+                "matchConditions": [
+                  {
+                    "key": "module",
+                    "mustEqual": "Invoice"
+                  },
+                  {
+                    "key": "instance",
+                    "isSet": true
+                  }
+                ],
+                "sceneChange": {
+                  "onEnter": [
+                    {
+                      "type": "VIEW_ADD",
+                      "name": "FormEngine",
+                      "constraints": {
+                        "type": "MasterDetail"
+                      },
+                      "models": [
+                        {
+                          "modelType": "form",
+                          "name": "Invoice_FM",
+                          "documentModel": "Invoice_DM"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "ProcessModule",
+        "menu": {
+          "name": "Process",
+          "label": [
+            {
+              "locale": "en",
+              "text": "Processes"
+            },
+            {
+              "locale": "de",
+              "text": "Prozesse"
+            }
+          ],
+          "initialActivity": {
+            "descriptor": {
+              "module": "Process"
+            }
+          }
+        },
+        "flows": [
+          {
+            "name": "ProcessFlow",
+            "scenes": [
+              {
+                "name": "ProcessOverview",
+                "description": "Overview of Process Documents",
+                "matchConditions": [
+                  {
+                    "key": "module",
+                    "mustEqual": "Process"
+                  },
+                  {
+                    "key": "instance",
+                    "isSet": false
+                  }
+                ],
+                "sceneChange": {
+                  "onEnter": [
+                    {
+                      "layout": {
+                        "name": "MasterDetail"
+                      },
+                      "type": "REGION_CLEAR"
+                    },
+                    {
+                      "type": "VIEW_ADD",
+                      "name": "OverviewEngine",
+                      "models": [
+                        {
+                          "modelType": "overview",
+                          "name": "Process_OM"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "ProcessForm",
+                "description": "Form showing on Process Document",
+                "matchConditions": [
+                  {
+                    "key": "module",
+                    "mustEqual": "Process"
+                  },
+                  {
+                    "key": "instance",
+                    "isSet": true
+                  }
+                ],
+                "sceneChange": {
+                  "onEnter": [
+                    {
+                      "type": "VIEW_ADD",
+                      "name": "FormEngine",
+                      "constraints": {
+                        "type": "MasterDetail"
+                      },
+                      "models": [
+                        {
+                          "modelType": "form",
+                          "name": "Process_FM",
+                          "documentModel": "Process_DM"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "PartyModule",
+        "menu": {
+          "name": "Party",
+          "label": [
+            {
+              "locale": "en",
+              "text": "Parties"
+            },
+            {
+              "locale": "de",
+              "text": "Beteiligte"
+            }
+          ],
+          "initialActivity": {
+            "descriptor": {
+              "module": "Party"
+            }
+          }
+        },
+        "flows": [
+          {
+            "name": "PartyFlow",
+            "scenes": [
+              {
+                "name": "PartyOverview",
+                "description": "Overview of Party Documents",
+                "matchConditions": [
+                  {
+                    "key": "module",
+                    "mustEqual": "Party"
+                  },
+                  {
+                    "key": "instance",
+                    "isSet": false
+                  }
+                ],
+                "sceneChange": {
+                  "onEnter": [
+                    {
+                      "layout": {
+                        "name": "MasterDetail"
+                      },
+                      "type": "REGION_CLEAR"
+                    },
+                    {
+                      "type": "VIEW_ADD",
+                      "name": "OverviewEngine",
+                      "models": [
+                        {
+                          "modelType": "overview",
+                          "name": "Party_OM"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "PartyForm",
+                "description": "Form showing on Party Document",
+                "matchConditions": [
+                  {
+                    "key": "module",
+                    "mustEqual": "Party"
+                  },
+                  {
+                    "key": "instance",
+                    "isSet": true
+                  }
+                ],
+                "sceneChange": {
+                  "onEnter": [
+                    {
+                      "type": "VIEW_ADD",
+                      "name": "FormEngine",
+                      "constraints": {
+                        "type": "MasterDetail"
+                      },
+                      "models": [
+                        {
+                          "modelType": "form",
+                          "name": "Party_FM",
+                          "documentModel": "Party_DM"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "AssistantModule",
+        "menu": {
+          "name": "Assistant",
+          "label": [
+            {
+              "locale": "en",
+              "text": "Assistants"
+            },
+            {
+              "locale": "de",
+              "text": "Assistenten"
+            }
+          ],
+          "initialActivity": {
+            "descriptor": {
+              "module": "Assistant"
+            }
+          }
+        },
+        "flows": [
+          {
+            "name": "AssistantFlow",
+            "scenes": [
+              {
+                "name": "AssistantOverview",
+                "description": "Overview of Assistant Documents",
+                "matchConditions": [
+                  {
+                    "key": "module",
+                    "mustEqual": "Assistant"
+                  },
+                  {
+                    "key": "instance",
+                    "isSet": false
+                  }
+                ],
+                "sceneChange": {
+                  "onEnter": [
+                    {
+                      "layout": {
+                        "name": "MasterDetail"
+                      },
+                      "type": "REGION_CLEAR"
+                    },
+                    {
+                      "type": "VIEW_ADD",
+                      "name": "OverviewEngine",
+                      "models": [
+                        {
+                          "modelType": "overview",
+                          "name": "Assistant_OM"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "AssistantForm",
+                "description": "Form showing on Assistant Document",
+                "matchConditions": [
+                  {
+                    "key": "module",
+                    "mustEqual": "Assistant"
+                  },
+                  {
+                    "key": "instance",
+                    "isSet": true
+                  }
+                ],
+                "sceneChange": {
+                  "onEnter": [
+                    {
+                      "type": "VIEW_ADD",
+                      "name": "FormEngine",
+                      "constraints": {
+                        "type": "MasterDetail"
+                      },
+                      "models": [
+                        {
+                          "modelType": "form",
+                          "name": "Assistant_FM",
+                          "documentModel": "Assistant_DM"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "ConversationModule",
+        "menu": {
+          "name": "Conversation",
+          "label": [
+            {
+              "locale": "en",
+              "text": "Conversations"
+            },
+            {
+              "locale": "de",
+              "text": "Konversationen"
+            }
+          ],
+          "initialActivity": {
+            "descriptor": {
+              "module": "Conversation"
+            }
+          }
+        },
+        "flows": [
+          {
+            "name": "ConversationFlow",
+            "scenes": [
+              {
+                "name": "ConversationOverview",
+                "description": "Overview of Conversation Documents",
+                "matchConditions": [
+                  {
+                    "key": "module",
+                    "mustEqual": "Conversation"
+                  },
+                  {
+                    "key": "instance",
+                    "isSet": false
+                  }
+                ],
+                "sceneChange": {
+                  "onEnter": [
+                    {
+                      "layout": {
+                        "name": "MasterDetail"
+                      },
+                      "type": "REGION_CLEAR"
+                    },
+                    {
+                      "type": "VIEW_ADD",
+                      "name": "OverviewEngine",
+                      "models": [
+                        {
+                          "modelType": "overview",
+                          "name": "Conversation_OM"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "ConversationForm",
+                "description": "Form showing on Conversation Document",
+                "matchConditions": [
+                  {
+                    "key": "module",
+                    "mustEqual": "Conversation"
+                  },
+                  {
+                    "key": "instance",
+                    "isSet": true
+                  }
+                ],
+                "sceneChange": {
+                  "onEnter": [
+                    {
+                      "type": "VIEW_ADD",
+                      "name": "FormEngine",
+                      "constraints": {
+                        "type": "MasterDetail"
+                      },
+                      "models": [
+                        {
+                          "modelType": "form",
+                          "name": "Conversation_FM",
+                          "documentModel": "Conversation_DM"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "RuntimeStateModule",
+        "menu": {
+          "name": "RuntimeState",
+          "label": [
+            {
+              "locale": "en",
+              "text": "Runtime"
+            },
+            {
+              "locale": "de",
+              "text": "Runtime"
+            }
+          ],
+          "initialActivity": {
+            "descriptor": {
+              "module": "RuntimeState"
+            }
+          }
+        },
+        "flows": [
+          {
+            "name": "RuntimeStateFlow",
+            "scenes": [
+              {
+                "name": "RuntimeStateOverview",
+                "description": "Overview of RuntimeState Documents",
+                "matchConditions": [
+                  {
+                    "key": "module",
+                    "mustEqual": "RuntimeState"
+                  },
+                  {
+                    "key": "instance",
+                    "isSet": false
+                  }
+                ],
+                "sceneChange": {
+                  "onEnter": [
+                    {
+                      "layout": {
+                        "name": "MasterDetail"
+                      },
+                      "type": "REGION_CLEAR"
+                    },
+                    {
+                      "type": "VIEW_ADD",
+                      "name": "OverviewEngine",
+                      "models": [
+                        {
+                          "modelType": "overview",
+                          "name": "RuntimeState_OM"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "RuntimeStateForm",
+                "description": "Form showing on RuntimeState Document",
+                "matchConditions": [
+                  {
+                    "key": "module",
+                    "mustEqual": "RuntimeState"
+                  },
+                  {
+                    "key": "instance",
+                    "isSet": true
+                  }
+                ],
+                "sceneChange": {
+                  "onEnter": [
+                    {
+                      "type": "VIEW_ADD",
+                      "name": "FormEngine",
+                      "constraints": {
+                        "type": "MasterDetail"
+                      },
+                      "models": [
+                        {
+                          "modelType": "form",
+                          "name": "RuntimeState_FM",
+                          "documentModel": "RuntimeState_DM"
                         }
                       ]
                     }
@@ -157,7 +815,7 @@
     ],
     "initialActivity": {
       "descriptor": {
-        "module": "Person"
+        "module": "OpenQuestion"
       }
     }
   }

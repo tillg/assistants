@@ -60,6 +60,8 @@ export default [
             "**/webpack.*.js",
             "prettier.config.js",
             "eslint.config.mjs",
+            "vitest.config.ts",
+            "vitest.setup.ts",
             "**/*.generated.*"
         ]
     },
@@ -162,7 +164,13 @@ export default [
             "import/no-extraneous-dependencies": [
                 "error",
                 {
-                    devDependencies: false,
+                    devDependencies: [
+                        "**/*.test.ts",
+                        "**/*.test.tsx",
+                        "**/*.spec.ts",
+                        "**/*.spec.tsx",
+                        "**/markdownTestUtils.ts"
+                    ],
                     optionalDependencies: false,
                     peerDependencies: false,
                     bundledDependencies: false

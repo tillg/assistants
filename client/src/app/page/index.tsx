@@ -45,6 +45,8 @@ import {
     shouldForwardProp
 } from "@com.mgmtp.a12.widgets/widgets-core";
 
+import { MarkdownEditorGlobalStyles } from "../../components/markdown-editor/theme/editorTheme";
+
 import { ThemeContextProvider, THEMES, useThemeContext } from "../ThemeContext";
 
 /**
@@ -74,6 +76,7 @@ const ThemedPageWrapper = ({ children }: PropsWithChildren) => {
         <StyleSheetManager shouldForwardProp={shouldForwardProp}>
             <ThemeProvider theme={THEMES[theme] ?? THEMES.Base}>
                 <GlobalStyles />
+                <MarkdownEditorGlobalStyles />
                 <BasePage>{children}</BasePage>
             </ThemeProvider>
         </StyleSheetManager>

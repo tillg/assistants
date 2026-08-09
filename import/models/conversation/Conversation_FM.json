@@ -1,0 +1,452 @@
+{
+  "header": {
+    "id": "Conversation_FM",
+    "modelType": "form",
+    "modelVersion": "39.0.0",
+    "locales": [
+      {
+        "code": "en"
+      },
+      {
+        "code": "de"
+      }
+    ],
+    "labels": [
+      {
+        "locale": "en",
+        "text": "Conversation"
+      },
+      {
+        "locale": "de",
+        "text": "Konversation"
+      }
+    ],
+    "annotations": [
+      {
+        "name": "roles",
+        "value": "user,runtime"
+      }
+    ],
+    "modelReferences": [
+      {
+        "alias": "Conversation_DM",
+        "modelType": "document",
+        "purpose": "data binding",
+        "reference": "Conversation_DM"
+      }
+    ]
+  },
+  "content": {
+    "footerBox": {
+      "id": "footerBox1",
+      "minorButtons": {
+        "button": [
+          {
+            "type": "EVENT",
+            "id": "button-4c1a7",
+            "name": "cancel",
+            "buttonStyling": {
+              "label": {
+                "type": "Multilingual",
+                "multilingualText": {
+                  "text": [
+                    {
+                      "locale": "en",
+                      "text": "Back"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Zurück"
+                    }
+                  ]
+                }
+              },
+              "priority": "SECONDARY"
+            },
+            "event": "event_cancel",
+            "scope": "ALWAYS"
+          }
+        ]
+      }
+    },
+    "screens": [
+      {
+        "id": "screen1",
+        "name": "Screen1",
+        "screenElements": [
+          {
+            "type": "MultiColumnSection",
+            "id": "multicolumnsection-1a4f8",
+            "name": "ConversationHeader",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Conversation"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Konversation"
+                  }
+                ]
+              }
+            },
+            "layout": {
+              "lg": "12"
+            },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_header",
+                "name": "CGHeader",
+                "layout": {
+                  "lg": "4-4-4"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_1",
+                    "name": "r1",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_assistantKey",
+                        "elementRef": "f_assistantKey",
+                        "readonly": true
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_title",
+                        "elementRef": "f_title",
+                        "readonly": true
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_status",
+                        "elementRef": "f_status",
+                        "readonly": true
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Row",
+                    "id": "row_2",
+                    "name": "r2",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_waitingFor",
+                        "elementRef": "f_waitingFor",
+                        "readonly": true
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_finishReason",
+                        "elementRef": "f_finishReason",
+                        "readonly": true
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_turnCount",
+                        "elementRef": "f_turnCount",
+                        "readonly": true
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Row",
+                    "id": "row_3",
+                    "name": "r3",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_subjectThingId",
+                        "elementRef": "f_subjectThingId",
+                        "readonly": true
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_subjectModel",
+                        "elementRef": "f_subjectModel",
+                        "readonly": true
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_wakeAt",
+                        "elementRef": "f_wakeAt",
+                        "readonly": true
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Row",
+                    "id": "row_4",
+                    "name": "r4",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_createdAt",
+                        "elementRef": "f_createdAt",
+                        "readonly": true
+                      }
+                    ]
+                  }
+                ],
+                "verticalAlignment": "BOTTOM"
+              }
+            ]
+          },
+          {
+            "type": "Section",
+            "id": "section-2b7c1",
+            "name": "SectionResult",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Result"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Ergebnis"
+                  }
+                ]
+              }
+            },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_result",
+                "name": "CGResult",
+                "layout": {
+                  "lg": "12"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_5",
+                    "name": "r5",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_result",
+                        "elementRef": "f_result",
+                        "readonly": true,
+                        "annotations": [
+                          {
+                            "name": "widget",
+                            "value": "markdown-editor"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "Section",
+            "id": "section-3d9e2",
+            "name": "SectionLastError",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Last error"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Letzter Fehler"
+                  }
+                ]
+              }
+            },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_lastError",
+                "name": "CGLastError",
+                "layout": {
+                  "lg": "12"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_6",
+                    "name": "r6",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_lastError",
+                        "elementRef": "f_lastError",
+                        "readonly": true,
+                        "annotations": [
+                          {
+                            "name": "widget",
+                            "value": "markdown-editor"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "Section",
+            "id": "section-4e0f3",
+            "name": "SectionEntries",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Entries"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Einträge"
+                  }
+                ]
+              }
+            },
+            "screenElements": [
+              {
+                "type": "InlineRepeat",
+                "id": "inlinerepeat-5f1a4",
+                "name": "inline-repeat-Entries",
+                "repeatOverviewColumn": [
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "fieldbasedrepeatoverviewcolumn-a1b2c",
+                    "width": 1,
+                    "sortable": false,
+                    "filterable": false,
+                    "preferredSorting": "ASC",
+                    "elementRef": "f_entry_seq"
+                  },
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "fieldbasedrepeatoverviewcolumn-b2c3d",
+                    "width": 1,
+                    "sortable": false,
+                    "filterable": false,
+                    "preferredSorting": "ASC",
+                    "elementRef": "f_entry_at"
+                  },
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "fieldbasedrepeatoverviewcolumn-c3d4e",
+                    "width": 1,
+                    "sortable": false,
+                    "filterable": false,
+                    "preferredSorting": "ASC",
+                    "elementRef": "f_entry_role"
+                  },
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "fieldbasedrepeatoverviewcolumn-d4e5f",
+                    "width": 1,
+                    "sortable": false,
+                    "filterable": false,
+                    "preferredSorting": "ASC",
+                    "elementRef": "f_entry_kind"
+                  },
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "fieldbasedrepeatoverviewcolumn-e5f6a",
+                    "width": 3,
+                    "sortable": false,
+                    "filterable": false,
+                    "preferredSorting": "ASC",
+                    "elementRef": "f_entry_text"
+                  }
+                ],
+                "groupRef": "f_entries",
+                "enableAdd": false,
+                "enableRemove": false
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "fieldConfiguration": {
+      "field": [
+        {
+          "elementRef": "f_result",
+          "exposition": "AREA"
+        },
+        {
+          "elementRef": "f_lastError",
+          "exposition": "AREA"
+        },
+        {
+          "elementRef": "f_entry_text",
+          "exposition": "AREA",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_entry_toolArgs",
+          "exposition": "AREA",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_entry_toolResult",
+          "exposition": "AREA",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_entry_seq",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_entry_at",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_entry_role",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_entry_kind",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_entry_toolName",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_entry_idempotencyKey",
+          "readonly": true
+        }
+      ]
+    },
+    "groupConfiguration": {},
+    "defaults": {
+      "buttonLabels": {
+        "CANCEL": {
+          "text": [
+            {
+              "locale": "en",
+              "text": "Cancel"
+            },
+            {
+              "locale": "de",
+              "text": "Abbrechen"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -48,8 +48,15 @@ import { withPlatformModelLoader } from "@com.mgmtp.a12.client/client-core/model
 import { withDirtyHandling } from "@com.mgmtp.a12.client/client-core/dirtyHandling";
 import { withLocalization } from "@com.mgmtp.a12.client/client-core/localization";
 import { withNotifications } from "@com.mgmtp.a12.client/client-core/notification";
-import { platformAttachmentLoader } from "@com.mgmtp.a12.formengine/formengine-core";
-import { withRelationshipFormEngine } from "@com.mgmtp.a12.relationshipengine/relationshipengine-core";
+import {
+    DefaultFormModelMap,
+    DefaultWidgetMap as DefaultFormEngineWidgetMap,
+    platformAttachmentLoader
+} from "@com.mgmtp.a12.formengine/formengine-core";
+import {
+    RelationshipFormModelMap,
+    withRelationshipFormEngine
+} from "@com.mgmtp.a12.relationshipengine/relationshipengine-core";
 import { withOverviewEngine } from "@com.mgmtp.a12.overviewengine/overviewengine-core";
 import { withTreeEngine } from "@com.mgmtp.a12.treeengine/treeengine-core";
 import { withCRUD } from "@com.mgmtp.a12.crud/crud-core";
@@ -59,11 +66,14 @@ import { withContentEngine } from "@com.mgmtp.a12.contentengine/contentengine-co
 import { DefaultElementLibrary } from "@com.mgmtp.a12.contentengine/contentengine-default-element-library";
 import { withUaa } from "@com.mgmtp.a12.uaa/uaa-authentication-a12-client";
 
+import { MarkdownTextArea } from "./components/markdown-editor/control/MarkdownTextArea";
+import { createModelElementBridge } from "./components/ModelElementBridge";
 import { registerModulesOnSetModelGraphMiddleware, unregisterModulesOnLogoutMiddleware } from "./modules";
 import { isProduction } from "./config";
 import { enableReduxDevTools } from "./config/devtools";
 import { LoadModelGraphSaga } from "./sagas/loadModelGraph";
 import { enginesViewMap } from "./app/EnginesViewMap";
+import { stabilizeModifications } from "./app/stabilizeModifications";
 import { CustomApplicationFrameLayout } from "./app/LayoutProvider";
 import { DEFAULT_TRANSLATIONS, supportedLocales, getDateTimeResource } from "./localization";
 import { AuthBarrier } from "./app/AuthBarrier";
@@ -88,6 +98,25 @@ export function setup() {
         formEngine: {
             sagas: {
                 attachmentLoader: platformAttachmentLoader
+            },
+            // Spread onto the `FormEngine` view as props (see `withConfiguredFormEngine`), which is why that
+            // view is `CustomizableRelationshipFormEngine` rather than `CRUDViews.FormEngineView`.
+            viewConfig: {
+                // The Markdown editor is selected per control by the `widget: markdown-editor` annotation.
+                // Widget props carry no annotations, so the bridge publishes the `Control`'s model element
+                // into a React context that `MarkdownTextArea` reads.
+                // `RelationshipFormModelMap` is spread because that is what `CRUDViews.FormEngineView` used
+                // internally before this app took the map over; without it CDD-bound controls, custom screen
+                // elements and detached repeats lose their relationship-aware renderers.
+                formModelMap: {
+                    ...DefaultFormModelMap,
+                    ...RelationshipFormModelMap,
+                    Control: { component: createModelElementBridge(RelationshipFormModelMap.Control.component) }
+                },
+                widgetMap: {
+                    ...DefaultFormEngineWidgetMap,
+                    TextAreaStateless: MarkdownTextArea
+                }
             }
         },
         localization: {
@@ -137,14 +166,16 @@ export function setup() {
         addCustomSagas(LoadModelGraphSaga)
     );
 
-    const configured = combineFeatures(
-        withLocalization,
-        withNotifications,
-        withUaa,
-        a12Features,
-        a12ExtensionFeatures,
-        applicationFeatures
-    )(initialConfig);
+    const configured = stabilizeModifications(
+        combineFeatures(
+            withLocalization,
+            withNotifications,
+            withUaa,
+            a12Features,
+            a12ExtensionFeatures,
+            applicationFeatures
+        )(initialConfig)
+    );
 
     assertFullyConfigured(configured);
 

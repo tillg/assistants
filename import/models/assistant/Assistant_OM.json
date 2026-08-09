@@ -1,0 +1,190 @@
+{
+  "header": {
+    "id": "Assistant_OM",
+    "modelType": "overview",
+    "modelVersion": "39.0.0",
+    "locales": [
+      {
+        "code": "en"
+      },
+      {
+        "code": "de"
+      }
+    ],
+    "labels": [
+      {
+        "locale": "en",
+        "text": "Assistants"
+      },
+      {
+        "locale": "de",
+        "text": "Assistenten"
+      }
+    ],
+    "annotations": [
+      {
+        "name": "roles",
+        "value": "user,runtime"
+      }
+    ],
+    "modelReferences": [
+      {
+        "purpose": "document-model-for-overview",
+        "modelType": "document",
+        "alias": "DM",
+        "reference": "Assistant_DM"
+      }
+    ]
+  },
+  "content": {
+    "columns": [
+      {
+        "id": "col_key",
+        "label": [
+          {
+            "locale": "en",
+            "text": "Key"
+          },
+          {
+            "locale": "de",
+            "text": "Schlüssel"
+          }
+        ],
+        "width": 2,
+        "elementRef": "f_key",
+        "sortable": true,
+        "preferredSorting": "ASC"
+      },
+      {
+        "id": "col_name",
+        "label": [
+          {
+            "locale": "en",
+            "text": "Name"
+          },
+          {
+            "locale": "de",
+            "text": "Name"
+          }
+        ],
+        "width": 3,
+        "elementRef": "f_name",
+        "sortable": true,
+        "preferredSorting": "ASC"
+      },
+      {
+        "id": "col_enabled",
+        "label": [
+          {
+            "locale": "en",
+            "text": "Enabled"
+          },
+          {
+            "locale": "de",
+            "text": "Aktiviert"
+          }
+        ],
+        "width": 1,
+        "elementRef": "f_enabled",
+        "sortable": false
+      },
+      {
+        "id": "col_llmModel",
+        "label": [
+          {
+            "locale": "en",
+            "text": "LLM model"
+          },
+          {
+            "locale": "de",
+            "text": "LLM-Modell"
+          }
+        ],
+        "width": 2,
+        "elementRef": "f_llmModel",
+        "sortable": true,
+        "preferredSorting": "ASC"
+      }
+    ],
+    "rowActionGroup": {
+      "actions": [
+        {
+          "event": "delete",
+          "confirmation": {
+            "title": [
+              {
+                "locale": "en",
+                "text": "Delete Item"
+              },
+              {
+                "locale": "de",
+                "text": "Item löschen"
+              }
+            ],
+            "message": [
+              {
+                "locale": "en",
+                "text": "Do you really want to delete this item?"
+              },
+              {
+                "locale": "de",
+                "text": "Möchten Sie diesen Eintrag wirklich löschen?"
+              }
+            ]
+          },
+          "icon": {
+            "name": "delete"
+          },
+          "destructive": false,
+          "primary": false
+        }
+      ]
+    },
+    "subHeaderBox": {
+      "leftSlot": [
+        {
+          "type": "button",
+          "label": [
+            {
+              "locale": "en",
+              "text": "Add"
+            },
+            {
+              "locale": "de",
+              "text": "Hinzufügen"
+            }
+          ],
+          "event": "add",
+          "icon": {
+            "name": "add"
+          },
+          "destructive": false,
+          "primary": false
+        }
+      ],
+      "rightSlot": [
+        {
+          "type": "search"
+        },
+        {
+          "type": "filter"
+        }
+      ]
+    },
+    "footerBox": {
+      "leftSlot": [],
+      "rightSlot": []
+    },
+    "configuration": {
+      "enableFilter": true,
+      "showFullTextSearch": true,
+      "pagingSize": 10,
+      "filterConfiguration": {
+        "showFilterButton": true,
+        "showFilterBar": true,
+        "filterMode": "all"
+      },
+      "rowHeight": 49
+    }
+  }
+}

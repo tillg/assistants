@@ -50,6 +50,84 @@ export const de_DE: LocalizationKeyTreeType = {
         de: "Deutsch (DE)"
     },
 
+    markdownEditor: {
+        mode: {
+            visual: "Visuell",
+            markdown: "Markdown"
+        },
+        toc: {
+            ariaLabel: "Inhaltsverzeichnis",
+            empty: "Keine Überschriften im Bereich",
+            settingsTitle: "Überschriftenebenen",
+            minLevel: "Min. Ebene",
+            maxLevel: "Max. Ebene"
+        },
+        block: {
+            paragraph: "Absatz",
+            heading: "Überschrift $level$",
+            quote: "Zitat",
+            code: "Codeblock",
+            typeMenu: "Blocktyp",
+            bulletList: "Aufzählung",
+            numberedList: "Nummerierte Liste",
+            checkList: "Checkliste"
+        },
+        format: {
+            bold: "Fett",
+            italic: "Kursiv",
+            strikethrough: "Durchgestrichen",
+            textColor: "Textfarbe"
+        },
+        history: {
+            undo: "Rückgängig",
+            redo: "Wiederholen"
+        },
+        insert: {
+            menu: "Einfügen",
+            table: "Tabelle",
+            image: "Bild",
+            horizontalRule: "Trennlinie",
+            tableOfContents: "Inhaltsverzeichnis",
+            link: "Link"
+        },
+        panel: {
+            group: "Panel",
+            info: "Info",
+            warning: "Warnung",
+            note: "Notiz",
+            tip: "Tipp",
+            panel: "Panel"
+        },
+        table: {
+            insertRowAbove: "Zeile oberhalb einfügen",
+            insertRowBelow: "Zeile unterhalb einfügen",
+            insertColumnLeft: "Spalte links einfügen",
+            insertColumnRight: "Spalte rechts einfügen",
+            deleteRow: "Zeile löschen",
+            deleteColumn: "Spalte löschen",
+            deleteTable: "Tabelle löschen"
+        },
+        link: {
+            button: "Link einfügen",
+            text: "Linktext",
+            url: "Link-URL",
+            apply: "Anwenden",
+            cancel: "Abbrechen"
+        },
+        image: {
+            url: "Bild-URL",
+            alt: "Alternativtext",
+            insert: "Einfügen",
+            cancel: "Abbrechen"
+        },
+        color: {
+            hex: "Farbe (Hex oder Name)",
+            apply: "Anwenden",
+            clear: "Farbe entfernen",
+            cancel: "Abbrechen"
+        }
+    },
+
     error: {
         security: {
             notAuthorized: {

@@ -30,7 +30,7 @@
  * LEGALLY INVALID. SEE THE RESPECTIVE LICENSE TEXT FOR DETAILS.
  */
 
-import { useContext } from "react";
+import { useContext, useMemo } from "react";
 import { de, enUS, type Locale as DateLocale } from "date-fns/locale";
 
 import {
@@ -50,6 +50,9 @@ import { RESOURCE_KEYS } from "./keys";
 
 export { RESOURCE_KEYS } from "./keys";
 
+/** A localizer with default translations applied — resolves a resource key (plus optional args) to a string. */
+export type Localize = (key: string, args?: LocalizableArgs) => string;
+
 export const DEFAULT_TRANSLATIONS: LocalizationTreeMap = {
     en: en_US,
     de: de_DE
@@ -66,11 +69,16 @@ export const applyDefaultTranslations = (localizer: Localizer) => {
 
 /**
  * Localizer hook, which returns Localizer with applied default translations.
+ *
+ * Memoized on the context `localizer` (which the provider keeps stable per-locale), so the returned
+ * function has a stable identity that changes only on a locale switch. Callers can therefore use it as a
+ * `useMemo`/`useEffect` dependency without rebuilding on every render — the Markdown editor's toolbar
+ * relies on that.
  */
-export const useLocalizer = () => {
+export const useLocalizer = (): Localize => {
     const { localizer } = useContext(LocalizerContext);
 
-    return applyDefaultTranslations(localizer);
+    return useMemo(() => applyDefaultTranslations(localizer), [localizer]);
 };
 
 export const supportedLocales: LocalizedLocale[] = [

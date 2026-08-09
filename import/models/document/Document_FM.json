@@ -1,0 +1,411 @@
+{
+  "header": {
+    "id": "Document_FM",
+    "modelType": "form",
+    "modelVersion": "39.0.0",
+    "locales": [
+      {
+        "code": "en"
+      },
+      {
+        "code": "de"
+      }
+    ],
+    "labels": [
+      {
+        "locale": "en",
+        "text": "Document"
+      },
+      {
+        "locale": "de",
+        "text": "Dokument"
+      }
+    ],
+    "annotations": [
+      {
+        "name": "roles",
+        "value": "user,runtime"
+      }
+    ],
+    "modelReferences": [
+      {
+        "alias": "Document_DM",
+        "modelType": "document",
+        "purpose": "data binding",
+        "reference": "Document_DM"
+      }
+    ]
+  },
+  "content": {
+    "subHeaderBox": {
+      "id": "subHeaderBox1"
+    },
+    "footerBox": {
+      "id": "footerBox1",
+      "minorButtons": {
+        "button": [
+          {
+            "type": "EVENT",
+            "id": "button_cancel",
+            "name": "Cancel",
+            "buttonStyling": {
+              "label": {
+                "type": "Multilingual",
+                "multilingualText": {
+                  "text": [
+                    {
+                      "locale": "en",
+                      "text": "Cancel"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Abbrechen"
+                    }
+                  ]
+                }
+              },
+              "priority": "SECONDARY",
+              "destructive": true
+            },
+            "event": "event_cancel",
+            "scope": "HIDDEN_IN_READONLY_MODE"
+          }
+        ]
+      },
+      "majorButtons": {
+        "button": [
+          {
+            "type": "EVENT",
+            "id": "button_edit",
+            "name": "Edit",
+            "buttonStyling": {
+              "label": {
+                "type": "Multilingual",
+                "multilingualText": {
+                  "text": [
+                    {
+                      "locale": "en",
+                      "text": "Edit"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Bearbeiten"
+                    }
+                  ]
+                }
+              },
+              "priority": "PRIMARY"
+            },
+            "event": "event_edit",
+            "scope": "HIDDEN_IN_EDIT_MODE"
+          },
+          {
+            "type": "EVENT",
+            "id": "button_save",
+            "name": "Save",
+            "buttonStyling": {
+              "label": {
+                "type": "Multilingual",
+                "multilingualText": {
+                  "text": [
+                    {
+                      "locale": "en",
+                      "text": "Save"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Speichern"
+                    }
+                  ]
+                }
+              },
+              "priority": "PRIMARY"
+            },
+            "event": "CRUD::SAVE",
+            "validation": "full",
+            "scope": "HIDDEN_IN_READONLY_MODE"
+          }
+        ]
+      }
+    },
+    "screens": [
+      {
+        "id": "screen1",
+        "name": "Screen1",
+        "screenElements": [
+          {
+            "type": "MultiColumnSection",
+            "id": "section_document",
+            "name": "SectionDocument",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Document"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Dokument"
+                  }
+                ]
+              }
+            },
+            "layout": {
+              "lg": "12"
+            },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_document",
+                "name": "GridDocument",
+                "layout": {
+                  "lg": "4-4-4"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_1",
+                    "name": "r1",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_title",
+                        "elementRef": "f_title"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_receivedAt",
+                        "elementRef": "f_receivedAt"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_source",
+                        "elementRef": "f_source"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Row",
+                    "id": "row_2",
+                    "name": "r2",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_mediaType",
+                        "elementRef": "f_mediaType"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_externalRef",
+                        "elementRef": "f_externalRef"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_attachment",
+                        "elementRef": "f_attachment"
+                      }
+                    ]
+                  }
+                ],
+                "verticalAlignment": "BOTTOM"
+              }
+            ]
+          },
+          {
+            "type": "Section",
+            "id": "section_extractedText",
+            "name": "SectionExtractedText",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Extracted text"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Extrahierter Text"
+                  }
+                ]
+              }
+            },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_extractedText",
+                "name": "GridExtractedText",
+                "layout": {
+                  "lg": "12"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_3",
+                    "name": "r3",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_extractedText",
+                        "annotations": [
+                          {
+                            "name": "widget",
+                            "value": "markdown-editor"
+                          }
+                        ],
+                        "elementRef": "f_extractedText"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "Section",
+            "id": "section_classification",
+            "name": "SectionClassification",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Classification"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Klassifikation"
+                  }
+                ]
+              }
+            },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_classification",
+                "name": "GridClassification",
+                "layout": {
+                  "lg": "4-4-4"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_4",
+                    "name": "r4",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_classification",
+                        "elementRef": "f_classification"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_classifiedThingId",
+                        "elementRef": "f_classifiedThingId"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_classifiedModel",
+                        "elementRef": "f_classifiedModel"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "ControlGrid",
+                "id": "grid_classificationNote",
+                "name": "GridClassificationNote",
+                "layout": {
+                  "lg": "12"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_5",
+                    "name": "r5",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_classificationNote",
+                        "annotations": [
+                          {
+                            "name": "widget",
+                            "value": "markdown-editor"
+                          }
+                        ],
+                        "elementRef": "f_classificationNote"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "fieldConfiguration": {
+      "field": [
+        {
+          "elementRef": "f_extractedText",
+          "exposition": "AREA"
+        },
+        {
+          "elementRef": "f_classificationNote",
+          "exposition": "AREA"
+        },
+        {
+          "label": {
+            "type": "Multilingual",
+            "multilingualText": {
+              "text": [
+                {
+                  "locale": "en",
+                  "text": "Attachment"
+                },
+                {
+                  "locale": "de",
+                  "text": "Anhang"
+                }
+              ]
+            }
+          },
+          "elementRef": "f_attachment"
+        }
+      ]
+    },
+    "groupConfiguration": {},
+    "defaults": {
+      "buttonLabels": {
+        "ADD": {
+          "text": [
+            {
+              "locale": "en",
+              "text": "Add"
+            },
+            {
+              "locale": "de",
+              "text": "Hinzufügen"
+            }
+          ]
+        },
+        "CANCEL": {
+          "text": [
+            {
+              "locale": "en",
+              "text": "Cancel"
+            },
+            {
+              "locale": "de",
+              "text": "Abbrechen"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

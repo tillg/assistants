@@ -69,6 +69,84 @@ export const RESOURCE_KEYS = {
         de: ""
     },
 
+    markdownEditor: {
+        mode: {
+            visual: "",
+            markdown: ""
+        },
+        toc: {
+            ariaLabel: "",
+            empty: "",
+            settingsTitle: "",
+            minLevel: "",
+            maxLevel: ""
+        },
+        block: {
+            paragraph: "",
+            heading: "",
+            quote: "",
+            code: "",
+            typeMenu: "",
+            bulletList: "",
+            numberedList: "",
+            checkList: ""
+        },
+        format: {
+            bold: "",
+            italic: "",
+            strikethrough: "",
+            textColor: ""
+        },
+        history: {
+            undo: "",
+            redo: ""
+        },
+        insert: {
+            menu: "",
+            table: "",
+            image: "",
+            horizontalRule: "",
+            tableOfContents: "",
+            link: ""
+        },
+        panel: {
+            group: "",
+            info: "",
+            warning: "",
+            note: "",
+            tip: "",
+            panel: ""
+        },
+        table: {
+            insertRowAbove: "",
+            insertRowBelow: "",
+            insertColumnLeft: "",
+            insertColumnRight: "",
+            deleteRow: "",
+            deleteColumn: "",
+            deleteTable: ""
+        },
+        link: {
+            button: "",
+            text: "",
+            url: "",
+            apply: "",
+            cancel: ""
+        },
+        image: {
+            url: "",
+            alt: "",
+            insert: "",
+            cancel: ""
+        },
+        color: {
+            hex: "",
+            apply: "",
+            clear: "",
+            cancel: ""
+        }
+    },
+
     error: {
         security: {
             notAuthorized: {

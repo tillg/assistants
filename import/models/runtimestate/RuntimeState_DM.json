@@ -1,0 +1,387 @@
+{
+  "header": {
+    "id": "RuntimeState_DM",
+    "modelType": "document",
+    "modelVersion": "29.4.0",
+    "locales": [
+      {
+        "code": "en"
+      },
+      {
+        "code": "de"
+      }
+    ],
+    "labels": [
+      {
+        "locale": "en",
+        "text": "Runtime state"
+      },
+      {
+        "locale": "de",
+        "text": "Runtime-Zustand"
+      }
+    ],
+    "annotations": [
+      {
+        "name": "roles",
+        "value": "user,runtime"
+      }
+    ],
+    "modelReferences": []
+  },
+  "content": {
+    "modelInfo": {
+      "name": "RuntimeState_DM",
+      "immutable": false,
+      "joinedModelsInfo": "RuntimeState_DM-document-meta-data+Add"
+    },
+    "modelConfig": {
+      "decimalSeparator": ".",
+      "timeZone": "UTC",
+      "conditionLanguage": {
+        "code": "en_US"
+      }
+    },
+    "modelRoot": {
+      "rootGroups": [
+        {
+          "type": "Group",
+          "id": "group_runtimestate",
+          "name": "RuntimeState",
+          "Group": {
+            "repeatability": 1,
+            "elements": [
+              {
+                "type": "Field",
+                "id": "f_singletonKey",
+                "name": "SingletonKey",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 40
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Singleton key"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Singleton-Schlüssel"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_watermark",
+                "name": "Watermark",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "DateTimeType",
+                    "DateTimeType": {
+                      "format": "yyyy-MM-dd'T'HH:mm:ss"
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Watermark"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Wasserzeichen"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Group",
+                "id": "f_watermarkDocRefs",
+                "name": "WatermarkDocRefs",
+                "Group": {
+                  "repeatability": 200,
+                  "elements": [
+                    {
+                      "type": "Field",
+                      "id": "f_wm_docRef",
+                      "name": "DocRef",
+                      "Field": {
+                        "fieldType": {
+                          "type": "StringType",
+                          "StringType": {
+                            "maxLength": 200
+                          }
+                        },
+                        "label": [
+                          {
+                            "locale": "en",
+                            "text": "Doc ref"
+                          },
+                          {
+                            "locale": "de",
+                            "text": "DocRef"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_paused",
+                "name": "Paused",
+                "Field": {
+                  "fieldType": {
+                    "type": "BooleanType"
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Paused"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Pausiert"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_birthsThisHour",
+                "name": "BirthsThisHour",
+                "Field": {
+                  "fieldType": {
+                    "type": "NumberType",
+                    "NumberType": {
+                      "minFractionalDigits": 0,
+                      "maxFractionalDigits": 0
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Births this hour"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Geburten in dieser Stunde"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_birthWindowStartedAt",
+                "name": "BirthWindowStartedAt",
+                "Field": {
+                  "fieldType": {
+                    "type": "DateTimeType",
+                    "DateTimeType": {
+                      "format": "yyyy-MM-dd'T'HH:mm:ss"
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Birth window started at"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Geburtsfenster gestartet am"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_heartbeatAt",
+                "name": "HeartbeatAt",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "DateTimeType",
+                    "DateTimeType": {
+                      "format": "yyyy-MM-dd'T'HH:mm:ss"
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Heartbeat at"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Heartbeat am"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_lastError",
+                "name": "LastError",
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "lineBreaksPermitted": true,
+                      "noValueValidation": true
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Last error"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Letzter Fehler"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_idempotencyKey",
+                "name": "IdempotencyKey",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 200
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Idempotency key"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Idempotenzschlüssel"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_createdByConversationId",
+                "name": "CreatedByConversationId",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 200
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Created by conversation"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Erstellt von Konversation"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_createdAt",
+                "name": "CreatedAt",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "DateTimeType",
+                    "DateTimeType": {
+                      "format": "yyyy-MM-dd'T'HH:mm:ss"
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Created at"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Erstellt am"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_updatedAt",
+                "name": "UpdatedAt",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "DateTimeType",
+                    "DateTimeType": {
+                      "format": "yyyy-MM-dd'T'HH:mm:ss"
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Updated at"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Geändert am"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

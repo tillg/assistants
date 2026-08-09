@@ -1,0 +1,501 @@
+{
+  "header": {
+    "id": "Invoice_FM",
+    "modelType": "form",
+    "modelVersion": "39.0.0",
+    "locales": [
+      {
+        "code": "en"
+      },
+      {
+        "code": "de"
+      }
+    ],
+    "labels": [
+      {
+        "locale": "en",
+        "text": "Invoice"
+      },
+      {
+        "locale": "de",
+        "text": "Rechnung"
+      }
+    ],
+    "annotations": [
+      {
+        "name": "roles",
+        "value": "user,runtime"
+      }
+    ],
+    "modelReferences": [
+      {
+        "alias": "Invoice_DM",
+        "modelType": "document",
+        "purpose": "data binding",
+        "reference": "Invoice_DM"
+      }
+    ]
+  },
+  "content": {
+    "subHeaderBox": {
+      "id": "subHeaderBox1"
+    },
+    "footerBox": {
+      "id": "footerBox1",
+      "minorButtons": {
+        "button": [
+          {
+            "type": "EVENT",
+            "id": "button_cancel",
+            "name": "Cancel",
+            "buttonStyling": {
+              "label": {
+                "type": "Multilingual",
+                "multilingualText": {
+                  "text": [
+                    {
+                      "locale": "en",
+                      "text": "Cancel"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Abbrechen"
+                    }
+                  ]
+                }
+              },
+              "priority": "SECONDARY",
+              "destructive": true
+            },
+            "event": "event_cancel",
+            "scope": "HIDDEN_IN_READONLY_MODE"
+          }
+        ]
+      },
+      "majorButtons": {
+        "button": [
+          {
+            "type": "EVENT",
+            "id": "button_edit",
+            "name": "Edit",
+            "buttonStyling": {
+              "label": {
+                "type": "Multilingual",
+                "multilingualText": {
+                  "text": [
+                    {
+                      "locale": "en",
+                      "text": "Edit"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Bearbeiten"
+                    }
+                  ]
+                }
+              },
+              "priority": "PRIMARY"
+            },
+            "event": "event_edit",
+            "scope": "HIDDEN_IN_EDIT_MODE"
+          },
+          {
+            "type": "EVENT",
+            "id": "button_save",
+            "name": "Save",
+            "buttonStyling": {
+              "label": {
+                "type": "Multilingual",
+                "multilingualText": {
+                  "text": [
+                    {
+                      "locale": "en",
+                      "text": "Save"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Speichern"
+                    }
+                  ]
+                }
+              },
+              "priority": "PRIMARY"
+            },
+            "event": "CRUD::SAVE",
+            "validation": "full",
+            "scope": "HIDDEN_IN_READONLY_MODE"
+          }
+        ]
+      }
+    },
+    "screens": [
+      {
+        "id": "screen1",
+        "name": "Screen1",
+        "screenElements": [
+          {
+            "type": "MultiColumnSection",
+            "id": "section_invoice",
+            "name": "SectionInvoice",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Invoice"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Rechnung"
+                  }
+                ]
+              }
+            },
+            "layout": {
+              "lg": "12"
+            },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_invoice",
+                "name": "GridInvoice",
+                "layout": {
+                  "lg": "4-4-4"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_1",
+                    "name": "r1",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_invoiceNumber",
+                        "elementRef": "f_invoiceNumber"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_issuerName",
+                        "elementRef": "f_issuerName"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_issuedByPartyThingId",
+                        "elementRef": "f_issuedByPartyThingId"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Row",
+                    "id": "row_2",
+                    "name": "r2",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_subject",
+                        "elementRef": "f_subject"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_recipientName",
+                        "elementRef": "f_recipientName"
+                      }
+                    ]
+                  }
+                ],
+                "verticalAlignment": "BOTTOM"
+              }
+            ]
+          },
+          {
+            "type": "MultiColumnSection",
+            "id": "section_dates",
+            "name": "SectionDates",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Dates"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Termine"
+                  }
+                ]
+              }
+            },
+            "layout": {
+              "lg": "12"
+            },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_dates",
+                "name": "GridDates",
+                "layout": {
+                  "lg": "4-4-4"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_3",
+                    "name": "r3",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_issueDate",
+                        "elementRef": "f_issueDate"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_dueDate",
+                        "elementRef": "f_dueDate"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_serviceDate",
+                        "elementRef": "f_serviceDate"
+                      }
+                    ]
+                  }
+                ],
+                "verticalAlignment": "BOTTOM"
+              }
+            ]
+          },
+          {
+            "type": "MultiColumnSection",
+            "id": "section_amounts",
+            "name": "SectionAmounts",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Amounts"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Beträge"
+                  }
+                ]
+              }
+            },
+            "layout": {
+              "lg": "12"
+            },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_amounts",
+                "name": "GridAmounts",
+                "layout": {
+                  "lg": "4-4-4"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_4",
+                    "name": "r4",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_amountGross",
+                        "elementRef": "f_amountGross"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_amountNet",
+                        "elementRef": "f_amountNet"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_currency",
+                        "elementRef": "f_currency"
+                      }
+                    ]
+                  }
+                ],
+                "verticalAlignment": "BOTTOM"
+              }
+            ]
+          },
+          {
+            "type": "MultiColumnSection",
+            "id": "section_links",
+            "name": "SectionLinks",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Links"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Verknüpfungen"
+                  }
+                ]
+              }
+            },
+            "layout": {
+              "lg": "12"
+            },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_links",
+                "name": "GridLinks",
+                "layout": {
+                  "lg": "6-6"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_5",
+                    "name": "r5",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_documentThingId",
+                        "elementRef": "f_documentThingId"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_processThingId",
+                        "elementRef": "f_processThingId"
+                      }
+                    ]
+                  }
+                ],
+                "verticalAlignment": "BOTTOM"
+              }
+            ]
+          },
+          {
+            "type": "Section",
+            "id": "section_notes",
+            "name": "SectionNotes",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Notes"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Notizen"
+                  }
+                ]
+              }
+            },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_notes",
+                "name": "GridNotes",
+                "layout": {
+                  "lg": "12"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_6",
+                    "name": "r6",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_notes",
+                        "annotations": [
+                          {
+                            "name": "widget",
+                            "value": "markdown-editor"
+                          }
+                        ],
+                        "elementRef": "f_notes"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "fieldConfiguration": {
+      "field": [
+        {
+          "elementRef": "f_amountGross",
+          "suffix": {
+            "text": [
+              {
+                "locale": "en",
+                "text": "EUR"
+              },
+              {
+                "locale": "de",
+                "text": "EUR"
+              }
+            ]
+          }
+        },
+        {
+          "elementRef": "f_amountNet",
+          "suffix": {
+            "text": [
+              {
+                "locale": "en",
+                "text": "EUR"
+              },
+              {
+                "locale": "de",
+                "text": "EUR"
+              }
+            ]
+          }
+        },
+        {
+          "elementRef": "f_notes",
+          "exposition": "AREA"
+        }
+      ]
+    },
+    "groupConfiguration": {},
+    "defaults": {
+      "buttonLabels": {
+        "ADD": {
+          "text": [
+            {
+              "locale": "en",
+              "text": "Add"
+            },
+            {
+              "locale": "de",
+              "text": "Hinzufügen"
+            }
+          ]
+        },
+        "CANCEL": {
+          "text": [
+            {
+              "locale": "en",
+              "text": "Cancel"
+            },
+            {
+              "locale": "de",
+              "text": "Abbrechen"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

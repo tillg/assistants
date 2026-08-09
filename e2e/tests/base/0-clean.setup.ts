@@ -33,17 +33,17 @@
 import { type Page, test } from "../../fixtures";
 import { OverviewPage } from "../../pages/OverviewPage";
 
-test.describe("Person Module - Clean up", () => {
+test.describe("Open Question Module - Clean up", () => {
     let page: Page;
     let overviewPage: OverviewPage;
     test.beforeEach(async ({ getPageAs }) => {
         page = await getPageAs("admin");
         overviewPage = new OverviewPage(page);
         await overviewPage.gotoHome();
-        await overviewPage.clickMenuItem("Person");
+        await overviewPage.clickMenuItem("Open Questions");
     });
 
-    test("should delete all persons in the overview", async () => {
+    test("should delete all open questions in the overview", async () => {
         await overviewPage.deleteAllRows();
     });
 });

@@ -1,0 +1,535 @@
+{
+  "header": {
+    "id": "Assistant_DM",
+    "modelType": "document",
+    "modelVersion": "29.4.0",
+    "locales": [
+      {
+        "code": "en"
+      },
+      {
+        "code": "de"
+      }
+    ],
+    "labels": [
+      {
+        "locale": "en",
+        "text": "Assistant"
+      },
+      {
+        "locale": "de",
+        "text": "Assistent"
+      }
+    ],
+    "annotations": [
+      {
+        "name": "roles",
+        "value": "user,runtime"
+      }
+    ],
+    "modelReferences": []
+  },
+  "content": {
+    "modelInfo": {
+      "name": "Assistant_DM",
+      "immutable": false,
+      "joinedModelsInfo": "Assistant_DM-document-meta-data+Add"
+    },
+    "modelConfig": {
+      "decimalSeparator": ".",
+      "timeZone": "UTC",
+      "conditionLanguage": {
+        "code": "en_US"
+      }
+    },
+    "modelRoot": {
+      "rootGroups": [
+        {
+          "type": "Group",
+          "id": "group_assistant",
+          "name": "Assistant",
+          "Group": {
+            "repeatability": 1,
+            "elements": [
+              {
+                "type": "Field",
+                "id": "f_key",
+                "name": "Key",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 60
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Key"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Schlüssel"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_name",
+                "name": "Name",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 120
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Name"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Name"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_description",
+                "name": "Description",
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 400
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Description"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Beschreibung"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_systemPrompt",
+                "name": "SystemPrompt",
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "lineBreaksPermitted": true,
+                      "noValueValidation": true
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "System prompt"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "System-Prompt"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_llmModel",
+                "name": "LlmModel",
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 80
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "LLM model"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "LLM-Modell"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_enabled",
+                "name": "Enabled",
+                "Field": {
+                  "fieldType": {
+                    "type": "BooleanType"
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Enabled"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Aktiviert"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_maxTurns",
+                "name": "MaxTurns",
+                "Field": {
+                  "fieldType": {
+                    "type": "NumberType",
+                    "NumberType": {
+                      "minFractionalDigits": 0,
+                      "maxFractionalDigits": 0
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Max turns"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Maximale Turns"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Group",
+                "id": "f_skills",
+                "name": "Skills",
+                "Group": {
+                  "repeatability": 50,
+                  "elements": [
+                    {
+                      "type": "Field",
+                      "id": "f_skill_name",
+                      "name": "SkillName",
+                      "Field": {
+                        "fieldType": {
+                          "type": "StringType",
+                          "StringType": {
+                            "maxLength": 120
+                          }
+                        },
+                        "label": [
+                          {
+                            "locale": "en",
+                            "text": "Skill name"
+                          },
+                          {
+                            "locale": "de",
+                            "text": "Skill-Name"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "Field",
+                      "id": "f_skill_instructions",
+                      "name": "SkillInstructions",
+                      "Field": {
+                        "fieldType": {
+                          "type": "StringType",
+                          "StringType": {
+                            "lineBreaksPermitted": true,
+                            "noValueValidation": true
+                          }
+                        },
+                        "label": [
+                          {
+                            "locale": "en",
+                            "text": "Skill instructions"
+                          },
+                          {
+                            "locale": "de",
+                            "text": "Skill-Anweisungen"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Group",
+                "id": "f_triggers",
+                "name": "Triggers",
+                "Group": {
+                  "repeatability": 20,
+                  "elements": [
+                    {
+                      "type": "Field",
+                      "id": "f_trigger_kind",
+                      "name": "TriggerKind",
+                      "Field": {
+                        "fieldType": {
+                          "type": "StringType",
+                          "StringType": {
+                            "maxLength": 40,
+                            "hintList": [
+                              {
+                                "locale": "en",
+                                "values": [
+                                  "thing-materialised",
+                                  "assistant-call",
+                                  "schedule"
+                                ]
+                              },
+                              {
+                                "locale": "de",
+                                "values": [
+                                  "thing-materialised",
+                                  "assistant-call",
+                                  "schedule"
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        "label": [
+                          {
+                            "locale": "en",
+                            "text": "Trigger kind"
+                          },
+                          {
+                            "locale": "de",
+                            "text": "Trigger-Art"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "Field",
+                      "id": "f_trigger_modelFilter",
+                      "name": "TriggerModelFilter",
+                      "Field": {
+                        "fieldType": {
+                          "type": "StringType",
+                          "StringType": {
+                            "maxLength": 60
+                          }
+                        },
+                        "label": [
+                          {
+                            "locale": "en",
+                            "text": "Model filter"
+                          },
+                          {
+                            "locale": "de",
+                            "text": "Modell-Filter"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "Field",
+                      "id": "f_trigger_cron",
+                      "name": "TriggerCron",
+                      "Field": {
+                        "fieldType": {
+                          "type": "StringType",
+                          "StringType": {
+                            "maxLength": 60
+                          }
+                        },
+                        "label": [
+                          {
+                            "locale": "en",
+                            "text": "Cron expression"
+                          },
+                          {
+                            "locale": "de",
+                            "text": "Cron-Ausdruck"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Group",
+                "id": "f_tools",
+                "name": "Tools",
+                "Group": {
+                  "repeatability": 60,
+                  "elements": [
+                    {
+                      "type": "Field",
+                      "id": "f_tool_operation",
+                      "name": "ToolOperation",
+                      "Field": {
+                        "fieldType": {
+                          "type": "StringType",
+                          "StringType": {
+                            "maxLength": 120
+                          }
+                        },
+                        "label": [
+                          {
+                            "locale": "en",
+                            "text": "Operation"
+                          },
+                          {
+                            "locale": "de",
+                            "text": "Operation"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_idempotencyKey",
+                "name": "IdempotencyKey",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 200
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Idempotency key"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Idempotenzschlüssel"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_createdByConversationId",
+                "name": "CreatedByConversationId",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 200
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Created by conversation"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Erstellt von Konversation"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_createdAt",
+                "name": "CreatedAt",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "DateTimeType",
+                    "DateTimeType": {
+                      "format": "yyyy-MM-dd'T'HH:mm:ss"
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Created at"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Erstellt am"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_updatedAt",
+                "name": "UpdatedAt",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "DateTimeType",
+                    "DateTimeType": {
+                      "format": "yyyy-MM-dd'T'HH:mm:ss"
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Updated at"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Geändert am"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

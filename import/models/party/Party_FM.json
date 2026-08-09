@@ -1,0 +1,408 @@
+{
+  "header": {
+    "id": "Party_FM",
+    "modelType": "form",
+    "modelVersion": "39.0.0",
+    "locales": [
+      {
+        "code": "en"
+      },
+      {
+        "code": "de"
+      }
+    ],
+    "labels": [
+      {
+        "locale": "en",
+        "text": "Party"
+      },
+      {
+        "locale": "de",
+        "text": "Kontakt"
+      }
+    ],
+    "annotations": [
+      {
+        "name": "roles",
+        "value": "user,runtime"
+      }
+    ],
+    "modelReferences": [
+      {
+        "alias": "Party_DM",
+        "modelType": "document",
+        "purpose": "data binding",
+        "reference": "Party_DM"
+      }
+    ]
+  },
+  "content": {
+    "subHeaderBox": {
+      "id": "subHeaderBox1"
+    },
+    "footerBox": {
+      "id": "footerBox1",
+      "minorButtons": {
+        "button": [
+          {
+            "type": "EVENT",
+            "id": "button-4a1c7",
+            "name": "Cancel",
+            "buttonStyling": {
+              "label": {
+                "type": "Multilingual",
+                "multilingualText": {
+                  "text": [
+                    {
+                      "locale": "en",
+                      "text": "Cancel"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Abbrechen"
+                    }
+                  ]
+                }
+              },
+              "priority": "SECONDARY",
+              "destructive": true
+            },
+            "event": "event_cancel",
+            "scope": "HIDDEN_IN_READONLY_MODE"
+          }
+        ]
+      },
+      "majorButtons": {
+        "button": [
+          {
+            "type": "EVENT",
+            "id": "button-9b3e2",
+            "name": "Edit",
+            "buttonStyling": {
+              "label": {
+                "type": "Multilingual",
+                "multilingualText": {
+                  "text": [
+                    {
+                      "locale": "en",
+                      "text": "Edit"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Bearbeiten"
+                    }
+                  ]
+                }
+              },
+              "priority": "PRIMARY"
+            },
+            "event": "event_edit",
+            "scope": "HIDDEN_IN_EDIT_MODE"
+          },
+          {
+            "type": "EVENT",
+            "id": "button-2f8d6",
+            "name": "Save",
+            "buttonStyling": {
+              "label": {
+                "type": "Multilingual",
+                "multilingualText": {
+                  "text": [
+                    {
+                      "locale": "en",
+                      "text": "Save"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Speichern"
+                    }
+                  ]
+                }
+              },
+              "priority": "PRIMARY"
+            },
+            "event": "CRUD::SAVE",
+            "validation": "full",
+            "scope": "HIDDEN_IN_READONLY_MODE"
+          }
+        ]
+      }
+    },
+    "screens": [
+      {
+        "id": "screen1",
+        "name": "Screen1",
+        "screenElements": [
+          {
+            "type": "MultiColumnSection",
+            "id": "section_identity",
+            "name": "Identity",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Identity"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Identität"
+                  }
+                ]
+              }
+            },
+            "layout": {
+              "lg": "12"
+            },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_identity",
+                "name": "GridIdentity",
+                "layout": {
+                  "lg": "4-4-4"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_1",
+                    "name": "r1",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_kind",
+                        "elementRef": "f_kind"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_role",
+                        "elementRef": "f_role"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_name",
+                        "elementRef": "f_name"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Row",
+                    "id": "row_2",
+                    "name": "r2",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_legalName",
+                        "elementRef": "f_legalName"
+                      }
+                    ]
+                  }
+                ],
+                "verticalAlignment": "BOTTOM"
+              }
+            ]
+          },
+          {
+            "type": "MultiColumnSection",
+            "id": "section_contact",
+            "name": "Contact",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Contact"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Kontaktdaten"
+                  }
+                ]
+              }
+            },
+            "layout": {
+              "lg": "12"
+            },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_contact",
+                "name": "GridContact",
+                "layout": {
+                  "lg": "4-4-4"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_3",
+                    "name": "r3",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_email",
+                        "elementRef": "f_email"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_phone",
+                        "elementRef": "f_phone"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_street",
+                        "elementRef": "f_street"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Row",
+                    "id": "row_4",
+                    "name": "r4",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_postcode",
+                        "elementRef": "f_postcode"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_city",
+                        "elementRef": "f_city"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_country",
+                        "elementRef": "f_country"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Row",
+                    "id": "row_5",
+                    "name": "r5",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_iban",
+                        "elementRef": "f_iban"
+                      }
+                    ]
+                  }
+                ],
+                "verticalAlignment": "BOTTOM"
+              }
+            ]
+          },
+          {
+            "type": "MultiColumnSection",
+            "id": "section_notes",
+            "name": "Notes",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Notes"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Notizen"
+                  }
+                ]
+              }
+            },
+            "layout": {
+              "lg": "12"
+            },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_notes",
+                "name": "GridNotes",
+                "layout": {
+                  "lg": "12"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_6",
+                    "name": "r6",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_notes",
+                        "label": {
+                          "type": "Multilingual",
+                          "multilingualText": {
+                            "text": [
+                              {
+                                "locale": "en",
+                                "text": "Notes"
+                              },
+                              {
+                                "locale": "de",
+                                "text": "Notizen"
+                              }
+                            ]
+                          }
+                        },
+                        "elementRef": "f_notes",
+                        "annotations": [
+                          {
+                            "name": "widget",
+                            "value": "markdown-editor"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "verticalAlignment": "BOTTOM"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "fieldConfiguration": {
+      "field": [
+        {
+          "exposition": "AREA",
+          "elementRef": "f_notes"
+        }
+      ]
+    },
+    "groupConfiguration": {},
+    "defaults": {
+      "buttonLabels": {
+        "ADD": {
+          "text": [
+            {
+              "locale": "en",
+              "text": "Add"
+            },
+            {
+              "locale": "de",
+              "text": "Hinzufügen"
+            }
+          ]
+        },
+        "CANCEL": {
+          "text": [
+            {
+              "locale": "en",
+              "text": "Cancel"
+            },
+            {
+              "locale": "de",
+              "text": "Abbrechen"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

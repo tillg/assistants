@@ -57,3 +57,11 @@ roles:
       - MODEL_READ
       - ATTACHMENT_UPLOAD
       - QUERY
+  - name: runtime
+    description: runtime role - the Assistant Runtime writes Things but must never delete one
+    accessRights:
+      - DOCUMENT_CREATE
+      - DOCUMENT_UPDATE
+      - DOCUMENT_PARTIAL_UPDATE
+      - MODEL_READ
+      - QUERY

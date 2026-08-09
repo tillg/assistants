@@ -141,9 +141,75 @@ services:
     networks:
       - a12_compose
 
+  firefly:
+    # Bookkeeping backend. SQLite -- no extra database container needed.
+    # Host port 8084 because 8081/8082/8083 are frontend/server/postgres.
+    image: fireflyiii/core:version-6.6.6
+    container_name: ${PROJECT_NAME:-assistants}_firefly
+    restart: unless-stopped
+    ports:
+      - 8084:8080
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_KEY: ${FIREFLY_APP_KEY}
+      APP_URL: http://localhost:8084 # must match the external URL
+      SITE_OWNER: ${FIREFLY_EMAIL}
+      TZ: Europe/Berlin
+      TRUSTED_PROXIES: "**"
+      DB_CONNECTION: sqlite
+      DB_DATABASE: "" # MUST stay empty for sqlite
+      DB_HOST: ""
+      DB_PORT: ""
+      DB_USERNAME: ""
+      DB_PASSWORD: ""
+      MAIL_MAILER: log
+      MAIL_FROM: noreply@example.com
+      STATIC_CRON_TOKEN: ${FIREFLY_CRON_TOKEN} # must be EXACTLY 32 chars
+      DEFAULT_LANGUAGE: en_US
+      DEFAULT_LOCALE: equal
+    volumes:
+      # Only these two narrow paths -- never mount all of storage/.
+      - firefly_db:/var/www/html/storage/database
+      - firefly_upload:/var/www/html/storage/upload
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -fsS http://localhost:8080/healthcheck || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+    networks:
+      - a12_compose
+
+  firefly-bootstrap:
+    # One-shot: registers the first (owner) user and mints a Personal Access
+    # Token into the firefly_token volume, where the Runtime can read it.
+    # Idempotent -- re-running logs in and reuses a still-valid token.
+    image: python:3.12-alpine
+    container_name: ${PROJECT_NAME:-assistants}_firefly-bootstrap
+    restart: "no"
+    environment:
+      BASE: http://firefly:8080
+      FIREFLY_EMAIL: ${FIREFLY_EMAIL}
+      FIREFLY_PASSWORD: ${FIREFLY_PASSWORD}
+      TOKEN_FILE: /firefly-token/pat.txt
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["apk add --no-cache curl >/dev/null && exec /bootstrap.sh"]
+    volumes:
+      - ./firefly/bootstrap.sh:/bootstrap.sh:ro
+      - firefly_token:/firefly-token
+    depends_on:
+      firefly:
+        condition: service_healthy
+    networks:
+      - a12_compose
+
 networks:
   a12_compose:
     driver: bridge
 
 volumes:
   postgres_data:
+  firefly_db:
+  firefly_upload:
+  firefly_token:

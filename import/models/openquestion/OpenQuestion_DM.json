@@ -1,0 +1,512 @@
+{
+  "header": {
+    "id": "OpenQuestion_DM",
+    "modelType": "document",
+    "modelVersion": "29.4.0",
+    "locales": [
+      {
+        "code": "en"
+      },
+      {
+        "code": "de"
+      }
+    ],
+    "labels": [
+      {
+        "locale": "en",
+        "text": "Open question"
+      },
+      {
+        "locale": "de",
+        "text": "Offene Frage"
+      }
+    ],
+    "annotations": [
+      {
+        "name": "roles",
+        "value": "user,runtime"
+      }
+    ],
+    "modelReferences": []
+  },
+  "content": {
+    "modelInfo": {
+      "name": "OpenQuestion_DM",
+      "immutable": false,
+      "joinedModelsInfo": "OpenQuestion_DM-document-meta-data+Add"
+    },
+    "modelConfig": {
+      "decimalSeparator": ".",
+      "timeZone": "UTC",
+      "conditionLanguage": {
+        "code": "en_US"
+      }
+    },
+    "modelRoot": {
+      "rootGroups": [
+        {
+          "type": "Group",
+          "id": "group_openquestion",
+          "name": "OpenQuestion",
+          "Group": {
+            "repeatability": 1,
+            "elements": [
+              {
+                "type": "Field",
+                "id": "f_conversationId",
+                "name": "ConversationId",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 200
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Conversation"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Konversation"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_assistantKey",
+                "name": "AssistantKey",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 60
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Assistant key"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Assistentenschlüssel"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_seq",
+                "name": "Seq",
+                "Field": {
+                  "fieldType": {
+                    "type": "NumberType",
+                    "NumberType": {
+                      "minFractionalDigits": 0,
+                      "maxFractionalDigits": 0
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Sequence"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Sequenz"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_kind",
+                "name": "Kind",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 40,
+                      "hintList": [
+                        {
+                          "locale": "en",
+                          "values": [
+                            "free-text",
+                            "confirm",
+                            "choice",
+                            "perform"
+                          ]
+                        },
+                        {
+                          "locale": "de",
+                          "values": [
+                            "free-text",
+                            "confirm",
+                            "choice",
+                            "perform"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Kind"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Art"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_subjectThingId",
+                "name": "SubjectThingId",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 200
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Subject thing id"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Subjekt-Thing-ID"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_prompt",
+                "name": "Prompt",
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "lineBreaksPermitted": true,
+                      "noValueValidation": true
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Question"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Frage"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Group",
+                "id": "f_options",
+                "name": "Options",
+                "Group": {
+                  "repeatability": 20,
+                  "elements": [
+                    {
+                      "type": "Field",
+                      "id": "f_option_value",
+                      "name": "OptionValue",
+                      "Field": {
+                        "fieldType": {
+                          "type": "StringType",
+                          "StringType": {
+                            "maxLength": 120
+                          }
+                        },
+                        "label": [
+                          {
+                            "locale": "en",
+                            "text": "Value"
+                          },
+                          {
+                            "locale": "de",
+                            "text": "Wert"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "Field",
+                      "id": "f_option_label",
+                      "name": "OptionLabel",
+                      "Field": {
+                        "fieldType": {
+                          "type": "StringType",
+                          "StringType": {
+                            "maxLength": 200
+                          }
+                        },
+                        "label": [
+                          {
+                            "locale": "en",
+                            "text": "Label"
+                          },
+                          {
+                            "locale": "de",
+                            "text": "Bezeichnung"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_text",
+                "name": "Text",
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "lineBreaksPermitted": true,
+                      "noValueValidation": true
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Answer"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Antwort"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_choice",
+                "name": "Choice",
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 120
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Choice"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Auswahl"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_confirmed",
+                "name": "Confirmed",
+                "Field": {
+                  "fieldType": {
+                    "type": "BooleanType"
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Confirmed"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Bestätigt"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_answeredAt",
+                "name": "AnsweredAt",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "DateTimeType",
+                    "DateTimeType": {
+                      "format": "yyyy-MM-dd'T'HH:mm:ss"
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Answered at"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Beantwortet am"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_idempotencyKey",
+                "name": "IdempotencyKey",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 200
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Idempotency key"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Idempotenzschlüssel"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_createdByConversationId",
+                "name": "CreatedByConversationId",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 200
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Created by conversation"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Erstellt von Konversation"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_createdAt",
+                "name": "CreatedAt",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "DateTimeType",
+                    "DateTimeType": {
+                      "format": "yyyy-MM-dd'T'HH:mm:ss"
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Created at"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Erstellt am"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_updatedAt",
+                "name": "UpdatedAt",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "DateTimeType",
+                    "DateTimeType": {
+                      "format": "yyyy-MM-dd'T'HH:mm:ss"
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Updated at"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Geändert am"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

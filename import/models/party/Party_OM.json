@@ -1,0 +1,207 @@
+{
+  "header": {
+    "id": "Party_OM",
+    "modelType": "overview",
+    "modelVersion": "39.0.0",
+    "locales": [
+      {
+        "code": "en"
+      },
+      {
+        "code": "de"
+      }
+    ],
+    "labels": [
+      {
+        "locale": "en",
+        "text": "Parties"
+      },
+      {
+        "locale": "de",
+        "text": "Kontakte"
+      }
+    ],
+    "annotations": [
+      {
+        "name": "roles",
+        "value": "user,runtime"
+      }
+    ],
+    "modelReferences": [
+      {
+        "purpose": "document-model-for-overview",
+        "modelType": "document",
+        "alias": "DM",
+        "reference": "Party_DM"
+      }
+    ]
+  },
+  "content": {
+    "columns": [
+      {
+        "id": "col_name",
+        "label": [
+          {
+            "locale": "en",
+            "text": "Name"
+          },
+          {
+            "locale": "de",
+            "text": "Name"
+          }
+        ],
+        "width": 2,
+        "elementRef": "f_name",
+        "sortable": true,
+        "preferredSorting": "ASC"
+      },
+      {
+        "id": "col_kind",
+        "label": [
+          {
+            "locale": "en",
+            "text": "Kind"
+          },
+          {
+            "locale": "de",
+            "text": "Art"
+          }
+        ],
+        "width": 1,
+        "elementRef": "f_kind",
+        "sortable": true,
+        "preferredSorting": "ASC"
+      },
+      {
+        "id": "col_role",
+        "label": [
+          {
+            "locale": "en",
+            "text": "Role"
+          },
+          {
+            "locale": "de",
+            "text": "Rolle"
+          }
+        ],
+        "width": 1,
+        "elementRef": "f_role",
+        "sortable": true,
+        "preferredSorting": "ASC"
+      },
+      {
+        "id": "col_city",
+        "label": [
+          {
+            "locale": "en",
+            "text": "City"
+          },
+          {
+            "locale": "de",
+            "text": "Stadt"
+          }
+        ],
+        "width": 1,
+        "elementRef": "f_city",
+        "sortable": true,
+        "preferredSorting": "ASC"
+      },
+      {
+        "id": "col_email",
+        "label": [
+          {
+            "locale": "en",
+            "text": "Email"
+          },
+          {
+            "locale": "de",
+            "text": "E-Mail"
+          }
+        ],
+        "width": 2,
+        "elementRef": "f_email",
+        "sortable": false
+      }
+    ],
+    "rowActionGroup": {
+      "actions": [
+        {
+          "event": "delete",
+          "confirmation": {
+            "title": [
+              {
+                "locale": "en",
+                "text": "Delete Item"
+              },
+              {
+                "locale": "de",
+                "text": "Item löschen"
+              }
+            ],
+            "message": [
+              {
+                "locale": "en",
+                "text": "Do you really want to delete this item?"
+              },
+              {
+                "locale": "de",
+                "text": "Möchten Sie diesen Eintrag wirklich löschen?"
+              }
+            ]
+          },
+          "icon": {
+            "name": "delete"
+          },
+          "destructive": false,
+          "primary": false
+        }
+      ]
+    },
+    "subHeaderBox": {
+      "leftSlot": [
+        {
+          "type": "button",
+          "label": [
+            {
+              "locale": "en",
+              "text": "Add"
+            },
+            {
+              "locale": "de",
+              "text": "hinzufügen"
+            }
+          ],
+          "event": "add",
+          "icon": {
+            "name": "add"
+          },
+          "destructive": false,
+          "primary": false
+        }
+      ],
+      "rightSlot": [
+        {
+          "type": "search"
+        },
+        {
+          "type": "filter"
+        }
+      ]
+    },
+    "footerBox": {
+      "leftSlot": [],
+      "rightSlot": []
+    },
+    "configuration": {
+      "enableFilter": true,
+      "showFullTextSearch": true,
+      "pagingSize": 10,
+      "filterConfiguration": {
+        "showFilterButton": true,
+        "showFilterBar": true,
+        "filterMode": "all"
+      },
+      "rowHeight": 49
+    }
+  }
+}

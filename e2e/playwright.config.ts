@@ -67,20 +67,6 @@ export default defineConfig({
             dependencies: ["setup-auth"]
         },
 
-        {
-            name: "extended",
-            use: { ...devices["Desktop Chrome"], channel: "chromium" },
-            testDir: "./tests/extended",
-            dependencies: ["setup-extended"]
-        },
-        {
-            name: "setup-extended",
-            use: { ...devices["Desktop Chrome"], channel: "chromium" },
-            testDir: "./tests/extended",
-            testMatch: /0-clean\.setup\.ts/,
-            dependencies: ["setup-auth"]
-        },
-
         { name: "setup-auth", testMatch: /auth\.setup\.ts/, teardown: "cleanup" },
         { name: "cleanup", testMatch: /auth\.teardown\.ts/ }
     ]

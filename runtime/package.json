@@ -1,0 +1,30 @@
+{
+  "name": "@assistants/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Runtime: trigger watcher and loop driver for the Assistants system",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node --enable-source-maps dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "bootstrap": "tsx src/bootstrap/cli.ts",
+    "demo": "tsx src/demo/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
+  },
+  "dependencies": {
+    "undici": "^7.10.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^3.2.4"
+  }
+}

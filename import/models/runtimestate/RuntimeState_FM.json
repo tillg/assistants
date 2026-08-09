@@ -1,0 +1,347 @@
+{
+  "header": {
+    "id": "RuntimeState_FM",
+    "modelType": "form",
+    "modelVersion": "39.0.0",
+    "locales": [
+      {
+        "code": "en"
+      },
+      {
+        "code": "de"
+      }
+    ],
+    "labels": [
+      {
+        "locale": "en",
+        "text": "Runtime state"
+      },
+      {
+        "locale": "de",
+        "text": "Runtime-Zustand"
+      }
+    ],
+    "annotations": [
+      {
+        "name": "roles",
+        "value": "user,runtime"
+      }
+    ],
+    "modelReferences": [
+      {
+        "alias": "RuntimeState_DM",
+        "modelType": "document",
+        "purpose": "data binding",
+        "reference": "RuntimeState_DM"
+      }
+    ]
+  },
+  "content": {
+    "footerBox": {
+      "id": "footerBox1",
+      "minorButtons": {
+        "button": [
+          {
+            "type": "EVENT",
+            "id": "button-6a2d9",
+            "name": "cancel",
+            "buttonStyling": {
+              "label": {
+                "type": "Multilingual",
+                "multilingualText": {
+                  "text": [
+                    {
+                      "locale": "en",
+                      "text": "Cancel"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Abbrechen"
+                    }
+                  ]
+                }
+              },
+              "priority": "SECONDARY",
+              "destructive": true
+            },
+            "event": "event_cancel",
+            "scope": "HIDDEN_IN_READONLY_MODE"
+          }
+        ]
+      },
+      "majorButtons": {
+        "button": [
+          {
+            "type": "EVENT",
+            "id": "button-7b3e0",
+            "name": "edit",
+            "buttonStyling": {
+              "label": {
+                "type": "Multilingual",
+                "multilingualText": {
+                  "text": [
+                    {
+                      "locale": "en",
+                      "text": "Edit"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Bearbeiten"
+                    }
+                  ]
+                }
+              },
+              "priority": "SECONDARY"
+            },
+            "event": "event_edit",
+            "scope": "HIDDEN_IN_EDIT_MODE"
+          },
+          {
+            "type": "EVENT",
+            "id": "button-8c4f1",
+            "name": "save",
+            "buttonStyling": {
+              "label": {
+                "type": "Multilingual",
+                "multilingualText": {
+                  "text": [
+                    {
+                      "locale": "en",
+                      "text": "Save"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Speichern"
+                    }
+                  ]
+                }
+              },
+              "priority": "PRIMARY"
+            },
+            "event": "CRUD::SAVE",
+            "validation": "full",
+            "scope": "HIDDEN_IN_READONLY_MODE"
+          }
+        ]
+      }
+    },
+    "screens": [
+      {
+        "id": "screen1",
+        "name": "Screen1",
+        "screenElements": [
+          {
+            "type": "MultiColumnSection",
+            "id": "multicolumnsection-9d5a2",
+            "name": "RuntimeControl",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Runtime control"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Runtime-Steuerung"
+                  }
+                ]
+              }
+            },
+            "layout": {
+              "lg": "12"
+            },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_control",
+                "name": "CGControl",
+                "layout": {
+                  "lg": "4-4-4"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_1",
+                    "name": "r1",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_paused",
+                        "elementRef": "f_paused"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_singletonKey",
+                        "elementRef": "f_singletonKey",
+                        "readonly": true
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_heartbeatAt",
+                        "elementRef": "f_heartbeatAt",
+                        "readonly": true
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Row",
+                    "id": "row_2",
+                    "name": "r2",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_watermark",
+                        "elementRef": "f_watermark",
+                        "readonly": true
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_birthsThisHour",
+                        "elementRef": "f_birthsThisHour",
+                        "readonly": true
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_birthWindowStartedAt",
+                        "elementRef": "f_birthWindowStartedAt",
+                        "readonly": true
+                      }
+                    ]
+                  }
+                ],
+                "verticalAlignment": "BOTTOM"
+              }
+            ]
+          },
+          {
+            "type": "Section",
+            "id": "section-a6b7c",
+            "name": "SectionLastError",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Last error"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Letzter Fehler"
+                  }
+                ]
+              }
+            },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_lastError",
+                "name": "CGLastError",
+                "layout": {
+                  "lg": "12"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_3",
+                    "name": "r3",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_lastError",
+                        "elementRef": "f_lastError",
+                        "readonly": true,
+                        "annotations": [
+                          {
+                            "name": "widget",
+                            "value": "markdown-editor"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "Section",
+            "id": "section-b7c8d",
+            "name": "SectionWatermarkDocRefs",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Watermark doc refs"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Wasserzeichen-DocRefs"
+                  }
+                ]
+              }
+            },
+            "screenElements": [
+              {
+                "type": "InlineRepeat",
+                "id": "inlinerepeat-c8d9e",
+                "name": "inline-repeat-WatermarkDocRefs",
+                "repeatOverviewColumn": [
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "fieldbasedrepeatoverviewcolumn-d9e0f",
+                    "width": 1,
+                    "sortable": false,
+                    "filterable": false,
+                    "preferredSorting": "ASC",
+                    "elementRef": "f_wm_docRef"
+                  }
+                ],
+                "groupRef": "f_watermarkDocRefs",
+                "enableAdd": false,
+                "enableRemove": false
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "fieldConfiguration": {
+      "field": [
+        {
+          "elementRef": "f_lastError",
+          "exposition": "AREA"
+        },
+        {
+          "elementRef": "f_paused",
+          "exposition": "SWITCH"
+        },
+        {
+          "elementRef": "f_wm_docRef",
+          "readonly": true
+        }
+      ]
+    },
+    "groupConfiguration": {},
+    "defaults": {
+      "buttonLabels": {
+        "CANCEL": {
+          "text": [
+            {
+              "locale": "en",
+              "text": "Cancel"
+            },
+            {
+              "locale": "de",
+              "text": "Abbrechen"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

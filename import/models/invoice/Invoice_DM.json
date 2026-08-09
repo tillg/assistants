@@ -1,0 +1,535 @@
+{
+  "header": {
+    "id": "Invoice_DM",
+    "modelType": "document",
+    "modelVersion": "29.4.0",
+    "locales": [
+      {
+        "code": "en"
+      },
+      {
+        "code": "de"
+      }
+    ],
+    "labels": [
+      {
+        "locale": "en",
+        "text": "Invoice"
+      },
+      {
+        "locale": "de",
+        "text": "Rechnung"
+      }
+    ],
+    "annotations": [
+      {
+        "name": "roles",
+        "value": "user,runtime"
+      }
+    ],
+    "modelReferences": []
+  },
+  "content": {
+    "modelInfo": {
+      "name": "Invoice_DM",
+      "immutable": false,
+      "joinedModelsInfo": "Invoice_DM-document-meta-data+Add"
+    },
+    "modelConfig": {
+      "decimalSeparator": ".",
+      "timeZone": "UTC",
+      "conditionLanguage": {
+        "code": "en_US"
+      }
+    },
+    "modelRoot": {
+      "rootGroups": [
+        {
+          "type": "Group",
+          "id": "group_invoice",
+          "name": "Invoice",
+          "Group": {
+            "repeatability": 1,
+            "elements": [
+              {
+                "type": "Field",
+                "id": "f_invoiceNumber",
+                "name": "InvoiceNumber",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 60
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Invoice number"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Rechnungsnummer"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_issuedByPartyThingId",
+                "name": "IssuedByPartyThingId",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 200
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Issued by party"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Ausgestellt von Partei"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_issuerName",
+                "name": "IssuerName",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 200
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Issuer name"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Name des Ausstellers"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_issueDate",
+                "name": "IssueDate",
+                "Field": {
+                  "fieldType": {
+                    "type": "DateType",
+                    "DateType": {
+                      "format": "yyyy-MM-dd"
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Issue date"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Rechnungsdatum"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_dueDate",
+                "name": "DueDate",
+                "Field": {
+                  "fieldType": {
+                    "type": "DateType",
+                    "DateType": {
+                      "format": "yyyy-MM-dd"
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Due date"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Fällig am"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_serviceDate",
+                "name": "ServiceDate",
+                "Field": {
+                  "fieldType": {
+                    "type": "DateType",
+                    "DateType": {
+                      "format": "yyyy-MM-dd"
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Service date"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Leistungsdatum"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_amountGross",
+                "name": "AmountGross",
+                "Field": {
+                  "fieldType": {
+                    "type": "NumberType",
+                    "NumberType": {
+                      "minValue": 0,
+                      "trait": "amount",
+                      "minFractionalDigits": 2,
+                      "maxFractionalDigits": 2
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Gross amount"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Bruttobetrag"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_amountNet",
+                "name": "AmountNet",
+                "Field": {
+                  "fieldType": {
+                    "type": "NumberType",
+                    "NumberType": {
+                      "minValue": 0,
+                      "trait": "amount",
+                      "minFractionalDigits": 2,
+                      "maxFractionalDigits": 2
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Net amount"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Nettobetrag"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_currency",
+                "name": "Currency",
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 3
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Currency"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Währung"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_subject",
+                "name": "Subject",
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 300
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Subject"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Betreff"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_recipientName",
+                "name": "RecipientName",
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 200
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Recipient name"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Name des Empfängers"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_documentThingId",
+                "name": "DocumentThingId",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 200
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Document"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Dokument"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_processThingId",
+                "name": "ProcessThingId",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 200
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Process"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Vorgang"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_notes",
+                "name": "Notes",
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "lineBreaksPermitted": true,
+                      "noValueValidation": true
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Notes"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Notizen"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_idempotencyKey",
+                "name": "IdempotencyKey",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 200
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Idempotency key"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Idempotenzschlüssel"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_createdByConversationId",
+                "name": "CreatedByConversationId",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 200
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Created by conversation"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Erstellt von Konversation"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_createdAt",
+                "name": "CreatedAt",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "DateTimeType",
+                    "DateTimeType": {
+                      "format": "yyyy-MM-dd'T'HH:mm:ss"
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Created at"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Erstellt am"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_updatedAt",
+                "name": "UpdatedAt",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "DateTimeType",
+                    "DateTimeType": {
+                      "format": "yyyy-MM-dd'T'HH:mm:ss"
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Updated at"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Geändert am"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

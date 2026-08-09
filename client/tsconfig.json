@@ -47,7 +47,10 @@
     "target": "ES2025",
     "tsBuildInfoFile": "./build/tsconfig.tsbuildinfo",
     "types": [
-      "webpack-env"
+      "webpack-env",
+      // Augments styled-components' DefaultTheme with the A12 widget theme, so `theme.colors` &c.
+      // are typed inside styled-component template literals.
+      "@com.mgmtp.a12.widgets/widgets-core/types/styled-components"
     ],
     "verbatimModuleSyntax": true
   },

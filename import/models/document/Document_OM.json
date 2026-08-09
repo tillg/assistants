@@ -1,0 +1,191 @@
+{
+  "header": {
+    "id": "Document_OM",
+    "modelType": "overview",
+    "modelVersion": "39.0.0",
+    "locales": [
+      {
+        "code": "en"
+      },
+      {
+        "code": "de"
+      }
+    ],
+    "labels": [
+      {
+        "locale": "en",
+        "text": "Documents"
+      },
+      {
+        "locale": "de",
+        "text": "Dokumente"
+      }
+    ],
+    "annotations": [
+      {
+        "name": "roles",
+        "value": "user,runtime"
+      }
+    ],
+    "modelReferences": [
+      {
+        "purpose": "document-model-for-overview",
+        "modelType": "document",
+        "alias": "DM",
+        "reference": "Document_DM"
+      }
+    ]
+  },
+  "content": {
+    "columns": [
+      {
+        "id": "col_title",
+        "label": [
+          {
+            "locale": "en",
+            "text": "Title"
+          },
+          {
+            "locale": "de",
+            "text": "Titel"
+          }
+        ],
+        "width": 3,
+        "elementRef": "f_title",
+        "sortable": true,
+        "preferredSorting": "ASC"
+      },
+      {
+        "id": "col_receivedAt",
+        "label": [
+          {
+            "locale": "en",
+            "text": "Received at"
+          },
+          {
+            "locale": "de",
+            "text": "Empfangen am"
+          }
+        ],
+        "width": 2,
+        "elementRef": "f_receivedAt",
+        "sortable": true,
+        "preferredSorting": "DESC"
+      },
+      {
+        "id": "col_source",
+        "label": [
+          {
+            "locale": "en",
+            "text": "Source"
+          },
+          {
+            "locale": "de",
+            "text": "Quelle"
+          }
+        ],
+        "width": 1,
+        "elementRef": "f_source",
+        "sortable": true,
+        "preferredSorting": "ASC"
+      },
+      {
+        "id": "col_classification",
+        "label": [
+          {
+            "locale": "en",
+            "text": "Classification"
+          },
+          {
+            "locale": "de",
+            "text": "Klassifikation"
+          }
+        ],
+        "width": 2,
+        "elementRef": "f_classification",
+        "sortable": true,
+        "preferredSorting": "ASC"
+      }
+    ],
+    "rowActionGroup": {
+      "actions": [
+        {
+          "event": "delete",
+          "confirmation": {
+            "title": [
+              {
+                "locale": "en",
+                "text": "Delete Item"
+              },
+              {
+                "locale": "de",
+                "text": "Item löschen"
+              }
+            ],
+            "message": [
+              {
+                "locale": "en",
+                "text": "Do you really want to delete this item?"
+              },
+              {
+                "locale": "de",
+                "text": "Möchten Sie diesen Eintrag wirklich löschen?"
+              }
+            ]
+          },
+          "icon": {
+            "name": "delete"
+          },
+          "destructive": false,
+          "primary": false
+        }
+      ]
+    },
+    "subHeaderBox": {
+      "leftSlot": [
+        {
+          "type": "button",
+          "label": [
+            {
+              "locale": "en",
+              "text": "Add"
+            },
+            {
+              "locale": "de",
+              "text": "Hinzufügen"
+            }
+          ],
+          "event": "add",
+          "icon": {
+            "name": "add"
+          },
+          "destructive": false,
+          "primary": false
+        }
+      ],
+      "rightSlot": [
+        {
+          "type": "search"
+        },
+        {
+          "type": "filter"
+        }
+      ]
+    },
+    "footerBox": {
+      "leftSlot": [],
+      "rightSlot": []
+    },
+    "configuration": {
+      "enableFilter": true,
+      "showFullTextSearch": true,
+      "pagingSize": 10,
+      "filterConfiguration": {
+        "showFilterButton": true,
+        "showFilterBar": true,
+        "filterMode": "all"
+      },
+      "rowHeight": 49
+    }
+  }
+}

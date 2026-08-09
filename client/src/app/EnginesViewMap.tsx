@@ -36,6 +36,8 @@ import { TreeEngineFactories } from "@com.mgmtp.a12.treeengine/treeengine-core";
 import { DefaultElementLibraryFactories } from "@com.mgmtp.a12.contentengine/contentengine-default-element-library";
 import { withFormElementContexts } from "@com.mgmtp.a12.formengine/formengine-content-elements";
 
+import { CustomizableRelationshipFormEngine } from "../components/CustomizableRelationshipFormEngine";
+
 type ViewMap = Record<string, View.ViewComponent | undefined>;
 
 /**
@@ -43,13 +45,17 @@ type ViewMap = Record<string, View.ViewComponent | undefined>;
  *
  * Maps view names specified in the App Model Scenes to React components of the respective engine.
  * Each entry must be registered via a corresponding `addView()` call in `appsetup.ts`.
+ *
+ * `FormEngine` is {@link CustomizableRelationshipFormEngine} rather than `CRUDViews.FormEngineView`,
+ * because the latter drops the `formModelMap`/`widgetMap` that `formEngine.viewConfig` in `appsetup.ts`
+ * injects as props — see that component's doc comment.
  */
 export const enginesViewMap = {
     TreeEngine(props) {
         return <TreeEngineFactories.ViewComponent {...props} />;
     },
     FormEngine(props) {
-        return <CRUDViews.FormEngineView {...props} />;
+        return <CustomizableRelationshipFormEngine {...props} />;
     },
     OverviewEngine(props) {
         return <CRUDViews.OverviewEngineView {...props} />;

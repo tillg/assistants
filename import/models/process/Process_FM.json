@@ -1,0 +1,435 @@
+{
+  "header": {
+    "id": "Process_FM",
+    "modelType": "form",
+    "modelVersion": "39.0.0",
+    "locales": [
+      {
+        "code": "en"
+      },
+      {
+        "code": "de"
+      }
+    ],
+    "labels": [
+      {
+        "locale": "en",
+        "text": "Process"
+      },
+      {
+        "locale": "de",
+        "text": "Vorgang"
+      }
+    ],
+    "annotations": [
+      {
+        "name": "roles",
+        "value": "user,runtime"
+      }
+    ],
+    "modelReferences": [
+      {
+        "alias": "Process_DM",
+        "modelType": "document",
+        "purpose": "data binding",
+        "reference": "Process_DM"
+      }
+    ]
+  },
+  "content": {
+    "subHeaderBox": {
+      "id": "subHeaderBox1"
+    },
+    "footerBox": {
+      "id": "footerBox1",
+      "minorButtons": {
+        "button": [
+          {
+            "type": "EVENT",
+            "id": "button-6c5a1",
+            "name": "Cancel",
+            "buttonStyling": {
+              "label": {
+                "type": "Multilingual",
+                "multilingualText": {
+                  "text": [
+                    {
+                      "locale": "en",
+                      "text": "Cancel"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Abbrechen"
+                    }
+                  ]
+                }
+              },
+              "priority": "SECONDARY",
+              "destructive": true
+            },
+            "event": "event_cancel",
+            "scope": "HIDDEN_IN_READONLY_MODE"
+          }
+        ]
+      },
+      "majorButtons": {
+        "button": [
+          {
+            "type": "EVENT",
+            "id": "button-1d7f4",
+            "name": "Edit",
+            "buttonStyling": {
+              "label": {
+                "type": "Multilingual",
+                "multilingualText": {
+                  "text": [
+                    {
+                      "locale": "en",
+                      "text": "Edit"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Bearbeiten"
+                    }
+                  ]
+                }
+              },
+              "priority": "PRIMARY"
+            },
+            "event": "event_edit",
+            "scope": "HIDDEN_IN_EDIT_MODE"
+          },
+          {
+            "type": "EVENT",
+            "id": "button-8e2b9",
+            "name": "Save",
+            "buttonStyling": {
+              "label": {
+                "type": "Multilingual",
+                "multilingualText": {
+                  "text": [
+                    {
+                      "locale": "en",
+                      "text": "Save"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Speichern"
+                    }
+                  ]
+                }
+              },
+              "priority": "PRIMARY"
+            },
+            "event": "CRUD::SAVE",
+            "validation": "full",
+            "scope": "HIDDEN_IN_READONLY_MODE"
+          }
+        ]
+      }
+    },
+    "screens": [
+      {
+        "id": "screen1",
+        "name": "Screen1",
+        "screenElements": [
+          {
+            "type": "MultiColumnSection",
+            "id": "section_process",
+            "name": "ProcessData",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Process"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Vorgang"
+                  }
+                ]
+              }
+            },
+            "layout": {
+              "lg": "12"
+            },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_process",
+                "name": "GridProcess",
+                "layout": {
+                  "lg": "4-4-4"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_1",
+                    "name": "r1",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_title",
+                        "elementRef": "f_title"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_kind",
+                        "elementRef": "f_kind"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_status",
+                        "elementRef": "f_status"
+                      }
+                    ]
+                  }
+                ],
+                "verticalAlignment": "BOTTOM"
+              }
+            ]
+          },
+          {
+            "type": "MultiColumnSection",
+            "id": "section_summary",
+            "name": "SummarySection",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Summary"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Zusammenfassung"
+                  }
+                ]
+              }
+            },
+            "layout": {
+              "lg": "12"
+            },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_summary",
+                "name": "GridSummary",
+                "layout": {
+                  "lg": "12"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_2",
+                    "name": "r2",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_summary",
+                        "label": {
+                          "type": "Multilingual",
+                          "multilingualText": {
+                            "text": [
+                              {
+                                "locale": "en",
+                                "text": "Summary"
+                              },
+                              {
+                                "locale": "de",
+                                "text": "Zusammenfassung"
+                              }
+                            ]
+                          }
+                        },
+                        "elementRef": "f_summary",
+                        "annotations": [
+                          {
+                            "name": "widget",
+                            "value": "markdown-editor"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "verticalAlignment": "BOTTOM"
+              }
+            ]
+          },
+          {
+            "type": "Section",
+            "id": "section_steps",
+            "name": "StepsSection",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Steps"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Schritte"
+                  }
+                ]
+              }
+            },
+            "screenElements": [
+              {
+                "type": "InlineRepeat",
+                "id": "inlinerepeat_steps",
+                "name": "inline-repeat-Steps",
+                "repeatOverviewColumn": [
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "repeatcolumn_step_seq",
+                    "width": 1,
+                    "sortable": false,
+                    "filterable": false,
+                    "preferredSorting": "ASC",
+                    "elementRef": "f_step_seq"
+                  },
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "repeatcolumn_step_title",
+                    "width": 1,
+                    "sortable": false,
+                    "filterable": false,
+                    "preferredSorting": "ASC",
+                    "elementRef": "f_step_title"
+                  },
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "repeatcolumn_step_state",
+                    "width": 1,
+                    "sortable": false,
+                    "filterable": false,
+                    "preferredSorting": "ASC",
+                    "elementRef": "f_step_state"
+                  },
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "repeatcolumn_step_doneAt",
+                    "width": 1,
+                    "sortable": false,
+                    "filterable": false,
+                    "preferredSorting": "ASC",
+                    "elementRef": "f_step_doneAt"
+                  }
+                ],
+                "groupRef": "f_steps",
+                "enableAdd": true,
+                "enableRemove": true
+              }
+            ]
+          },
+          {
+            "type": "Section",
+            "id": "section_related",
+            "name": "RelatedSection",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Related"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Verknüpft"
+                  }
+                ]
+              }
+            },
+            "screenElements": [
+              {
+                "type": "InlineRepeat",
+                "id": "inlinerepeat_related",
+                "name": "inline-repeat-Related",
+                "repeatOverviewColumn": [
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "repeatcolumn_rel_thingId",
+                    "width": 1,
+                    "sortable": false,
+                    "filterable": false,
+                    "preferredSorting": "ASC",
+                    "elementRef": "f_rel_thingId"
+                  },
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "repeatcolumn_rel_model",
+                    "width": 1,
+                    "sortable": false,
+                    "filterable": false,
+                    "preferredSorting": "ASC",
+                    "elementRef": "f_rel_model"
+                  },
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "repeatcolumn_rel_note",
+                    "width": 1,
+                    "sortable": false,
+                    "filterable": false,
+                    "preferredSorting": "ASC",
+                    "elementRef": "f_rel_note"
+                  }
+                ],
+                "groupRef": "f_related",
+                "enableAdd": true,
+                "enableRemove": true
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "fieldConfiguration": {
+      "field": [
+        {
+          "exposition": "AREA",
+          "elementRef": "f_summary"
+        },
+        {
+          "exposition": "AREA",
+          "elementRef": "f_step_note"
+        }
+      ]
+    },
+    "groupConfiguration": {},
+    "defaults": {
+      "buttonLabels": {
+        "ADD": {
+          "text": [
+            {
+              "locale": "en",
+              "text": "Add"
+            },
+            {
+              "locale": "de",
+              "text": "Hinzufügen"
+            }
+          ]
+        },
+        "CANCEL": {
+          "text": [
+            {
+              "locale": "en",
+              "text": "Cancel"
+            },
+            {
+              "locale": "de",
+              "text": "Abbrechen"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

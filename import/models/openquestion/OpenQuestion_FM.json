@@ -1,0 +1,403 @@
+{
+  "header": {
+    "id": "OpenQuestion_FM",
+    "modelType": "form",
+    "modelVersion": "39.0.0",
+    "locales": [
+      {
+        "code": "en"
+      },
+      {
+        "code": "de"
+      }
+    ],
+    "labels": [
+      {
+        "locale": "en",
+        "text": "Open question"
+      },
+      {
+        "locale": "de",
+        "text": "Offene Frage"
+      }
+    ],
+    "annotations": [
+      {
+        "name": "roles",
+        "value": "user,runtime"
+      }
+    ],
+    "modelReferences": [
+      {
+        "alias": "OpenQuestion_DM",
+        "modelType": "document",
+        "purpose": "data binding",
+        "reference": "OpenQuestion_DM"
+      }
+    ]
+  },
+  "content": {
+    "subHeaderBox": {
+      "id": "subHeaderBox1"
+    },
+    "footerBox": {
+      "id": "footerBox1",
+      "minorButtons": {
+        "button": [
+          {
+            "type": "EVENT",
+            "id": "button_cancel",
+            "name": "Cancel",
+            "buttonStyling": {
+              "label": {
+                "type": "Multilingual",
+                "multilingualText": {
+                  "text": [
+                    {
+                      "locale": "en",
+                      "text": "Cancel"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Abbrechen"
+                    }
+                  ]
+                }
+              },
+              "priority": "SECONDARY",
+              "destructive": true
+            },
+            "event": "event_cancel",
+            "scope": "HIDDEN_IN_READONLY_MODE"
+          }
+        ]
+      },
+      "majorButtons": {
+        "button": [
+          {
+            "type": "EVENT",
+            "id": "button_edit",
+            "name": "Edit",
+            "buttonStyling": {
+              "label": {
+                "type": "Multilingual",
+                "multilingualText": {
+                  "text": [
+                    {
+                      "locale": "en",
+                      "text": "Edit"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Bearbeiten"
+                    }
+                  ]
+                }
+              },
+              "priority": "PRIMARY"
+            },
+            "event": "event_edit",
+            "scope": "HIDDEN_IN_EDIT_MODE"
+          },
+          {
+            "type": "EVENT",
+            "id": "button_save",
+            "name": "Save",
+            "buttonStyling": {
+              "label": {
+                "type": "Multilingual",
+                "multilingualText": {
+                  "text": [
+                    {
+                      "locale": "en",
+                      "text": "Save"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Speichern"
+                    }
+                  ]
+                }
+              },
+              "priority": "PRIMARY"
+            },
+            "event": "CRUD::SAVE",
+            "validation": "full",
+            "scope": "HIDDEN_IN_READONLY_MODE"
+          }
+        ]
+      }
+    },
+    "screens": [
+      {
+        "id": "screen1",
+        "name": "Screen1",
+        "screenElements": [
+          {
+            "type": "Section",
+            "id": "section_question",
+            "name": "SectionQuestion",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Question"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Frage"
+                  }
+                ]
+              }
+            },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_question",
+                "name": "GridQuestion",
+                "layout": {
+                  "lg": "4-4-4"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_1",
+                    "name": "r1",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_assistantKey",
+                        "elementRef": "f_assistantKey",
+                        "readonly": true
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_kind",
+                        "elementRef": "f_kind",
+                        "readonly": true
+                      }
+                    ]
+                  }
+                ],
+                "verticalAlignment": "BOTTOM"
+              },
+              {
+                "type": "ControlGrid",
+                "id": "grid_prompt",
+                "name": "GridPrompt",
+                "layout": {
+                  "lg": "12"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_2",
+                    "name": "r2",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_prompt",
+                        "elementRef": "f_prompt",
+                        "readonly": true,
+                        "annotations": [
+                          {
+                            "name": "widget",
+                            "value": "markdown-editor"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "Section",
+            "id": "section_options",
+            "name": "SectionOptions",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Options"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Optionen"
+                  }
+                ]
+              }
+            },
+            "screenElements": [
+              {
+                "type": "InlineRepeat",
+                "id": "inlinerepeat_options",
+                "name": "inline-repeat-Options",
+                "repeatOverviewColumn": [
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "repeatcolumn_option_value",
+                    "width": 1,
+                    "sortable": false,
+                    "filterable": false,
+                    "preferredSorting": "ASC",
+                    "elementRef": "f_option_value"
+                  },
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "repeatcolumn_option_label",
+                    "width": 3,
+                    "sortable": false,
+                    "filterable": false,
+                    "preferredSorting": "ASC",
+                    "elementRef": "f_option_label"
+                  }
+                ],
+                "groupRef": "f_options",
+                "enableAdd": false,
+                "enableRemove": false
+              }
+            ]
+          },
+          {
+            "type": "Section",
+            "id": "section_answer",
+            "name": "SectionAnswer",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Answer"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Antwort"
+                  }
+                ]
+              }
+            },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_answerText",
+                "name": "GridAnswerText",
+                "layout": {
+                  "lg": "12"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_3",
+                    "name": "r3",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_text",
+                        "elementRef": "f_text",
+                        "annotations": [
+                          {
+                            "name": "widget",
+                            "value": "markdown-editor"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "ControlGrid",
+                "id": "grid_answer",
+                "name": "GridAnswer",
+                "layout": {
+                  "lg": "4-4-4"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_4",
+                    "name": "r4",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_choice",
+                        "elementRef": "f_choice"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_confirmed",
+                        "elementRef": "f_confirmed"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_answeredAt",
+                        "elementRef": "f_answeredAt"
+                      }
+                    ]
+                  }
+                ],
+                "verticalAlignment": "BOTTOM"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "fieldConfiguration": {
+      "field": [
+        {
+          "elementRef": "f_prompt",
+          "exposition": "AREA"
+        },
+        {
+          "elementRef": "f_text",
+          "exposition": "AREA"
+        },
+        {
+          "elementRef": "f_option_value",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_option_label",
+          "readonly": true
+        }
+      ]
+    },
+    "groupConfiguration": {},
+    "defaults": {
+      "buttonLabels": {
+        "ADD": {
+          "text": [
+            {
+              "locale": "en",
+              "text": "Add"
+            },
+            {
+              "locale": "de",
+              "text": "Hinzufügen"
+            }
+          ]
+        },
+        "CANCEL": {
+          "text": [
+            {
+              "locale": "en",
+              "text": "Cancel"
+            },
+            {
+              "locale": "de",
+              "text": "Abbrechen"
+            }
+          ]
+        }
+      }
+    }
+  }
+}
