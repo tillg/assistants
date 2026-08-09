@@ -44,7 +44,7 @@ import { ComposeFormPage } from "./ComposeFormPage";
 export class OverviewPage extends BasePage {
     private readonly table: Locator;
 
-    constructor(protected readonly page: Page) {
+    constructor(protected override readonly page: Page) {
         super(page);
         this.table = page.getByTestId(TestID.TABLE);
     }
@@ -64,7 +64,7 @@ export class OverviewPage extends BasePage {
         await formPage.finishedLoading();
         await formPage.toBeVisible();
         await formPage.createDocument(document);
-        await this.assertDocumentsInTable([document[0].value]);
+        await this.assertDocumentsInTable([document[0]?.value ?? ""]);
     }
 
     async addComposeDocument(
@@ -77,13 +77,37 @@ export class OverviewPage extends BasePage {
         const composeFormPage = new ComposeFormPage(this.page, formLocator, relationFormLocator);
         await composeFormPage.toBeVisible();
         await composeFormPage.createDocument(document, relationData);
-        await this.assertDocumentsInTable([document[0].value]);
+        await this.assertDocumentsInTable([document[0]?.value ?? ""]);
     }
 
     getRow(document: string): Locator {
         const table = this.page.getByTestId(TestID.TABLE);
         const row = table.getByTestId(TestID.TABLE_BODY_ROW).filter({ hasText: document });
         return row;
+    }
+
+    /** Open a row's instance form. */
+    async openDocument(document: string) {
+        const row = this.getRow(document).first();
+        await expect(row).toBeVisible();
+        await row.click();
+        await this.finishedLoading();
+        await expect(this.page.getByRole("form").first()).toBeVisible();
+    }
+
+    async assertDocumentNotInTable(document: string) {
+        await expect(this.getRow(document)).toHaveCount(0);
+    }
+
+    /**
+     * The overview's full-text search. It becomes a `simple_search` constraint over the Model's
+     * indexed fields server-side, which is the only way to find one row among many pages.
+     */
+    async search(term: string) {
+        const input = this.page.locator('input[role="search"], [role="search"] input').first();
+        await input.fill(term);
+        await input.press("Enter");
+        await this.finishedLoading();
     }
 
     async deleteRow(row: Locator, hasConfirmation: boolean = true) {

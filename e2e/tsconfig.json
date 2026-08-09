@@ -1,7 +1,9 @@
 {
     "extends": "../client/tsconfig",
     "compilerOptions": {
-        "types": ["node"]
+        "types": ["node"],
+        // The client's tsconfig roots at `client/src`; these sources sit beside it, not under it.
+        "rootDir": "."
     },
     "include": ["./**/*.ts"],
     "exclude": ["node_modules", "playwright-report", "test-results"]

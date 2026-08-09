@@ -8,8 +8,10 @@
   "scripts": {
     "clean": "rimraf node_modules .auth test-results playwright-report",
     "e2e:install": "playwright install chromium",
+    "test": "playwright test",
+    "typecheck": "tsc --noEmit",
     "e2e:test": "playwright test --project=base",
-    "e2e:test-extended": "playwright test --project=base --project=extended",
+    "e2e:test-flow": "playwright test --project=flow-invoice --project=flow-restart",
     "e2e:test-ui": "playwright test --ui",
     "e2e:report": "playwright show-report",
     "lint": "eslint .",

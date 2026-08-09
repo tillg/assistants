@@ -190,6 +190,18 @@
                         "id": "ctrl_createdAt",
                         "elementRef": "f_createdAt",
                         "readonly": true
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_parentConversationId",
+                        "elementRef": "f_parentConversationId",
+                        "readonly": true
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_currentQuestionId",
+                        "elementRef": "f_currentQuestionId",
+                        "readonly": true
                       }
                     ]
                   }
@@ -389,6 +401,42 @@
         {
           "elementRef": "f_lastError",
           "exposition": "AREA"
+        },
+        {
+          "elementRef": "f_parentConversationId",
+          "label": {
+            "type": "Multilingual",
+            "multilingualText": {
+              "text": [
+                {
+                  "locale": "en",
+                  "text": "Called by"
+                },
+                {
+                  "locale": "de",
+                  "text": "Aufgerufen von"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "elementRef": "f_currentQuestionId",
+          "label": {
+            "type": "Multilingual",
+            "multilingualText": {
+              "text": [
+                {
+                  "locale": "en",
+                  "text": "Waiting on question"
+                },
+                {
+                  "locale": "de",
+                  "text": "Wartet auf Frage"
+                }
+              ]
+            }
+          }
         },
         {
           "elementRef": "f_entry_text",

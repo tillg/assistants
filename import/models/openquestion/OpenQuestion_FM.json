@@ -177,6 +177,25 @@
                         "id": "ctrl_kind",
                         "elementRef": "f_kind",
                         "readonly": true
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_conversationId",
+                        "elementRef": "f_conversationId",
+                        "readonly": true
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Row",
+                    "id": "row_2",
+                    "name": "r2",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_subjectThingId",
+                        "elementRef": "f_subjectThingId",
+                        "readonly": true
                       }
                     ]
                   }
@@ -193,8 +212,8 @@
                 "row": [
                   {
                     "type": "Row",
-                    "id": "row_2",
-                    "name": "r2",
+                    "id": "row_3",
+                    "name": "r3",
                     "cell": [
                       {
                         "type": "Control",
@@ -294,8 +313,8 @@
                 "row": [
                   {
                     "type": "Row",
-                    "id": "row_3",
-                    "name": "r3",
+                    "id": "row_4",
+                    "name": "r4",
                     "cell": [
                       {
                         "type": "Control",
@@ -322,8 +341,8 @@
                 "row": [
                   {
                     "type": "Row",
-                    "id": "row_4",
-                    "name": "r4",
+                    "id": "row_5",
+                    "name": "r5",
                     "cell": [
                       {
                         "type": "Control",
@@ -359,6 +378,24 @@
         {
           "elementRef": "f_text",
           "exposition": "AREA"
+        },
+        {
+          "elementRef": "f_subjectThingId",
+          "label": {
+            "type": "Multilingual",
+            "multilingualText": {
+              "text": [
+                {
+                  "locale": "en",
+                  "text": "About"
+                },
+                {
+                  "locale": "de",
+                  "text": "Betrifft"
+                }
+              ]
+            }
+          }
         },
         {
           "elementRef": "f_option_value",

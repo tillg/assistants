@@ -104,7 +104,11 @@ export class A12Client {
         const url = `${this.baseUrl}/api/user/local/login`;
         const response = await this.doFetch(url, {
             method: "POST",
-            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+                "Accept-Language": this.locale,
+            },
             body: JSON.stringify({ username: this.options.username, password: this.options.password }),
         });
         if (!response.ok) {
@@ -133,6 +137,11 @@ export class A12Client {
                 method: "POST",
                 headers: {
                     Accept: "application/json",
+                    // Node's fetch sends `Accept-Language: *` by default, and the Data Service
+                    // takes the locale from that header: QUERY then fails with
+                    // "Unable to construct query for unsupported locale: *". Pinning it is the
+                    // whole fix, and it is invisible until the first query.
+                    "Accept-Language": this.locale,
                     "Content-Type": "application/json;charset=utf8",
                     Authorization: `UAABearer ${token}`,
                 },

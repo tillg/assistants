@@ -67,6 +67,27 @@ export default defineConfig({
             dependencies: ["setup-auth"]
         },
 
+        // The two flow specs drive the *live* Assistants, and the second one restarts the stack
+        // underneath the first. Playwright has no per-project worker limit, so each one is its
+        // own project and the chain of `dependencies` is what serialises them — against each
+        // other and against everything in `base`.
+        {
+            name: "flow-invoice",
+            use: { ...devices["Desktop Chrome"], channel: "chromium" },
+            testDir: "./tests/flow",
+            testMatch: /1-invoice-slice\.spec\.ts/,
+            timeout: 600_000,
+            dependencies: ["base"]
+        },
+        {
+            name: "flow-restart",
+            use: { ...devices["Desktop Chrome"], channel: "chromium" },
+            testDir: "./tests/flow",
+            testMatch: /2-restart\.spec\.ts/,
+            timeout: 900_000,
+            dependencies: ["flow-invoice"]
+        },
+
         { name: "setup-auth", testMatch: /auth\.setup\.ts/, teardown: "cleanup" },
         { name: "cleanup", testMatch: /auth\.teardown\.ts/ }
     ]

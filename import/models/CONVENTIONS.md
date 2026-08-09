@@ -10,6 +10,7 @@ the system's hot path. See `specs/changes/first-running-system/architecture.md`.
 import/models/<thing>/<Thing>_DM.json    document model   — the data
 import/models/<thing>/<Thing>_FM.json    form model       — how one is shown and edited
 import/models/<thing>/<Thing>_OM.json    overview model   — how a list of them is shown
+import/models/<thing>/<Name>_QeM.json    query model      — a default constraint for an overview
 import/models/AssistantsAppModel_AM.json application model — navigation (owned centrally)
 ```
 
@@ -25,6 +26,11 @@ Copy these exactly; they are metamodel versions and move independently of the A1
 | Form | `form` | `39.0.0` |
 | Overview | `overview` | `39.0.0` |
 | Application | `application` | `6.0.0` |
+| Query | `query` | `0.2.1` |
+
+`query` is the one exception: `@com.mgmtp.a12.querymodel/querymodel-core` declares no `modelType` /
+`modelVersion` in its `package.json`, so `collectA12ModelVersions()` never emits a `"query"` key and
+nothing checks the value. `0.2.1` is the package's own version, used for traceability.
 
 ## Header
 
@@ -216,7 +222,43 @@ button (`scope: HIDDEN_IN_EDIT_MODE`). A **read-only** form (Conversation) omits
 `content.columns[]` entries are `{id, label[], width, elementRef, sortable, preferredSorting}`.
 Keep overviews to scalars — never a column into a repeating group. Include a `rowActionGroup`
 with a confirmed `delete` action and a `subHeaderBox` with an Add button, except where creation is
-the Runtime's job (`Conversation`, `RuntimeState`).
+the Runtime's job (`Conversation`, `RuntimeState`, `OpenQuestion` — those carry
+`"leftSlot": []`).
+
+## Query models — the only way to give an overview a default constraint
+
+An overview model cannot carry a default constraint itself. A **query model** can, and
+`overview-engine-data-provider.ts` ANDs it into every `LIST_DOCUMENTS` and `EXPORT` query:
+
+```ts
+return QueryBuilder.and(
+    modelsState.queryModel?.content.constraint,
+    ...FieldBasedFiltering.toOperators(activeFilters ?? {}, modelsState),
+    ...
+).build();
+```
+
+The overview finds it by `purpose` (`selectors.ts`):
+
+```ts
+({ modelType, purpose }) => modelType === "query" && purpose === "query-model-for-overview"
+```
+
+**The trap**: once a query model is present, the document model is resolved *exclusively* from the
+query model's own `document-model-for-query` reference — the OM's `document-model-for-overview`
+branch becomes the `else`. A query model that omits that reference silently kills the overview.
+Keep the reference on **both** models: the OM needs it for `validate-models.mjs`, the QM needs it
+for the runtime.
+
+`content` is a `Query.QueryRoot`, so `targetDocumentModel`, `projectionName` and `paging` are
+required by the type even though the overview overrides paging from UI state. Field paths are the
+same `/<RootGroupName>/<FieldName>` the Runtime uses (`things.ts` `path()`), **not** field ids.
+Leave `content.sort` out unless you mean it — its absence keeps the engine's `/__meta/createdAt`
+DESC fallback and lets the columns' `preferredSorting` win.
+
+The `_QeM` suffix is ours. Nothing in A12 maps model types to file suffixes: the WCF converter
+dispatches purely on `header.modelType` and writes `<header.id>.json`, and the Data Service
+persists any non-`document` model generically.
 
 ## Who writes what
 

@@ -50,7 +50,13 @@ export enum DataType {
     String,
     Select,
     Check,
-    File
+    File,
+    /**
+     * A `StringType` carrying a `hintList`. The form engine renders those as an autocomplete —
+     * an `<input role="combobox">` that still accepts free text — so it is neither a plain
+     * textbox nor a `<select>`, and needs its own handling.
+     */
+    Autocomplete
 }
 
 export type TestUsername = keyof typeof USERS;

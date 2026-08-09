@@ -1,0 +1,51 @@
+{
+  "header": {
+    "id": "OpenQuestionPending_QeM",
+    "modelType": "query",
+    "modelVersion": "0.2.1",
+    "locales": [
+      {
+        "code": "en"
+      },
+      {
+        "code": "de"
+      }
+    ],
+    "labels": [
+      {
+        "locale": "en",
+        "text": "Pending open questions"
+      },
+      {
+        "locale": "de",
+        "text": "Unbeantwortete offene Fragen"
+      }
+    ],
+    "annotations": [
+      {
+        "name": "roles",
+        "value": "user,runtime"
+      }
+    ],
+    "modelReferences": [
+      {
+        "purpose": "document-model-for-query",
+        "modelType": "document",
+        "alias": "DM",
+        "reference": "OpenQuestion_DM"
+      }
+    ]
+  },
+  "content": {
+    "targetDocumentModel": "OpenQuestion_DM",
+    "projectionName": "document",
+    "paging": {
+      "pageNumber": 0,
+      "pageSize": 10
+    },
+    "constraint": {
+      "operator": "undefined_match",
+      "field": "/OpenQuestion/AnsweredAt"
+    }
+  }
+}

@@ -151,6 +151,8 @@ export class FireflyConnector {
         currencyCode?: string;
         openingBalance?: string;
         openingBalanceDate?: string;
+        liabilityType?: string;
+        liabilityDirection?: string;
     }): Promise<FireflyAccount> {
         const body: Record<string, unknown> = {
             name: input.name,
@@ -158,6 +160,20 @@ export class FireflyConnector {
             currency_code: input.currencyCode ?? "EUR",
         };
         if (input.type === "asset") body["account_role"] = input.role ?? "defaultAsset";
+        if (input.type === "liability" || input.type === "liabilities") {
+            // Firefly rejects a liability without these: "The liability type field is required
+            // when type is liability." A household payables account is a debt we owe, carrying
+            // no interest.
+            body["type"] = "liability";
+            body["liability_type"] = input.liabilityType ?? "debt";
+            body["liability_direction"] = input.liabilityDirection ?? "credit";
+            body["interest"] = "0";
+            body["interest_period"] = "monthly";
+            if (!input.openingBalance) {
+                body["opening_balance"] = "0";
+                body["opening_balance_date"] = todayIso();
+            }
+        }
         if (input.openingBalance) {
             body["opening_balance"] = input.openingBalance;
             body["opening_balance_date"] = input.openingBalanceDate ?? todayIso();

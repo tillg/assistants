@@ -43,7 +43,7 @@ import { BasePage } from "./BasePage";
 export class FormPage extends BasePage {
     protected readonly form: Locator;
     constructor(
-        protected readonly page: Page,
+        protected override readonly page: Page,
         protected readonly formLocator: Locator = page.getByRole("form")
     ) {
         super(page);
@@ -67,6 +67,7 @@ export class FormPage extends BasePage {
         const input = getByLabelWithOptionalAsterisk(locator, label, type);
         switch (type) {
             case DataType.Select:
+            case DataType.Autocomplete:
             case DataType.String:
                 await expect(input).toHaveValue(value);
                 break;
@@ -104,6 +105,11 @@ export class FormPage extends BasePage {
             case DataType.Select:
                 await input.selectOption(value);
                 break;
+            case DataType.Autocomplete:
+                await input.fill(value);
+                // The suggestion list opens on every keystroke and would swallow the next click.
+                await input.press("Escape");
+                break;
             case DataType.Check:
                 isChecked = await input.isChecked();
                 if (value === "true") {
@@ -136,7 +142,7 @@ export class FormPage extends BasePage {
         await expect(rows).toHaveCount(testData.length);
 
         for (let i = 0; i < testData.length; i++) {
-            for (const field of testData[i]) {
+            for (const field of testData[i] ?? []) {
                 await this.assertFieldValue(field, rows.nth(i));
             }
         }
@@ -165,6 +171,50 @@ export class FormPage extends BasePage {
         if (shouldCloseForm) {
             await this.toBeHidden();
         }
+    }
+
+    /**
+     * Instance forms open read-only. `Edit` is `HIDDEN_IN_EDIT_MODE` and `Save` is
+     * `HIDDEN_IN_READONLY_MODE`, so which of the two is on screen *is* the form's mode.
+     */
+    async startEditing() {
+        const edit = this.form.getByRole("button", { name: "Edit" });
+        if (await edit.isVisible()) {
+            await edit.click();
+        }
+        await expect(this.form.getByRole("button", { name: "Save" })).toBeVisible();
+        await this.finishedLoading();
+    }
+
+    /** Save an instance form and wait for it to fall back to read-only, which only a good save does. */
+    async saveEdits() {
+        await this.form.getByRole("button", { name: "Save", disabled: false }).click();
+        await this.finishedLoading();
+        await expect(this.form.getByRole("button", { name: "Edit" })).toBeVisible();
+    }
+
+    /**
+     * The Lexical editor behind a control annotated `widget: markdown-editor`.
+     *
+     * It is a `contenteditable` with `role="textbox"`, labelled by the control — which is exactly
+     * how a test tells it apart from the plain `<textarea>` the default widget map would render.
+     */
+    markdownEditor(label: string, locator: Locator = this.form): Locator {
+        return locator.getByRole("textbox", { name: new RegExp(`^${label}\\s*\\*?$`) });
+    }
+
+    /** The static toolbar the rich text editor puts above its content. */
+    markdownToolbar(locator: Locator = this.form): Locator {
+        return locator.locator('[data-role="rich-text-editor-toolbar"]');
+    }
+
+    /** Replace a markdown field's content by typing, so the markdown shortcuts actually fire. */
+    async typeMarkdown(label: string, markdown: string, locator: Locator = this.form) {
+        const editor = this.markdownEditor(label, locator);
+        await editor.click();
+        await this.page.keyboard.press("ControlOrMeta+a");
+        await this.page.keyboard.press("Backspace");
+        await editor.pressSequentially(markdown, { delay: 15 });
     }
 
     async createDocument(data: TestData[]) {

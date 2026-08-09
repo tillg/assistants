@@ -30,4 +30,31 @@
  * LEGALLY INVALID. SEE THE RESPECTIVE LICENSE TEXT FOR DETAILS.
  */
 
+import path from "node:path";
+
+/** The UserInterface — the A12 web application. */
 export const BASE_URL = process.env.BASE_URL || "http://localhost:8081";
+
+/** The ThingStore — the A12 Data Service. JSON-RPC lives under `/api/v2/rpc`. */
+export const THINGSTORE_URL = process.env.THINGSTORE_URL || "http://localhost:8082";
+
+/** Bookkeeping — Firefly III. REST lives under `/api/v1`. */
+export const FIREFLY_URL = process.env.FIREFLY_URL || "http://localhost:8084";
+
+/** The repository root, so the flow tests can drive `docker compose` the way `just` does. */
+export const REPO_ROOT = path.resolve(process.cwd(), "..");
+
+/** The compose invocation the justfile uses, minus the `docker` binary itself. */
+export const COMPOSE_ARGS = ["compose", "-f", "compose/docker-compose.yml", "--env-file", "compose/.env"];
+
+/**
+ * Everything these tests create carries this prefix, so a clean-up pass can tell its own
+ * leftovers from the demo household — and never delete the latter.
+ */
+export const E2E_PREFIX = "E2E";
+
+/**
+ * The Runtime scans every two seconds and the invoice slice takes several turns across two
+ * Assistants, with a human answer in the middle. Nothing here is fast; be generous.
+ */
+export const AGENT_TIMEOUT_MS = Number(process.env.AGENT_TIMEOUT_MS || 180_000);

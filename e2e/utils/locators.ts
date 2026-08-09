@@ -42,6 +42,7 @@ export function getByLabelWithOptionalAsterisk(scope: Page | Locator, label: str
         case DataType.String:
             return scope.getByRole("textbox", { name: labelRegex });
         case DataType.Select:
+        case DataType.Autocomplete:
             return scope.getByRole("combobox", { name: labelRegex });
         case DataType.Check:
             return scope.getByRole("checkbox", { name: labelRegex });

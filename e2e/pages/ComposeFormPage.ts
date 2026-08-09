@@ -41,15 +41,15 @@ export class ComposeFormPage extends FormPage {
     protected readonly relationForm: Locator;
 
     constructor(
-        protected readonly page: Page,
-        protected readonly formLocator: Locator = page.getByRole("form").first(),
+        protected override readonly page: Page,
+        protected override readonly formLocator: Locator = page.getByRole("form").first(),
         protected readonly relationFormLocator: Locator = page.getByRole("form").nth(1)
     ) {
         super(page, formLocator);
         this.relationForm = relationFormLocator;
     }
 
-    async createDocument(data: TestData[], relationData: TestData[] = []): Promise<void> {
+    override async createDocument(data: TestData[], relationData: TestData[] = []): Promise<void> {
         for (const field of data) {
             await this.inputFieldValue(field);
         }

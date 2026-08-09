@@ -4,7 +4,7 @@
 
 set shell := ["bash", "-uc"]
 
-compose := "docker compose -f compose/docker-compose.yml --env-file compose/.env"
+compose := "docker compose -p assistants -f compose/docker-compose.yml --env-file compose/.env"
 gradle  := "gradle --no-daemon"
 
 # Show the available commands.

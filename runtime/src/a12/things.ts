@@ -136,12 +136,12 @@ export const SPECS = {
             ...MACHINE_FIELDS,
         },
         groups: {
-            skills: { name: "Skills", fields: { name: "Name", instructions: "Instructions" } },
+            skills: { name: "Skills", fields: { name: "SkillName", instructions: "SkillInstructions" } },
             triggers: {
                 name: "Triggers",
-                fields: { kind: "Kind", modelFilter: "ModelFilter", cron: "Cron" },
+                fields: { kind: "TriggerKind", modelFilter: "TriggerModelFilter", cron: "TriggerCron" },
             },
-            tools: { name: "Tools", fields: { operation: "Operation" } },
+            tools: { name: "Tools", fields: { operation: "ToolOperation" } },
         },
     },
     Conversation_DM: {
@@ -201,7 +201,7 @@ export const SPECS = {
             ...MACHINE_FIELDS,
         },
         groups: {
-            options: { name: "Options", fields: { value: "Value", label: "Label" } },
+            options: { name: "Options", fields: { value: "OptionValue", label: "OptionLabel" } },
         },
     },
     RuntimeState_DM: {

@@ -22,7 +22,7 @@ import { A12Client } from "../a12/client.js";
 import { eq, nowIso, path as fieldPath, SPECS, ThingRepository } from "../a12/things.js";
 import { FireflyConnector } from "../connectors/firefly.js";
 import { RUNTIME_STATE_KEY } from "../watcher/watcher.js";
-import { setPaused } from "../bootstrap/cli.js";
+import { setPaused } from "../bootstrap/bootstrap.js";
 import { sleep } from "../loop/advance.js";
 import {
     DEMO_ACCOUNTS,

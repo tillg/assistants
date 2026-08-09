@@ -91,7 +91,7 @@
                   ]
                 }
               },
-              "priority": "SECONDARY"
+              "priority": "PRIMARY"
             },
             "event": "event_edit",
             "scope": "HIDDEN_IN_EDIT_MODE"

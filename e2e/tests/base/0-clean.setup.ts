@@ -30,20 +30,47 @@
  * LEGALLY INVALID. SEE THE RESPECTIVE LICENSE TEXT FOR DETAILS.
  */
 
-import { type Page, test } from "../../fixtures";
-import { OverviewPage } from "../../pages/OverviewPage";
+/**
+ * Clean up after earlier runs — and nothing else.
+ *
+ * Two rules shape this file:
+ *
+ *   1. **Never delete a Conversation or an Open Question.** Those are Runtime-owned. Removing one
+ *      mid-flight strands a Conversation on a question that no longer exists, and the resulting
+ *      failure surfaces three tests later in something unrelated.
+ *   2. **Destructive setup runs behind the kill switch.** `RuntimeState.paused` stops the watcher
+ *      dead; deleting Things it is scanning without it is how a suite becomes flaky.
+ *
+ * So this removes only the Things *these tests* created — recognisable by the `E2E` prefix — and
+ * leaves the demo household alone.
+ */
 
-test.describe("Open Question Module - Clean up", () => {
-    let page: Page;
-    let overviewPage: OverviewPage;
-    test.beforeEach(async ({ getPageAs }) => {
-        page = await getPageAs("admin");
-        overviewPage = new OverviewPage(page);
-        await overviewPage.gotoHome();
-        await overviewPage.clickMenuItem("Open Questions");
-    });
+import { test } from "@playwright/test";
 
-    test("should delete all open questions in the overview", async () => {
-        await overviewPage.deleteAllRows();
+import { E2E_PREFIX } from "../../utils/config";
+import { ThingStore } from "../../utils/thingstore";
+
+const DISPOSABLE: Array<{ model: string; root: string; field: string }> = [
+    { model: "Party_DM", root: "Party", field: "Name" },
+    { model: "Document_DM", root: "Document", field: "Title" }
+];
+
+test("Remove Things left behind by earlier e2e runs", async () => {
+    test.setTimeout(120_000);
+    const store = await ThingStore.connect("admin");
+
+    await store.withRuntimePaused(async () => {
+        for (const { model, root, field } of DISPOSABLE) {
+            const entries = await store.query(model);
+            const stale = entries.filter((entry) => {
+                const body = (entry.document[root] ?? {}) as Record<string, unknown>;
+                return String(body[field] ?? "").startsWith(E2E_PREFIX);
+            });
+            for (const entry of stale) {
+                await store.deleteDocument(entry.docRef);
+            }
+            // eslint-disable-next-line no-console
+            console.log(`cleaned ${stale.length} leftover ${model} Thing(s)`);
+        }
     });
 });

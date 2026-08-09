@@ -36,16 +36,20 @@ import { TestID } from "../../types/testIds";
 
 test.describe("Login flow", () => {
     for (const username of USERNAMES) {
-        test(`should login with the ${username} user`, async ({ getPageAs }) => {
+        test(`should login with the ${username} user and render the app frame`, async ({ getPageAs }) => {
             const page = await getPageAs(username);
             await page.goto("/");
 
-            const popupTrigger = page
-                .getByTestId(TestID.APPLICATION_HEADER)
-                .getByTestId(TestID.POPUP_TRIGGER_ELEMENT)
-                .filter({ hasText: username })
-                .first();
+            // The app frame: header, the identity it was reached with, and a navigable menu.
+            const header = page.getByTestId(TestID.APPLICATION_HEADER);
+            await expect(header).toBeVisible();
+
+            const popupTrigger = header.getByTestId(TestID.POPUP_TRIGGER_ELEMENT).filter({ hasText: username }).first();
             await expect(popupTrigger).toBeVisible();
+
+            await expect(page.getByTestId(TestID.MENU_ITEM).first()).toBeVisible();
+            await expect(page.getByTestId(TestID.CONTENTBOX_TITLE).first()).toBeVisible();
+
             await popupTrigger.click();
             await expect(page.getByTestId(TestID.POPUP_MENU)).toContainText("Logged in as");
             await expect(page.getByTestId(TestID.POPUP_MENU)).toContainText(username);

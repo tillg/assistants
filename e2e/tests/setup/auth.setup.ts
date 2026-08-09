@@ -55,7 +55,7 @@ test("Auth setup", async ({ browser }) => {
             .filter({ hasText: username })
             .first();
         await expect(popupTrigger).toBeVisible({ timeout: 30_000 });
-        
+
         const sessionData = await extractSessionData(page);
         await writeUserSessionData(username, sessionData);
     }
@@ -68,7 +68,9 @@ async function extractSessionData(page: Page): Promise<Record<string, string>> {
         const data: Record<string, string> = {};
         for (let i = 0; i < sessionStorage.length; i++) {
             const key = sessionStorage.key(i);
-            if (!key) continue;
+            if (!key) {
+                continue;
+            }
             data[key] = sessionStorage.getItem(key) || "";
         }
         return data;
