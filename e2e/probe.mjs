@@ -2,49 +2,68 @@ import { chromium } from "@playwright/test";
 
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+page.on("console", (m) => {
+    if (m.type() === "error") console.log("PAGE ERROR:", m.text().slice(0, 200));
+});
 await page.goto("http://localhost:8081/");
 await page.fill("#username", "admin");
 await page.fill("#password", "A12PT-admintest");
 await page.press("#password", "Enter");
 await page.waitForTimeout(6000);
 
-// Parties
-await page.locator('[data-role=menu-item]').filter({ hasText: "Parties" }).click();
-await page.waitForTimeout(3000);
+// ---------- autocomplete behaviour ----------
+await page.locator("[data-role=menu-item]").filter({ hasText: "Parties" }).click();
+await page.waitForTimeout(2500);
 await page.getByRole("button", { name: "Add" }).click();
-await page.waitForTimeout(3000);
+await page.waitForTimeout(2500);
 
-const info = await page.evaluate(() => {
-    const out = [];
-    document.querySelectorAll("form input, form textarea, form select, form [contenteditable]").forEach((el) => {
-        out.push({
-            tag: el.tagName,
-            type: el.getAttribute("type"),
-            role: el.getAttribute("role"),
-            id: el.id,
-            name: el.getAttribute("name"),
-            aria: el.getAttribute("aria-label"),
-            labelledby: el.getAttribute("aria-labelledby"),
-            labelText: (() => {
-                const lb = el.getAttribute("aria-labelledby");
-                if (lb) {
-                    return lb
-                        .split(" ")
-                        .map((i) => document.getElementById(i)?.textContent)
-                        .join("|");
-                }
-                const l = el.id ? document.querySelector(`label[for="${el.id}"]`) : null;
-                return l?.textContent ?? null;
-            })()
-        });
-    });
-    return out;
-});
-console.log("FORM FIELDS:", JSON.stringify(info, null, 1));
+const form = page.getByRole("form");
+const byLabel = form.getByLabel(/^Role\s*\*?$/);
+console.log("getByLabel Role count:", await byLabel.count());
+await byLabel.fill("doctor");
+await page.waitForTimeout(400);
+console.log("after fill, combobox role count:", await form.getByRole("combobox", { name: /^Role\s*\*?$/ }).count());
+console.log("DOM after fill:", JSON.stringify(await page.evaluate(() => [...document.querySelectorAll("input")].map((el) => ({ id: el.id, role: el.getAttribute("role"), aria: el.getAttribute("aria-label"), lbl: el.id ? document.querySelector(`label[for="${el.id}"]`)?.textContent : null, val: el.value }))), null, 1));
+await page.locator("#a12-Role-f_role").press("Escape");
+await page.waitForTimeout(400);
+console.log("after escape:", JSON.stringify(await page.evaluate(() => { const el = document.getElementById("a12-Role-f_role"); return el ? { role: el.getAttribute("role"), val: el.value } : null; })));
+await page.getByRole("button", { name: "Cancel" }).click();
+await page.waitForTimeout(1500);
 
-const buttons = await page.evaluate(() =>
-    [...document.querySelectorAll("form button")].map((b) => b.textContent?.trim()).filter(Boolean)
+// ---------- assistant instance form ----------
+await page.locator("[data-role=menu-item]").filter({ hasText: "Assistants" }).click();
+await page.waitForTimeout(2500);
+await page.locator("[data-role=table-body-row]").filter({ hasText: "receptionist" }).first().click();
+await page.waitForTimeout(2500);
+console.log(
+    "instance form buttons:",
+    await page.evaluate(() => [...document.querySelectorAll('[role="form"] button')].map((b) => b.textContent?.trim()))
 );
-console.log("FORM BUTTONS:", JSON.stringify(buttons));
-await page.screenshot({ path: "/Users/tgartner/git/assistents/tmp/party-add.png", fullPage: true });
+await page.getByRole("form").getByRole("button", { name: "Edit" }).click();
+await page.waitForTimeout(2000);
+console.log(
+    "edit mode buttons:",
+    await page.evaluate(() => [...document.querySelectorAll('[role="form"] button')].map((b) => b.textContent?.trim()))
+);
+const editor = page.getByRole("form").getByRole("textbox", { name: /^System prompt\s*\*?$/ });
+console.log("systemPrompt editor count:", await editor.count());
+console.log("  contenteditable:", await editor.first().getAttribute("contenteditable"));
+console.log("  data-lexical-editor:", await editor.first().getAttribute("data-lexical-editor"));
+console.log("  toolbar count:", await page.locator('[data-role="rich-text-editor-toolbar"]').count());
+
+await editor.first().click();
+await page.keyboard.press("ControlOrMeta+a");
+await page.keyboard.press("Backspace");
+await editor.first().pressSequentially("## Probe heading\nSome **bold** text.", { delay: 15 });
+await page.waitForTimeout(500);
+console.log("h2 in editor:", await editor.first().locator("h2").count(), "strong:", await editor.first().locator("strong").count());
+
+await page.getByRole("form").getByRole("button", { name: "Save" }).click();
+await page.waitForTimeout(4000);
+console.log(
+    "after save buttons:",
+    await page.evaluate(() => [...document.querySelectorAll('[role="form"] button')].map((b) => b.textContent?.trim()))
+);
+console.log("form count after save:", await page.getByRole("form").count());
+await page.screenshot({ path: "/Users/tgartner/git/assistents/tmp/assistant-after-save.png", fullPage: true });
 await browser.close();

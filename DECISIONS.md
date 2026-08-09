@@ -321,3 +321,52 @@ localhost, and at that point it must come back out.
 
 ---
 
+## D-014 — Findings that only a running stack could produce
+
+Not decisions so much as facts bought with time, recorded because each one cost an hour and none
+of them is written down anywhere else.
+
+1. **Node's `fetch` sends `Accept-Language: *`**, and the A12 Data Service derives a query's
+   locale from that header. Every `QUERY` failed with *"Unable to construct query for unsupported
+   locale: *"* until the client pinned the header. It is invisible until the first query, and the
+   same request works fine from `curl`, which sends no such header.
+2. **A12's `not` constraint takes a singular `operand`**, while `and` and `or` take `operands`
+   (an array). The wrong shape is rejected with *"Please provide operand for not operator"*.
+   Four of the six watcher scans used it.
+3. **`hintList` is an array keyed by locale**, not an object — the wrong shape fails model
+   conversion with a Jackson `HintLists` deserialisation error.
+4. **An empty `repositoryPolicies: []`** in `childAuthorizationDefinition.json` fails the whole
+   server's startup. The key has to be absent, not empty.
+5. **A dot in the Docker image group** makes Docker read the first path segment as a registry
+   hostname and try to resolve it over DNS. `com.mgmtp.assistants/frontend` is a DNS lookup;
+   `assistants/frontend` is a local image.
+6. **`docker compose` takes its project name from the directory**, not from any variable in the
+   `--env-file`, so containers were `assistants_*` while volumes were `compose_*`.
+7. **Repeating-group field names** in the models did not match what the Runtime wrote, and the
+   only symptom was `ADD_DOCUMENT ... rollback was performed`. There is now a test that compares
+   the Runtime's field map against the model JSON, because nothing in TypeScript can catch it.
+
+---
+
+## D-015 — What is deliberately not finished
+
+Recorded so nothing here comes as a surprise.
+
+- **The Accountant does not tag its bookings with the Invoice's ThingID.** The demo loader does,
+  and the mechanism works; the scripted LLM fixture simply does not pass `thingId` to
+  `postTransaction`. A live model reading its own tool schema would. Cosmetic, but it means the
+  live-flow booking is linked only by its idempotency key.
+- **Text extraction does not exist.** A Document's `extractedText` is supplied by whoever creates
+  it. `document.requestText` is a Manual Connector that asks the User to paste it.
+- **The content store runs embedded inside the server container** — that is the A12 template's own
+  `dev-env` profile, and it means attachment content does not survive `docker compose down`.
+  The documents themselves are in the external Postgres and do survive.
+- **A Conversation's transcript renders as a data grid**, not as a transcript. `just logs runtime`
+  is the debugging surface. Building a viewer would be exactly the custom client code D-005 exists
+  to avoid.
+- **`RuntimeState_FM` still has Edit and Save buttons** while `CONVENTIONS.md` describes the model
+  as Runtime-owned. That is deliberate for the `paused` kill switch, but the form lets a human
+  edit the watermark too, which they should not.
+
+---
+
