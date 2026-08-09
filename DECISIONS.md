@@ -462,3 +462,28 @@ see them strand. Green tests were evidence about the fake, not about the system.
 
 ---
 
+## D-018 — Final verification, and one accidental demonstration
+
+Verified on a live stack after every fix above, through the `just` recipes rather than by hand:
+
+```
+just bootstrap    → the two Assistants and the RuntimeState
+just demo-data    → 6 parties, 2 processes, 5 documents, 3 invoices, 3 transactions
+                    (re-run: the books recognised the existing bookings rather than duplicating)
+just test-models  → 26 models, 0 errors, 0 warnings
+just test-runtime → 40 passed
+just test-integration → 51 passed against the live Data Service and Firefly
+just test-client  → 288 passed
+```
+
+Then a document dropped into the ThingStore, end to end: Receptionist born → Invoice created →
+Accountant called → Open Question raised → suspended → answered → resumed → **96.50 EUR booked**.
+
+**The accidental demonstration**: switching the Data Service from embedded to external Postgres
+reinitialised the database, and every Thing was lost — but **every transaction the Accountant had
+booked was still there**. Bookkeeping is a separate Authority with its own storage and its own
+lifecycle (ADR-0006), and this is what that means in practice. It is also why `just demo-reset`
+has to be a full `down -v` cycle: no smaller reset is symmetric across two Authorities.
+
+---
+
