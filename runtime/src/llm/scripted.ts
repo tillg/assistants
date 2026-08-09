@@ -68,11 +68,22 @@ export class ScriptedProvider implements LlmProvider {
         );
 
         if (!step) {
-            log.warn("scripted LLM has no step for this call; answering", { assistantKey, turn });
+            // NOT `answered`. This is the compose default, so a user who follows the README and
+            // drops in a real invoice would otherwise watch the Conversation run off the end of
+            // the fixture and report success having done nothing. An error escalates into an Open
+            // Question, which is at least honest about it.
+            log.warn("scripted LLM has no step for this call", { assistantKey, turn });
             return {
-                text: `No scripted response for ${assistantKey} turn ${turn}.`,
+                text: "",
                 toolCalls: [],
-                finishReason: "answered",
+                finishReason: "error",
+                error: {
+                    message:
+                        `The scripted language model has no step for assistant "${assistantKey}" ` +
+                        `turn ${turn}. This stack is running with LLM_PROVIDER=scripted; set ` +
+                        `LLM_PROVIDER=openai and LLM_API_KEY to use a real model.`,
+                    transient: false,
+                },
             };
         }
 

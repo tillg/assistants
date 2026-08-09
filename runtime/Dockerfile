@@ -4,8 +4,8 @@
 
 FROM node:24-alpine AS build
 WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN npm install --no-audit --no-fund
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
 COPY tsconfig.json ./
 COPY src ./src
 RUN npx tsc
@@ -13,11 +13,10 @@ RUN npx tsc
 FROM node:24-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-COPY package.json package-lock.json* ./
-RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY --from=build /app/dist ./dist
 
-# curl is used by the compose healthcheck's sibling probe; node does the real check.
 RUN addgroup -S runtime && adduser -S runtime -G runtime
 USER runtime
 

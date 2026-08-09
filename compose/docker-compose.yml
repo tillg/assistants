@@ -34,11 +34,12 @@ services:
   frontend:
     image: ${FRONTEND_IMAGE}
     container_name: ${PROJECT_NAME}_frontend
+    restart: unless-stopped
     environment:
       NGINX_ASSISTANTS_SERVER_BASE_URL: http://server:8080/api
       NGINX_ASSISTANTS_SERVER_ACTUATOR_URL: http://server:8080/actuator
     ports:
-      - 8081:8081
+      - 127.0.0.1:8081:8081
     depends_on:
       - "server"
     networks:
@@ -47,8 +48,15 @@ services:
   server:
     image: ${SERVER_IMAGE}
     container_name: ${PROJECT_NAME}_server
+    restart: unless-stopped
     environment:
-      SPRING_PROFILES_ACTIVE: dev-env,dataservices-external_postgres
+      # `local-db-env`, NOT `dev-env`: the dev-env group transitively activates
+      # dataservices-embedded_postgres + contentstore-embedded_postgres, and an embedded
+      # Postgres beats an additionally-listed external one. Every Thing then lives in the
+      # container's writable layer and dies with the container. local-db-env is the same
+      # group with the external_postgres profiles instead; the datasource URLs below
+      # override the localhost defaults the `local-db` profile ships with.
+      SPRING_PROFILES_ACTIVE: local-db-env
       SERVER_PORT: 8080
       SERVER_ADDRESS: 0.0.0.0
 
@@ -80,16 +88,18 @@ services:
     networks:
       - a12_compose
     ports:
-      - 8082:8080
+      - 127.0.0.1:8082:8080
     volumes:
-      - ../import:/var/lib/a12/data/import
+      # Read-only: this tree carries the plaintext user YAML and the server only reads it.
+      - ../import:/var/lib/a12/data/import:ro
       - ../build/wcf-output/data/models:/var/lib/a12/data/models
 
   server-init:
     image: ${SERVER_INIT_IMAGE}
     container_name: ${PROJECT_NAME}_server-init
     environment:
-      SPRING_PROFILES_ACTIVE: dev-env,dataservices-external_postgres
+      # See the note on `server` -- dev-env would put the data in the container's writable layer.
+      SPRING_PROFILES_ACTIVE: local-db-env
       SPRING_DATASOURCES_DATASERVICES_URL: jdbc:postgresql://postgres:5432/${DATASERVICES_DB}
       SPRING_DATASOURCES_DATASERVICES_USERNAME: ${DATASERVICES_USERNAME}
       SPRING_DATASOURCES_DATASERVICES_PASSWORD: ${DATASERVICES_PASSWORD}
@@ -109,14 +119,16 @@ services:
     networks:
       - a12_compose
     volumes:
-      - ../import:/var/lib/a12/data/import
+      # Read-only: this tree carries the plaintext user YAML and the server only reads it.
+      - ../import:/var/lib/a12/data/import:ro
       - ../build/wcf-output/data/models:/var/lib/a12/data/models
 
   postgres:
     image: ${DOCKER_REGISTRY_FOR_READ}/postgres:${POSTGRES_VERSION}
     container_name: ${PROJECT_NAME}_postgres
+    restart: unless-stopped
     ports:
-      - 8083:5432
+      - 127.0.0.1:8083:5432
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       DATASERVICES_USER: ${DATASERVICES_USERNAME}
@@ -148,7 +160,7 @@ services:
     container_name: ${PROJECT_NAME:-assistants}_firefly
     restart: unless-stopped
     ports:
-      - 8084:8080
+      - 127.0.0.1:8084:8080
     environment:
       APP_ENV: production
       APP_DEBUG: "false"
@@ -185,7 +197,12 @@ services:
     # One-shot: registers the first (owner) user and mints a Personal Access
     # Token into the firefly_token volume, where the Runtime can read it.
     # Idempotent -- re-running logs in and reuses a still-valid token.
-    image: python:3.12-alpine
+    #
+    # alpine/curl, not python:3.12-alpine + `apk add curl`: the script needs only sh, curl and
+    # the busybox text tools, and installing curl at start-up made every `up` require the
+    # internet. Offline this container exited non-zero and, because `runtime` waits for it with
+    # service_completed_successfully, the Runtime never started at all.
+    image: alpine/curl:latest
     container_name: ${PROJECT_NAME:-assistants}_firefly-bootstrap
     restart: "no"
     environment:
@@ -194,7 +211,7 @@ services:
       FIREFLY_PASSWORD: ${FIREFLY_PASSWORD}
       TOKEN_FILE: /firefly-token/pat.txt
     entrypoint: ["/bin/sh", "-c"]
-    command: ["apk add --no-cache curl >/dev/null && exec /bootstrap.sh"]
+    command: ["exec /bootstrap.sh"]
     volumes:
       - ./firefly/bootstrap.sh:/bootstrap.sh:ro
       - firefly_token:/firefly-token
@@ -216,6 +233,11 @@ services:
     image: ${PROJECT_NAME:-assistants}/runtime:${PROJECT_VERSION:-dev}
     container_name: ${PROJECT_NAME:-assistants}_runtime
     restart: unless-stopped
+    # Stated, not merely implied by container_name: `--scale runtime=3` must fail on the
+    # constraint above, not on an incidental name clash whose error suggests removing the name.
+    scale: 1
+    deploy:
+      replicas: 1
     environment:
       THINGSTORE_URL: http://server:8080
       THINGSTORE_USER: runtime

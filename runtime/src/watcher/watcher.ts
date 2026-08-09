@@ -16,6 +16,7 @@ import {
     eq,
     nowIso,
     not,
+    or,
     parseIso,
     path as fieldPath,
     setButNot,
@@ -78,19 +79,24 @@ export class Watcher {
         const assistants = (
             await this.deps.things.search<Assistant>(SPECS.Assistant_DM, undefined, 100)
         ).filter((assistant) => assistant.data.enabled !== false);
+        const enabledKeys = new Set(assistants.map((assistant) => assistant.data.key ?? ""));
+
+        // Conversations already advanced in this pass, so scan 6 does not take a second Turn on
+        // the same one.
+        const handled = new Set<string>();
 
         // Scan 1 — Things that have materialised
         report.births += await this.scanMaterialised(state, assistants);
         // Scan 2 — the User has answered
-        report.continuations += await this.scanAnswered();
+        report.continuations += await this.scanAnswered(handled);
         // Scan 3 — wakeAt has passed
-        report.continuations += await this.scanWoken();
+        report.continuations += await this.scanWoken(handled);
         // Scan 4 — a lease has expired: the Runtime died mid-Turn
-        report.continuations += await this.scanExpiredLeases();
+        report.continuations += await this.scanExpiredLeases(handled);
         // Scan 5 — a child has finished and its parent has not been told
-        report.continuations += await this.scanResultDelivery();
+        report.continuations += await this.scanResultDelivery(handled);
         // Scan 6 — running Conversations that simply need their next Turn
-        report.continuations += await this.scanRunnable();
+        report.continuations += await this.scanRunnable(handled, enabledKeys);
 
         await this.stampHeartbeat(state);
         return report;
@@ -149,6 +155,7 @@ export class Watcher {
                 const creator = String(thing.data["createdByConversationId"] ?? "");
                 if (creator && (await this.isConversationRunning(creator))) continue;
 
+                let decided = true;
                 for (const assistant of triggered) {
                     const matches = (assistant.data.triggers ?? []).some(
                         (trigger) =>
@@ -160,7 +167,10 @@ export class Watcher {
                     if (await this.conversationExistsFor(assistant.data.key ?? "", thing.thingId)) {
                         continue;
                     }
-                    if (!this.withinBirthBudget(state)) break;
+                    if (!this.withinBirthBudget(state)) {
+                        decided = false;
+                        break;
+                    }
 
                     await this.deps.birth({
                         assistant,
@@ -180,6 +190,11 @@ export class Watcher {
                     state.data.birthsThisHour = (state.data.birthsThisHour ?? 0) + 1;
                 }
 
+                // The watermark may only pass a Thing that reached a decision. Advancing it past
+                // one that was *skipped* — because the budget ran out, or because its creating
+                // Conversation was still running — would put it permanently behind the watermark
+                // and it would never be birthed at all.
+                if (!decided) continue;
                 if (createdAt > newestSeen) {
                     newestSeen = createdAt;
                     boundaryDocRefs.length = 0;
@@ -207,12 +222,20 @@ export class Watcher {
      * the User may still be editing the record they just saved. Continuing clears `waitingFor`,
      * so the Conversation stops matching this scan, and the question is never touched twice.
      */
-    private async scanAnswered(): Promise<number> {
+    private async scanAnswered(handled: Set<string>): Promise<number> {
+        // `waitingFor` is "user" for ui.askUser and "tool" for every Manual Connector — and a
+        // Manual Connector is answered through exactly the same Open Question. Filtering on
+        // "user" alone left every email.send / bank.sendMoney / document.requestText suspended
+        // forever: no other scan can reach a waiting Conversation either, so it was terminal and
+        // silent, with the heartbeat still green.
         const waiting = await this.deps.things.search<Conversation>(
             SPECS.Conversation_DM,
             and(
                 eq(fieldPath(SPECS.Conversation_DM, "status"), "waiting"),
-                eq(fieldPath(SPECS.Conversation_DM, "waitingFor"), "user"),
+                or(
+                    eq(fieldPath(SPECS.Conversation_DM, "waitingFor"), "user"),
+                    eq(fieldPath(SPECS.Conversation_DM, "waitingFor"), "tool"),
+                ),
                 not(unset(fieldPath(SPECS.Conversation_DM, "currentQuestionId"))),
             ),
             100,
@@ -229,10 +252,29 @@ export class Watcher {
                     `OpenQuestion_DM/${questionId}`,
                 );
             } catch (error) {
-                log.warn("open question could not be read", {
+                // The question is gone — most likely deleted by hand. The Conversation is waiting
+                // on something that no longer exists, so without this it would wait forever.
+                log.warn("the open question a conversation was waiting on has gone", {
                     questionId,
+                    conversationId: conversation.thingId,
                     error: describeError(error),
                 });
+                appendEntry(conversation.data, {
+                    role: "system",
+                    kind: "error",
+                    text: `The question you were waiting on (\`${questionId}\`) no longer exists. It was probably deleted. Ask again if you still need an answer.`,
+                });
+                conversation.data.currentQuestionId = "";
+                conversation.data.waitingFor = "";
+                conversation.data.status = "running";
+                await this.deps.things.update(
+                    SPECS.Conversation_DM,
+                    conversation.docRef,
+                    conversation.data as Record<string, unknown>,
+                );
+                handled.add(conversation.docRef);
+                await this.runTurn(conversation.docRef);
+                continued += 1;
                 continue;
             }
             if (!question.data.answeredAt) continue;
@@ -250,6 +292,7 @@ export class Watcher {
                 conversation.docRef,
                 conversation.data as Record<string, unknown>,
             );
+            handled.add(conversation.docRef);
             await this.runTurn(conversation.docRef);
             continued += 1;
         }
@@ -258,7 +301,7 @@ export class Watcher {
 
     // ---------------------------------------------------------------- scan 3: wakeAt
 
-    private async scanWoken(): Promise<number> {
+    private async scanWoken(handled: Set<string>): Promise<number> {
         const waiting = await this.deps.things.search<Conversation>(
             SPECS.Conversation_DM,
             and(
@@ -285,6 +328,7 @@ export class Watcher {
                 conversation.docRef,
                 conversation.data as Record<string, unknown>,
             );
+            handled.add(conversation.docRef);
             await this.runTurn(conversation.docRef);
             continued += 1;
         }
@@ -293,7 +337,7 @@ export class Watcher {
 
     // ---------------------------------------------------------------- scan 4: expired leases
 
-    private async scanExpiredLeases(): Promise<number> {
+    private async scanExpiredLeases(handled: Set<string>): Promise<number> {
         const running = await this.deps.things.search<Conversation>(
             SPECS.Conversation_DM,
             and(
@@ -318,6 +362,7 @@ export class Watcher {
                 conversation.docRef,
                 conversation.data as Record<string, unknown>,
             );
+            handled.add(conversation.docRef);
             await this.runTurn(conversation.docRef);
             recovered += 1;
         }
@@ -326,11 +371,16 @@ export class Watcher {
 
     // ---------------------------------------------------------------- scan 5: result delivery
 
-    private async scanResultDelivery(): Promise<number> {
+    private async scanResultDelivery(handled: Set<string>): Promise<number> {
+        // `done` OR `failed`: a child that gave up still owes its caller an answer. Without this a
+        // parent waits on `assistant` forever with nothing anywhere saying why.
         const finished = await this.deps.things.search<Conversation>(
             SPECS.Conversation_DM,
             and(
-                eq(fieldPath(SPECS.Conversation_DM, "status"), "done"),
+                or(
+                    eq(fieldPath(SPECS.Conversation_DM, "status"), "done"),
+                    eq(fieldPath(SPECS.Conversation_DM, "status"), "failed"),
+                ),
                 setButNot(
                     fieldPath(SPECS.Conversation_DM, "parentConversationId"),
                     fieldPath(SPECS.Conversation_DM, "resultDeliveredAt"),
@@ -349,14 +399,23 @@ export class Watcher {
                     `Conversation_DM/${parentId}`,
                 );
 
+                const failed = child.data.status === "failed";
                 appendEntry(parent.data, {
                     role: "user",
                     kind: "answer",
-                    text: [
-                        `The **${child.data.assistantKey}** assistant you called has finished.`,
-                        ``,
-                        child.data.result ?? "(no result)",
-                    ].join("\n"),
+                    text: failed
+                        ? [
+                              `The **${child.data.assistantKey}** assistant you called did not finish.`,
+                              ``,
+                              child.data.lastError ?? "(no reason recorded)",
+                              ``,
+                              `Decide what to do without it.`,
+                          ].join("\n")
+                        : [
+                              `The **${child.data.assistantKey}** assistant you called has finished.`,
+                              ``,
+                              child.data.result ?? "(no result)",
+                          ].join("\n"),
                 });
 
                 const parentWasWaiting =
@@ -372,31 +431,37 @@ export class Watcher {
                     parent.data as Record<string, unknown>,
                 );
 
+                // Stamped only after the parent write succeeded. Stamping unconditionally would
+                // mark a failed delivery as delivered, and the scan would never retry it — the
+                // parent then waits on `assistant` forever with one warn line as the only trace.
+                child.data.resultDeliveredAt = nowIso();
+                await this.deps.things.update(
+                    SPECS.Conversation_DM,
+                    child.docRef,
+                    child.data as Record<string, unknown>,
+                );
+
                 // A result arriving for a Conversation that has already moved on is a log line,
                 // never a resurrection.
-                if (parentWasWaiting) await this.runTurn(parent.docRef);
+                if (parentWasWaiting) {
+                    handled.add(parent.docRef);
+                    await this.runTurn(parent.docRef);
+                }
                 delivered += 1;
             } catch (error) {
-                log.warn("could not deliver a result to the parent conversation", {
+                log.warn("could not deliver a result to the parent conversation; will retry", {
                     child: child.thingId,
                     parentId,
                     error: describeError(error),
                 });
             }
-
-            child.data.resultDeliveredAt = nowIso();
-            await this.deps.things.update(
-                SPECS.Conversation_DM,
-                child.docRef,
-                child.data as Record<string, unknown>,
-            );
         }
         return delivered;
     }
 
     // ---------------------------------------------------------------- scan 6: runnable
 
-    private async scanRunnable(): Promise<number> {
+    private async scanRunnable(handled: Set<string>, enabledKeys: Set<string>): Promise<number> {
         const runnable = await this.deps.things.search<Conversation>(
             SPECS.Conversation_DM,
             and(
@@ -407,6 +472,13 @@ export class Watcher {
         );
         let turns = 0;
         for (const conversation of runnable) {
+            // Scans 2-5 leave a Conversation `running` with no lease and advance it themselves.
+            // Without this guard scan 6 finds the same Conversation in the same pass and takes a
+            // second Turn — two LLM calls per scan, and maxTurns burning at twice the stated rate.
+            if (handled.has(conversation.docRef)) continue;
+            // A disabled Assistant's Conversation stays `running` forever; advancing it every two
+            // seconds just churns updatedAt and makes the log look busy.
+            if (!enabledKeys.has(conversation.data.assistantKey ?? "")) continue;
             await this.runTurn(conversation.docRef);
             turns += 1;
         }

@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "start": "node --enable-source-maps dist/index.js",
+    "start": "node --enable-source-maps dist/src/index.js",
     "dev": "tsx watch src/index.ts",
     "bootstrap": "tsx src/bootstrap/cli.ts",
     "demo": "tsx src/demo/cli.ts",

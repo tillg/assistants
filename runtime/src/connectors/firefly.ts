@@ -16,6 +16,9 @@
 import { readFileSync } from "node:fs";
 import { log } from "../log.js";
 
+/** No outbound call may hang the scan loop. */
+const REQUEST_TIMEOUT_MS = 20_000;
+
 export interface FireflyAccount {
     id: string;
     name: string;
@@ -90,6 +93,9 @@ export class FireflyConnector {
                 Accept: "application/json",
                 "Content-Type": "application/json",
             },
+            // Without this a service that accepts the connection and never answers wedges the
+            // whole scan loop indefinitely — the heartbeat freezes and SIGTERM cannot interrupt it.
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
             ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         });
 
@@ -222,7 +228,11 @@ export class FireflyConnector {
         thingId?: string;
         splits: PostingSplit[];
     }): Promise<{ id: string; alreadyExisted: boolean }> {
-        const existing = await this.findByExternalId(input.externalId).catch(() => undefined);
+        // Deliberately NOT `.catch(() => undefined)`. A failed probe is not evidence of absence:
+        // if the search 500s or the token has just rotated, treating that as "nothing there" posts
+        // a duplicate against real books, and ADR-0006 means nothing else holds a copy to
+        // disagree. Let it throw — it becomes a tool error the next Turn can see.
+        const existing = await this.findByExternalId(input.externalId);
         if (existing) {
             log.info("firefly: transaction already booked under this key", {
                 externalId: input.externalId,

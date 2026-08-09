@@ -37,7 +37,8 @@
 #   3. mint a Personal Access Token -> $TOKEN_FILE
 #
 # No artisan command can mint a PAT, so this drives the same HTTP endpoints the
-# web UI uses. Only curl + python3 are required.
+# web UI uses. Only sh, curl and the busybox text tools are required -- deliberately
+# nothing that has to be installed at start-up, so an offline `up` still works.
 set -eu
 
 BASE="${BASE:-http://firefly:8080}"
@@ -125,24 +126,23 @@ curl -sS -b "$CJ" -c "$CJ" -X POST "$BASE/oauth/personal-access-tokens" \
   -d "{\"name\":\"$TOKEN_NAME\",\"scopes\":[]}" \
   -o "$WORK/pat.json" -w 'PAT:        HTTP %{http_code}\n'
 
-TOKEN_FILE="$TOKEN_FILE" WORK="$WORK" python3 - <<'PY'
-import json, os, sys
-d = json.load(open(os.environ['WORK'] + '/pat.json'))
-if not d.get('accessToken'):
-    print('FAILED:', json.dumps(d)[:300]); sys.exit(1)
-path = os.environ['TOKEN_FILE']
-os.makedirs(os.path.dirname(path), exist_ok=True)
-with open(path, 'w') as fh:
-    fh.write(d['accessToken'])
+# The response is one flat JSON object and a PAT is base64url, so it never contains a quote --
+# the same grep/cut extraction the CSRF step above uses is enough, and it keeps python3 off the
+# dependency list.
+ACCESS_TOKEN="$(grep -oE '"accessToken" *: *"[^"]+"' "$WORK/pat.json" | head -1 | cut -d'"' -f4)"
+if [ -z "$ACCESS_TOKEN" ]; then
+  echo "FAILED: no accessToken in the response -- $(head -c 300 "$WORK/pat.json")"
+  exit 1
+fi
+mkdir -p "$(dirname "$TOKEN_FILE")"
+printf '%s' "$ACCESS_TOKEN" > "$TOKEN_FILE"
 # 0644, not 0600: this file is handed to the Runtime container through a shared volume, and the
 # Runtime deliberately runs as an unprivileged user, so a root-owned 0600 file is unreadable to it
 # (EACCES, which surfaces as every bookkeeping call failing). The volume is internal to the compose
 # stack, and the token is a development one.
-os.chmod(path, 0o644)
-print('accessTokenId:', d['accessTokenId'])
-print('expiresIn    :', d['expiresIn'], 's')
-print('-> %s (%d chars)' % (path, len(d['accessToken'])))
-PY
+chmod 0644 "$TOKEN_FILE"
+echo "accessTokenId: $(grep -oE '"accessTokenId" *: *"?[^",}]+' "$WORK/pat.json" | head -1 | cut -d: -f2- | tr -d '" ')"
+echo "-> $TOKEN_FILE ($(printf '%s' "$ACCESS_TOKEN" | wc -c | tr -d ' ') chars)"
 
 # ------------------------------------------------------------- 6. verify
 curl -fsS -o /dev/null \

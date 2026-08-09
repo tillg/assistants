@@ -77,12 +77,15 @@ demo-data:
 # Wipe everything and rebuild from scratch, including the books.
 # Firefly has no bulk delete and its data lives in a named volume, so a full teardown is the
 # only reset that is symmetric across both Authorities (ADR-0006, as an operational consequence).
-demo-reset: clean up wait bootstrap demo-data
+# `build` is not optional here: `clean` deletes build/wcf-output/data/models, which `up`
+# bind-mounts -- Docker would recreate it empty and the server would import zero models.
+demo-reset: clean build up wait bootstrap demo-data
 
 # Print the Firefly personal access token the bootstrap container minted.
+# Read it through the Runtime, which already has the token volume mounted -- no volume name to
+# guess and no second, differently-prefixed spelling of it to keep in sync.
 firefly-token:
-    @{{compose}} run --rm --no-deps -v firefly_token:/t --entrypoint sh firefly-bootstrap -c 'cat /t/pat.txt' 2>/dev/null \
-        || docker run --rm -v assistants_firefly_token:/t alpine cat /t/pat.txt
+    @{{compose}} exec -T runtime cat /run/firefly/pat.txt
 
 # Stop the Runtime from doing anything (the global kill switch).
 pause:
@@ -131,7 +134,7 @@ clean:
     -{{compose}} --profile server-init down -v --remove-orphans
     -{{gradle}} clean
     rm -rf build client/build runtime/dist e2e/test-results e2e/playwright-report
-    @echo "cleaned. `just dev` will rebuild from scratch."
+    @echo 'cleaned. `just dev` will rebuild from scratch.'
 
 # Remove node_modules too — for when a dependency tree has gone wrong.
 clean-all: clean

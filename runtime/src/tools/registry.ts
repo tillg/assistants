@@ -43,6 +43,20 @@ export interface ToolDefinition {
     /** True when the Operation changes state in some Authority. */
     mutating: boolean;
     execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolOutcome>;
+    /**
+     * "Did this call already land, under this key?"
+     *
+     * This is what makes the intent log worth keeping. When a Turn is recovered after a crash,
+     * the Conversation may hold a tool intent with no result: the Operation may have completed,
+     * or may never have started, and re-running it could book the same invoice twice.
+     *
+     * A mutating tool that cannot answer this question forces the recovery path to escalate to
+     * the User rather than guess — which is the safe default, not a bug.
+     */
+    reconcile?(
+        args: Record<string, unknown>,
+        context: ToolContext,
+    ): Promise<ToolOutcome | undefined>;
 }
 
 export class ToolRegistry {
@@ -81,6 +95,11 @@ export class ToolRegistry {
             const tool = this.tools.get(base);
             if (!tool) continue;
             if (base === "assistant.call") {
+                // A bare `assistant.call` (no `:callee`) is not a wildcard — it is a mistake.
+                // Without this guard `slice(indexOf(":") + 1)` returns the whole string and the
+                // Assistant is offered `assistant.call:assistant.call`, which throws on every use
+                // and burns a Turn against maxTurns.
+                if (!operation.includes(":")) continue;
                 const callee = operation.slice(operation.indexOf(":") + 1);
                 if (!callee || callee === assistant.key) continue; // no self-calls
                 granted.push(withCalleeBound(tool, callee));
@@ -141,5 +160,12 @@ function withCalleeBound(tool: ToolDefinition, callee: string): ToolDefinition {
         async execute(args, context) {
             return tool.execute({ ...args, assistantKey: callee }, context);
         },
+        ...(tool.reconcile
+            ? {
+                  async reconcile(args: Record<string, unknown>, context: ToolContext) {
+                      return tool.reconcile!({ ...args, assistantKey: callee }, context);
+                  },
+              }
+            : {}),
     };
 }

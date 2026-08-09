@@ -312,13 +312,31 @@ export class ThingRepository {
         return this.toStored<T>(spec, found);
     }
 
+    /**
+     * Update, merging onto the **raw stored document** rather than onto our projection of it.
+     *
+     * `MODIFY_DOCUMENT` is a whole-document replace, and this map deliberately does not cover
+     * everything a Model declares — `Document_DM`'s attachment group, for one. Building the
+     * outgoing document from the map alone therefore deleted the User's uploaded scan the moment
+     * an Assistant touched the Document's classification. Silently, because an empty attachment
+     * group is valid.
+     *
+     * Merging onto the raw document protects every field the map does not know about, including
+     * ones added to a Model later.
+     */
     async update<T extends Record<string, unknown>>(
         spec: ModelSpec,
         docRef: string,
         data: T,
     ): Promise<void> {
-        const withStamp = { ...data, updatedAt: nowIso() };
-        await this.client.modifyDocument(docRef, toDocument(spec, withStamp));
+        const current = await this.client.getDocument(docRef);
+        const rawRoot = (current.document[spec.root] ?? {}) as Record<string, unknown>;
+        const mapped = toDocument(spec, { ...data, updatedAt: nowIso() });
+        const mappedRoot = (mapped[spec.root] ?? {}) as Record<string, unknown>;
+        await this.client.modifyDocument(docRef, {
+            ...current.document,
+            [spec.root]: { ...rawRoot, ...mappedRoot },
+        });
     }
 
     async search<T>(spec: ModelSpec, constraint?: Constraint, pageSize = 100): Promise<Stored<T>[]> {

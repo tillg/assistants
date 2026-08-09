@@ -137,6 +137,25 @@ function safeParse(raw: string | undefined): Record<string, unknown> {
     }
 }
 
+/**
+ * The tool intent this Conversation wrote down but never recorded a result for.
+ *
+ * Its existence means exactly one thing: a Turn was interrupted between "we are about to do X"
+ * and "X returned". The Operation may have completed or may never have started, and the whole
+ * point of writing the intent first is that we must not guess.
+ */
+export function unresolvedIntent(conversation: Conversation): Entry | undefined {
+    const entries = conversation.entries ?? [];
+    const resolved = new Set(
+        entries
+            .filter((entry) => entry.kind === "tool-result")
+            .map((entry) => entry.idempotencyKey ?? ""),
+    );
+    return entries
+        .filter((entry) => entry.kind === "tool-intent")
+        .find((entry) => !resolved.has(entry.idempotencyKey ?? ""));
+}
+
 export class LoopDriver {
     constructor(private readonly deps: AdvanceDeps) {}
 
@@ -202,6 +221,30 @@ export class LoopDriver {
 
         conversation.status = "running";
         conversation.waitingFor = "";
+
+        // --- reconcile an interrupted Turn before starting a new one ----------------------
+        //
+        // This is the half of the intent log that makes writing it worthwhile. Without it,
+        // recovery calls the model again, the model re-issues the same tool call, and the new
+        // call gets a NEW idempotency key (the un-answered intent is itself in the log, so the
+        // sequence has moved on) — which is exactly how you book the same invoice twice.
+        const unresolved = unresolvedIntent(conversation);
+        if (unresolved) {
+            const settled = await this.reconcile(stored, assistant, unresolved);
+            if (!settled) {
+                await this.escalate(
+                    stored,
+                    assistant,
+                    "error",
+                    `This conversation was interrupted while calling **${unresolved.toolName}**, ` +
+                        `and I cannot tell whether that call took effect. Repeating it might do ` +
+                        `the work twice, so I have stopped instead.\n\nCheck whether it happened, ` +
+                        `then answer to tell me what to do.`,
+                );
+                return { status: conversation.status ?? "waiting", turnsRun: 0, note: "unreconcilable intent" };
+            }
+            await this.write(stored);
+        }
 
         // --- one Turn ---------------------------------------------------------------------
         this.deps.setLlmContext({
@@ -297,6 +340,22 @@ export class LoopDriver {
             }
 
             if (outcome.kind === "pending") {
+                // A tool call with no result is invalid to both OpenAI and Anthropic — each
+                // requires a tool message per tool call — so a suspended Conversation would fail
+                // the moment it resumed against a real provider. It also has to be distinguishable
+                // from a *crashed* call, which is what `unresolvedIntent` looks for. Both problems
+                // are solved by recording the suspension as the result.
+                appendEntry(conversation, {
+                    role: "tool",
+                    kind: "tool-result",
+                    toolName: operation,
+                    toolResult: JSON.stringify({
+                        pending: true,
+                        waitingFor: outcome.waitingFor,
+                        note: outcome.note ?? "Suspended; the answer will arrive as a later message.",
+                    }),
+                    idempotencyKey,
+                });
                 conversation.status = "waiting";
                 conversation.waitingFor = outcome.waitingFor;
                 conversation.wakeAt = outcome.wakeAt ?? "";
@@ -327,6 +386,84 @@ export class LoopDriver {
         conversation.status = "running";
         await this.write(stored);
         return { status: "running", turnsRun: 1 };
+    }
+
+    /**
+     * Ask the Connector whether an interrupted call landed. Never re-execute.
+     *
+     * Returns true when the question was settled (either way) and the transcript now has a result
+     * for that intent; false when nothing can answer it, in which case the caller escalates.
+     */
+    private async reconcile(
+        stored: Stored<Conversation>,
+        assistant: Stored<Assistant>,
+        intent: Entry,
+    ): Promise<boolean> {
+        const conversation = stored.data;
+        const operation = intent.toolName ?? "";
+        const key = intent.idempotencyKey ?? "";
+        const tool = this.deps.registry
+            .grantedTo(assistant.data)
+            .find((candidate) => candidate.name === operation);
+
+        log.warn("reconciling an interrupted tool call", {
+            conversationId: stored.thingId,
+            tool: operation,
+            idempotencyKey: key,
+        });
+
+        if (!tool) {
+            // The Operation is gone (renamed, or revoked from this Assistant). Nothing did it.
+            appendEntry(conversation, {
+                role: "tool",
+                kind: "tool-result",
+                toolName: operation,
+                toolResult: `Error: this call was interrupted, and "${operation}" is no longer available, so it did not take effect.`,
+                idempotencyKey: key,
+            });
+            return true;
+        }
+
+        if (!tool.mutating) {
+            // Read-only: repeating it is free and cannot be wrong.
+            appendEntry(conversation, {
+                role: "tool",
+                kind: "tool-result",
+                toolName: operation,
+                toolResult: "This call was interrupted. It only reads, so nothing was changed — ask again if you still need it.",
+                idempotencyKey: key,
+            });
+            return true;
+        }
+
+        if (!tool.reconcile) return false;
+
+        const context: ToolContext = { conversation: stored, assistant, idempotencyKey: key };
+        let outcome: ToolOutcome | undefined;
+        try {
+            outcome = await tool.reconcile(safeParse(intent.toolArgs), context);
+        } catch (error) {
+            log.error("reconciliation itself failed", {
+                tool: operation,
+                error: describeError(error),
+            });
+            return false;
+        }
+        if (!outcome) return false;
+
+        appendEntry(conversation, {
+            role: "tool",
+            kind: "tool-result",
+            toolName: operation,
+            toolResult:
+                outcome.kind === "error"
+                    ? `Error: ${outcome.message}`
+                    : outcome.kind === "pending"
+                      ? JSON.stringify({ pending: true, waitingFor: outcome.waitingFor })
+                      : JSON.stringify(outcome.value ?? null),
+            idempotencyKey: key,
+        });
+        return true;
     }
 
     /**

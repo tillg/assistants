@@ -49,6 +49,24 @@ function specFor(model: string): ModelSpec {
     return spec;
 }
 
+/**
+ * The fields carrying the `indexed` annotation, per Model. Only these can be filtered on — see
+ * `import/models/CONVENTIONS.md`. Kept here rather than derived because the Runtime does not read
+ * the model JSON at runtime; `test/model-mapping.test.ts` holds it to the models.
+ */
+const INDEXED: Record<string, string[]> = {
+    Party_DM: ["kind", "role", "name", "idempotencyKey", "createdByConversationId", "createdAt", "updatedAt"],
+    Document_DM: [
+        "title", "source", "classification", "classifiedThingId",
+        "idempotencyKey", "createdByConversationId", "createdAt", "updatedAt",
+    ],
+    Invoice_DM: [
+        "invoiceNumber", "issuedByPartyThingId", "issuerName", "documentThingId", "processThingId",
+        "idempotencyKey", "createdByConversationId", "createdAt", "updatedAt",
+    ],
+    Process_DM: ["title", "kind", "status", "idempotencyKey", "createdByConversationId", "createdAt", "updatedAt"],
+};
+
 /** Models an Assistant may create or edit. Never its own machinery. */
 const WRITABLE_MODELS: readonly string[] = ["Party_DM", "Document_DM", "Invoice_DM", "Process_DM"];
 
@@ -89,6 +107,17 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             });
             log.info("thing created", { model, thingId: created.thingId });
             return { kind: "value", value: { thingId: created.thingId, model } };
+        },
+        async reconcile(args, context): Promise<ToolOutcome | undefined> {
+            const model = String(args["model"] ?? "");
+            if (!WRITABLE_MODELS.includes(model)) return { kind: "value", value: null };
+            const existing = await things.findByIdempotencyKey(
+                specFor(model),
+                context.idempotencyKey,
+            );
+            return existing
+                ? { kind: "value", value: { thingId: existing.thingId, model } }
+                : { kind: "error", message: "This call was interrupted and nothing was created; try again." };
         },
     };
 
@@ -140,6 +169,15 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             void context;
             return { kind: "value", value: { thingId: current.thingId, model, updated: true } };
         },
+        async reconcile(): Promise<ToolOutcome> {
+            // An update sets named fields to values the model chose, so applying it twice reaches
+            // the same state. Reporting the uncertainty is enough; the next Turn can re-read.
+            return {
+                kind: "error",
+                message:
+                    "This update was interrupted and may or may not have applied. Read the Thing back before assuming either way.",
+            };
+        },
     };
 
     const thingstoreSearch: ToolDefinition = {
@@ -163,6 +201,17 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             const spec = specFor(model);
             const field = args["field"] ? String(args["field"]) : undefined;
             const limit = Math.min(Number(args["limit"] ?? 25) || 25, 100);
+            if (field !== undefined && !INDEXED[model]?.includes(field)) {
+                // Only indexed fields are queryable in A12; an unindexed one errors or silently
+                // returns nothing, and "no overdue invoices" is a dangerous thing to conclude by
+                // accident. Told plainly, the next Turn can pick a field that works.
+                return {
+                    kind: "error",
+                    message:
+                        `"${field}" cannot be searched on ${model}. Searchable fields: ` +
+                        `${(INDEXED[model] ?? []).join(", ")}.`,
+                };
+            }
             const constraint =
                 field !== undefined
                     ? eq(fieldPath(spec, field), String(args["value"] ?? ""))
@@ -216,6 +265,16 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
                 subjectThingId: args["subjectThingId"] ? String(args["subjectThingId"]) : undefined,
             });
             return { kind: "pending", waitingFor: "user", questionId };
+        },
+        async reconcile(_args, context): Promise<ToolOutcome | undefined> {
+            const existing = await things.findByIdempotencyKey<OpenQuestion>(
+                SPECS.OpenQuestion_DM,
+                context.idempotencyKey,
+            );
+            if (!existing) return undefined;
+            return existing.data.answeredAt
+                ? { kind: "value", value: { answered: true } }
+                : { kind: "pending", waitingFor: "user", questionId: existing.thingId };
         },
     };
 
@@ -350,6 +409,18 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
                 },
             };
         },
+        async reconcile(_args, context): Promise<ToolOutcome | undefined> {
+            // The one that would cost real money. Firefly carries our key in `external_id`, so
+            // this is a question we can actually answer rather than a guess.
+            const landed = await firefly.findByExternalId(context.idempotencyKey);
+            return landed
+                ? { kind: "value", value: { transactionId: landed.id, alreadyExisted: true } }
+                : {
+                      kind: "error",
+                      message:
+                          "This booking was interrupted before it reached the books, so nothing was posted. Book it again if it is still right.",
+                  };
+        },
     };
 
     const getBalance: ToolDefinition = {
@@ -402,12 +473,30 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             required: ["name", "type"],
         },
         async execute(args): Promise<ToolOutcome> {
+            // Search-then-create, so a repeated Turn cannot produce two accounts with one name —
+            // the silent chart corruption this connector exists to prevent.
+            const name = String(args["name"] ?? "");
+            const accounts = await firefly.listAccounts(true);
+            const existing = accounts.find(
+                (account) => account.name.toLowerCase() === name.trim().toLowerCase(),
+            );
+            if (existing) return { kind: "value", value: { ...existing, alreadyExisted: true } };
             const created = await firefly.createAccount({
-                name: String(args["name"] ?? ""),
+                name,
                 type: String(args["type"] ?? "expense"),
                 currencyCode: args["currencyCode"] ? String(args["currencyCode"]) : undefined,
             });
             return { kind: "value", value: created };
+        },
+        async reconcile(args): Promise<ToolOutcome> {
+            const name = String(args["name"] ?? "");
+            const accounts = await firefly.listAccounts(true);
+            const existing = accounts.find(
+                (account) => account.name.toLowerCase() === name.trim().toLowerCase(),
+            );
+            return existing
+                ? { kind: "value", value: { ...existing, alreadyExisted: true } }
+                : { kind: "error", message: `This call was interrupted; no account named "${name}" exists.` };
         },
     };
 
@@ -439,6 +528,16 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
                     subjectThingId: context.conversation.data.subjectThingId,
                 });
                 return { kind: "pending", waitingFor: "tool", questionId };
+            },
+            async reconcile(_args, context): Promise<ToolOutcome | undefined> {
+                const existing = await things.findByIdempotencyKey<OpenQuestion>(
+                    SPECS.OpenQuestion_DM,
+                    context.idempotencyKey,
+                );
+                if (!existing) return undefined;
+                return existing.data.answeredAt
+                    ? { kind: "value", value: { done: true } }
+                    : { kind: "pending", waitingFor: "tool", questionId: existing.thingId };
             },
         };
     }

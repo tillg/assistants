@@ -191,7 +191,7 @@ describe("suspension and continuation (ADR-0004, ADR-0005)", () => {
 });
 
 describe("recovery", () => {
-    it("recovers an expired lease without booking the same transaction twice", async () => {
+    it("reconciles an interrupted booking instead of re-running it", async () => {
         const harness = buildHarness([
             {
                 turn: 0,
@@ -222,20 +222,92 @@ describe("recovery", () => {
 
         await harness.driver.advance(docRef);
         expect(harness.firefly.posted).toHaveLength(1);
+        const bookedKey = harness.firefly.posted[0]!.externalId;
 
-        // Simulate a crash mid-Turn: the work landed, the conversation looks still-running.
-        const conversation = await harness.conversation(docRef);
+        // The crash that matters: Firefly returned 200 and the process died before the result
+        // entry reached the store. Truncating the transcript at the intent is exactly that state.
+        const crashed = await harness.conversation(docRef);
         await harness.things.update(SPECS.Conversation_DM, docRef, {
-            ...conversation.data,
+            ...crashed.data,
+            entries: (crashed.data.entries ?? []).filter((entry) => entry.kind !== "tool-result"),
             status: "running",
             leaseUntil: nowIso(new Date(Date.now() - 60_000)),
         });
 
         await harness.watcher.scan();
 
-        // The idempotency key is deterministic, so the recovered Turn finds the booking already
-        // landed rather than making a second one.
+        // Exactly one booking, and the reconciled result carries the ORIGINAL key — the drift
+        // that would otherwise mint a fresh key and post again.
         expect(harness.firefly.posted).toHaveLength(1);
+        const recovered = await harness.conversation(docRef);
+        const result = (recovered.data.entries ?? []).find(
+            (entry) => entry.kind === "tool-result" && entry.idempotencyKey === bookedKey,
+        );
+        expect(result).toBeDefined();
+        expect(result!.toolResult).toContain("alreadyExisted");
+    });
+
+    it("stops and asks rather than guessing when nothing can say whether the call landed", async () => {
+        const harness = buildHarness([
+            {
+                turn: 0,
+                toolCalls: [
+                    { name: "thingstore__update", arguments: { model: "Party_DM", thingId: "x", fields: {} } },
+                ],
+            },
+        ]);
+        const assistant = await harness.seedAssistant({ tools: [{ operation: "thingstore.update" }] });
+        const docRef = await harness.birth({ assistant });
+        await harness.driver.advance(docRef);
+
+        const crashed = await harness.conversation(docRef);
+        await harness.things.update(SPECS.Conversation_DM, docRef, {
+            ...crashed.data,
+            entries: (crashed.data.entries ?? []).filter((entry) => entry.kind !== "tool-result"),
+            status: "running",
+            leaseUntil: nowIso(new Date(Date.now() - 60_000)),
+        });
+
+        await harness.watcher.scan();
+
+        // thingstore.update reconciles to "may or may not have applied", which is a result, so the
+        // conversation carries on informed rather than blind.
+        const recovered = await harness.conversation(docRef);
+        const results = (recovered.data.entries ?? []).filter((entry) => entry.kind === "tool-result");
+        expect(results).toHaveLength(1);
+        expect(results[0]!.toolResult).toMatch(/may or may not have applied/i);
+    });
+});
+
+describe("manual connectors", () => {
+    it("resumes a conversation suspended on a Manual Connector, not only on askUser", async () => {
+        const harness = buildHarness([
+            {
+                turn: 0,
+                toolCalls: [
+                    { name: "bank__sendMoney", arguments: { iban: "DE00", amount: "10.00", reference: "r" } },
+                ],
+            },
+            { turn: 1, text: "Thanks, recorded.", finishReason: "answered" },
+        ]);
+        const assistant = await harness.seedAssistant({ tools: [{ operation: "bank.sendMoney" }] });
+        const docRef = await harness.birth({ assistant });
+
+        await harness.driver.advance(docRef);
+        let conversation = await harness.conversation(docRef);
+        // A Manual Connector waits on `tool`, not `user` — the distinction that stranded every
+        // one of them.
+        expect(conversation.data.status).toBe("waiting");
+        expect(conversation.data.waitingFor).toBe("tool");
+
+        const [question] = await harness.questions();
+        expect(question!.data.kind).toBe("perform");
+        await harness.answer(question!.thingId, { text: "Sent it, reference 12345." });
+
+        await harness.watcher.scan();
+
+        conversation = await harness.conversation(docRef);
+        expect(conversation.data.status).toBe("done");
     });
 });
 

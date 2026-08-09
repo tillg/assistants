@@ -36,8 +36,12 @@ async function main(): Promise<void> {
     );
     const state = found[0];
     if (!state) {
-        // Not yet bootstrapped. Healthy: there is nothing to have failed at.
-        process.stdout.write("no runtime state yet\n");
+        // NOT healthy. The watcher creates this on its first successful scan, so its absence
+        // after start_period means the Runtime never completed one — which is exactly the wedge
+        // this probe exists to catch. Reporting green here made the probe useless in the case it
+        // was written for.
+        process.stderr.write("no RuntimeState — the watcher has never completed a scan\n");
+        process.exitCode = 1;
         return;
     }
 
@@ -48,7 +52,8 @@ async function main(): Promise<void> {
 
     const heartbeat = parseIso(state.data.heartbeatAt);
     if (heartbeat === undefined) {
-        process.stdout.write("no heartbeat yet\n");
+        process.stderr.write("RuntimeState exists but has never been stamped — no scan has completed\n");
+        process.exitCode = 1;
         return;
     }
 

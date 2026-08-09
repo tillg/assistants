@@ -12,6 +12,9 @@
 
 import { log, describeError } from "../log.js";
 
+/** No outbound call may hang the scan loop (see the Runtime's heartbeat).*/
+const REQUEST_TIMEOUT_MS = 30_000;
+
 export interface A12Error {
     code: number;
     message: string;
@@ -119,6 +122,7 @@ export class A12Client {
                 Accept: "application/json",
                 "Accept-Language": this.locale,
             },
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
             body: JSON.stringify({ username: this.options.username, password: this.options.password }),
         });
         if (!response.ok) {
@@ -155,6 +159,7 @@ export class A12Client {
                     "Content-Type": "application/json;charset=utf8",
                     Authorization: `UAABearer ${token}`,
                 },
+                signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
                 body,
             });
 
@@ -236,7 +241,9 @@ export class A12Client {
     /** Used by the health probe and by `just dev` to wait for the store. */
     async isReachable(): Promise<boolean> {
         try {
-            const response = await this.doFetch(`${this.baseUrl}/actuator/health`);
+            const response = await this.doFetch(`${this.baseUrl}/actuator/health`, {
+                signal: AbortSignal.timeout(5_000),
+            });
             return response.ok;
         } catch (error) {
             log.debug("ThingStore not reachable yet", { error: describeError(error) });

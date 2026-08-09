@@ -120,40 +120,6 @@
         "sortable": true
       }
     ],
-    "rowActionGroup": {
-      "actions": [
-        {
-          "event": "delete",
-          "confirmation": {
-            "title": [
-              {
-                "locale": "en",
-                "text": "Delete Item"
-              },
-              {
-                "locale": "de",
-                "text": "Item löschen"
-              }
-            ],
-            "message": [
-              {
-                "locale": "en",
-                "text": "Do you really want to delete this item?"
-              },
-              {
-                "locale": "de",
-                "text": "Möchten Sie diesen Eintrag wirklich löschen?"
-              }
-            ]
-          },
-          "icon": {
-            "name": "delete"
-          },
-          "destructive": false,
-          "primary": false
-        }
-      ]
-    },
     "subHeaderBox": {
       "leftSlot": [],
       "rightSlot": [
