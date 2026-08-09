@@ -79,7 +79,9 @@ allprojects {
 }
 
 project.ext {
-    imageGroup = project.group
+    // NOT project.group: a group with dots in it (com.mgmtp.assistants) makes Docker read the
+    // first path segment as a registry hostname and try to resolve it over DNS.
+    imageGroup = project.findProperty('imageGroup') ?: project.group
 }
 
 subprojects {
