@@ -213,17 +213,23 @@ describe.skipIf(!THING_STORE_UP)("watcher queries against the live ThingStore", 
         ).rejects.toSatisfy((error: unknown) => /allowed limit 100/i.test(describeRpc(error)));
     });
 
-    it.fails(
-        "known defect · QuerySpec.sort is rejected: the server wants `direction`, `nullHandling` and `ignoreCase`",
+    it(
+        "QuerySpec.sort uses the server's field names: `direction`, not `order`",
         async () => {
-            // `A12Client.QuerySpec` models sort as `{ field, order, nulls? }`. The Data Service
-            // rejects that ("None of the sorting parameters 'field', 'direction', 'nullHandling',
-            // and 'ignoreCase' must be null"). Nothing in `src/` sorts today, so this is latent
-            // rather than broken — and this test turns green→red the day the shape is fixed.
+            // The obvious names are wrong, and all four parts are required: the Data Service rejects
+            // `order`/`nulls`, and rejects a null `nullHandling` or `ignoreCase` too. Nothing in
+            // `src/` sorts today, which is exactly why this needs a test.
             await client.query({
                 targetDocumentModel: SPECS.Party_DM.model,
                 paging: { pageNumber: 0, pageSize: 2 },
-                sort: [{ field: fieldPath(SPECS.Party_DM, "createdAt"), order: "DESC" }],
+                sort: [
+                    {
+                        field: fieldPath(SPECS.Party_DM, "createdAt"),
+                        direction: "DESC",
+                        nullHandling: "NULLS_LAST",
+                        ignoreCase: false,
+                    },
+                ],
             });
         },
     );

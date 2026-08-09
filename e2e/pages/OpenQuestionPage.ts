@@ -95,10 +95,11 @@ export class OpenQuestionPage extends FormPage {
     async answer(input: { confirmed: boolean; text: string }) {
         await this.startEditing();
 
+        // A `BooleanType` renders as a three-state select — empty / yes / no — not a checkbox.
         await this.inputFieldValue({
             label: "Confirmed",
             value: String(input.confirmed),
-            type: DataType.Check
+            type: DataType.Select
         });
         await this.typeMarkdown("Answer", input.text);
         await this.setAnsweredAt(nowIso());

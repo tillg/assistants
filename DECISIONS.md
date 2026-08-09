@@ -372,3 +372,36 @@ Recorded so nothing here comes as a surprise.
 
 ---
 
+## D-016 — What the integration tier caught, and the one that mattered
+
+Adding a tier that runs against the live A12 Data Service and the live Firefly found five things.
+One was serious.
+
+**The serious one**: the idempotency key is `<conversationId>:<entrySeq>`, and Firefly's search
+grammar is `field:value` — so an unquoted `external_id_is:<uuid>:3` **splits at the colon and
+matches nothing**. `findByExternalId` therefore always returned "not found", which silently voided
+the entire guarantee ADR-0012 rests on: lease recovery would re-post rather than recognise the
+work as already done. What actually stood between a crash and a double booking was Firefly's
+`error_if_duplicate_hash`, which surfaces as a 422 rather than as an idempotent success.
+
+The fix is to quote the value. Verified against a live Firefly: unquoted 0 hits, quoted 1 hit.
+There is now an integration test carrying a real conversation-shaped key with a colon in it.
+
+Worth dwelling on: the unit tier could not have caught this, because the fake Firefly matched keys
+with `Array.find`. The bug lived entirely in the difference between our idea of a search and
+Firefly's. That is the argument for the tier, in one example.
+
+**The other four**:
+- `QuerySpec.sort` used the obvious field names; the server wants `direction` (not `order`),
+  `nullHandling` (not `nulls`) and `ignoreCase`, and rejects a null in **any** of them. Latent —
+  nothing sorts yet — which is exactly why it needed a test.
+- The `runtime` role withholds `DOCUMENT_DELETE` by design (D-007), so `ThingRepository.delete`
+  can never succeed as the Runtime. That is intended, but the method's existence implies otherwise.
+- `exact_match` with an empty-string value is rejected by the server. `waitingFor` is cleared to
+  `""`, so a future scan filtering on it would fail rather than match. No scan does today; there
+  is a test recording the limitation.
+- `pageSize` caps at exactly 100 — which is also `ThingRepository.search`'s default, so the
+  default is a ceiling rather than a convention.
+
+---
+

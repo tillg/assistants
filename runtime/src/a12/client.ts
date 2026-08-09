@@ -71,7 +71,17 @@ export interface QuerySpec {
     projectionName?: string;
     constraint?: Constraint;
     paging?: { pageNumber: number; pageSize: number };
-    sort?: Array<{ field: string; order: "ASC" | "DESC"; nulls?: string }>;
+    /**
+     * The server's field names, not the obvious ones: `direction` (not `order`) and
+     * `nullHandling` (not `nulls`). Getting them wrong is rejected at query time.
+     */
+    sort?: Array<{
+        field: string;
+        direction: "ASC" | "DESC";
+        /** All three are REQUIRED: the server rejects a null in any of them. */
+        nullHandling: "NULLS_FIRST" | "NULLS_LAST";
+        ignoreCase: boolean;
+    }>;
 }
 
 export interface A12ClientOptions {

@@ -191,9 +191,17 @@ export class FireflyConnector {
         };
     }
 
-    /** Did a transaction with this idempotency key already land? */
+    /**
+     * Did a transaction with this idempotency key already land?
+     *
+     * The value **must be quoted**. Firefly's search grammar is `field:value`, so our keys —
+     * `<conversationId>:<entrySeq>` — split at the colon and match nothing unquoted. That silently
+     * broke the whole idempotency guarantee: recovery would re-post instead of recognising the
+     * work as already done, and only `error_if_duplicate_hash` stood between a crash and a second
+     * booking. Verified against a live Firefly: unquoted 0 hits, quoted 1 hit.
+     */
     async findByExternalId(externalId: string): Promise<{ id: string } | undefined> {
-        const query = encodeURIComponent(`external_id_is:${externalId}`);
+        const query = encodeURIComponent(`external_id_is:"${externalId}"`);
         const { data } = await this.call<{ data?: Array<{ id: string }> }>(
             "GET",
             `/search/transactions?query=${query}&limit=5`,

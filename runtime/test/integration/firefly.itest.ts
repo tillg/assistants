@@ -14,7 +14,7 @@
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { FireflyConnector, FireflyError } from "../../src/connectors/firefly.js";
-import { deleteTransaction, FIREFLY_UP, ITEST, newFirefly } from "./support/live.js";
+import { deleteTransaction, FIREFLY_UP, ITEST, newFirefly, unique } from "./support/live.js";
 
 const SOURCE = "Checking";
 const DESTINATION = "Expenses:Household";
@@ -109,11 +109,12 @@ describe.skipIf(!FIREFLY_UP)("Firefly connector against the live Firefly III", (
         const found = await firefly.findByExternalId(externalId);
         expect(found?.id).toBe(first.id);
 
-        // And exactly one group carries the key.
-        const today = new Date().toISOString().slice(0, 10);
+        // And exactly one group carries the key. The window has to be strictly wider than a
+        // day: Firefly rejects `start === end` with "The start must be a date before end".
+        const day = 86_400_000;
         const transactions = await firefly.listTransactions({
-            start: today,
-            end: today,
+            start: new Date(Date.now() - day).toISOString().slice(0, 10),
+            end: new Date(Date.now() + day).toISOString().slice(0, 10),
             accountName: SOURCE,
             limit: 50,
         });
@@ -125,16 +126,18 @@ describe.skipIf(!FIREFLY_UP)("Firefly connector against the live Firefly III", (
         expect(mine).toHaveLength(1);
     });
 
-    it.fails(
-        "known defect · an externalId containing ':' is invisible to findByExternalId, so posting is not idempotent for real Runtime keys",
+    it(
+        "an externalId containing ':' — the real Runtime key shape — is found, so posting is idempotent",
         async () => {
-            // `LoopDriver` builds the key as `${conversationThingId}:${seq}` and hands it to the
-            // Connector as `external_id`. Firefly's search grammar is `field:value`, so the colon
-            // splits the term and `external_id_is:<uuid>:3` matches nothing — the "ask, don't
-            // re-execute" guarantee that lease recovery depends on silently does not hold.
-            // What actually stops a double booking today is `error_if_duplicate_hash`, which
-            // surfaces as a 422 rather than as an idempotent success.
-            const externalId = `00000000-0000-0000-0000-0000000000fe:3`;
+            // `LoopDriver` builds the key as `${conversationThingId}:${seq}`. Firefly's search
+            // grammar is `field:value`, so an unquoted colon splits the term and matches nothing —
+            // which silently voided the "ask, don't re-execute" guarantee lease recovery depends
+            // on. The Connector quotes the value; this test is what holds it to that.
+            // A fresh conversation-shaped id per run: Firefly's `error_if_duplicate_hash` hashes the
+            // transaction's content and remembers deleted ones, so a fixed amount and description
+            // would collide with a previous run rather than exercising the search.
+            const suffix = unique("x").replace(/[^a-z0-9]/gi, "").slice(-12);
+            const externalId = `00000000-0000-0000-0000-${suffix.padStart(12, "0")}:3`;
             const input = {
                 externalId,
                 splits: [
