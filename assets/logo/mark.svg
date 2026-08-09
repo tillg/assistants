@@ -2,5 +2,5 @@
   <rect x="30" y="10" width="23" height="31" rx="3.5" fill="currentColor" opacity="0.22"/>
   <rect x="21" y="16" width="23" height="31" rx="3.5" fill="currentColor" opacity="0.4"/>
   <rect x="12" y="22" width="23" height="31" rx="3.5" fill="currentColor"/>
-  <circle cx="23.5" cy="37.5" r="4" fill="#4A3FB5"/>
+  <circle cx="23.5" cy="37.5" r="4" fill="#6D5DE3"/>
 </svg>

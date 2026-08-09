@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/lockup-dark.svg">
+    <img src="assets/logo/lockup-light.svg" alt="Assistents" width="300">
+  </picture>
+</p>
+
 # Assistents
 
 Assitents is a system that assists me in my life, in many areas:

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="9 8 47 47" width="47" height="47" role="img" aria-label="Assistents">
+  <style>
+    .ink { fill: #171A18 }
+    @media (prefers-color-scheme: dark) { .ink { fill: #E6E8E1 } }
+  </style>
+  <rect class="ink" x="30" y="10" width="23" height="31" rx="3.5" opacity="0.22"/>
+  <rect class="ink" x="21" y="16" width="23" height="31" rx="3.5" opacity="0.4"/>
+  <rect class="ink" x="12" y="22" width="23" height="31" rx="3.5"/>
+  <circle cx="23.5" cy="37.5" r="4" fill="#6D5DE3"/>
+</svg>
