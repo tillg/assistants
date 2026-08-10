@@ -285,6 +285,54 @@ Four defects this run turned up that no entry covers. Each is fixed.
 Two of those four (2 and 4) are the same shape as the findings in `BUGS.md` itself: a real defect
 whose only symptom was silence.
 
+## What the end-to-end exploration turned up
+
+Driving the running stack by hand in a browser, and then at volume through the store. Two more
+defects, both of which only a live system could show.
+
+5. **BUG-15 was only half fixed by making the forms open.** With the Conversation form finally
+   openable, its transcript grid showed five columns — Seq, At, Role, Kind, Text — and a `tool-result`
+   row has no `Text`, so *every row where an Operation ran or returned was blank*. Restoring the
+   `fieldConfiguration` entries silenced the ADR-0008 warnings because the fields became
+   *referenced*; it did not make them *visible*, because a repeating group needs a
+   `FieldBasedRepeatOverviewColumn` as well. Two different kinds of "unexposed", and the validator's
+   hint can only see the first. Fixed in `0556756`; the transcript now reads end to end.
+
+6. **BUG-03's fix was completely inert.** 30 invoices driven through the live loop produced 39
+   postings, 39 distinct journals and zero recognised repeats — correct, but only because the
+   `thing:` tag the guard interrogates *was never written*. The scripted transcript passes only
+   `groupTitle` and `splits`, and the Accountant's prompt never mentioned `thingId`. So the fix asked
+   a question of a field nothing populated. Fixed in `5c50834` by instructing it in the skill and in
+   the tool's own description.
+
+That second one is the most useful thing this phase found: a fix that passes its own test and does
+nothing in production, because the test supplied the input the system never does.
+
+### Verified by hand in a browser
+
+- The **Conversation** and **Runtime** forms open and render completely — transcript, `finishReason`,
+  `turnCount`, `Result`, `lastError`, and on the Runtime form the pause toggle, the watermark, the
+  live heartbeat and the boundary doc-refs. That is BUG-15's *Expected* satisfied.
+- **BUG-24 through the form**: asterisks on exactly the four fields made mandatory, and an empty save
+  refused with "This field is required." and a `1 / 4` error navigator. Requiredness put in the Model
+  reaches the UI for free — which is why it does not belong in the tool layer.
+- **BUG-34 through the form**: an emoji in `Subject` is refused with "The field contains one or
+  several unsupported signs", client-side, before any round trip. Exactly as documented.
+- A full CRUD cycle: create (refused, then saved), read, search, edit, delete-with-confirmation.
+- **BUG-01 at volume**: 30 Open Questions answered with **no** `AnsweredAt`, and all 31 waiting
+  Conversations resumed within 40 seconds.
+- **The watermark at volume**: 30 of 30 Documents got a Conversation. Nothing lost.
+
+### Smaller things noticed, not fixed
+
+- `e2e/tests/base/0-clean.setup.ts` cleans `Party_DM` and `Document_DM` but not `Invoice_DM`, so every
+  invoice-slice run leaves an Invoice behind. The Invoices overview is now mostly `2026-118`.
+- A *red* integration test can leak a Firefly transaction, because `postedIds.push` happens after the
+  call that the assertion then fails on. Six 1.00 EUR journals in the demo books came from exactly
+  that during this run.
+- Two `RuntimeState` rows exist — `the-one` and `itest`. Not a bug: the integration tier keeps one
+  inert fixture per Model and `loadState()` filters on `the-one`. Worth knowing before it looks alarming.
+
 ## Still open, deliberately
 
 - **BUG-23's read half.** `thingstore.search` has no read restriction, so an Assistant granted it can
