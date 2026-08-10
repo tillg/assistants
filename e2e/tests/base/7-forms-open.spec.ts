@@ -9,24 +9,23 @@
 import { expect, test } from "../../fixtures";
 import { BasePage } from "../../pages/BasePage";
 
-/** module → a cell value present in that overview, and whether the form is known to be broken. */
-const MODULES: ReadonlyArray<readonly [string, string, boolean]> = [
-    ["Open Questions", "accountant", false],
-    ["Documents", "post", false],
-    ["Invoices", "EUR", false],
-    ["Processes", "renovation", false],
-    ["Parties", "organisation", false],
-    ["Assistants", "receptionist", false],
-    // Known broken, cause not isolated — see tmp/BUGS.md #4. Marked `fixme` rather than `fail`
-    // because Conversations is *intermittent*: it loads on some runs. `test.fail()` would then
-    // report "expected to fail, but passed" and turn a real bug into a flaky red herring.
-    ["Conversations", "accountant", true],
-    ["Runtime", "the-one", true]
+/** module → a cell value present in that overview. */
+const MODULES: ReadonlyArray<readonly [string, string]> = [
+    ["Open Questions", "accountant"],
+    ["Documents", "post"],
+    ["Invoices", "EUR"],
+    ["Processes", "renovation"],
+    ["Parties", "organisation"],
+    ["Assistants", "receptionist"],
+    // Conversations and Runtime were `fixme` while the cause was unknown: both form models were
+    // missing `content.subHeaderBox`, which the form engine's own gate requires (BUG-15). The
+    // apparent intermittency was this spec, not the models — see the wait below.
+    ["Conversations", "accountant"],
+    ["Runtime", "the-one"],
 ];
 
-for (const [module, cell, knownBroken] of MODULES) {
+for (const [module, cell] of MODULES) {
     test(`${module}: a row opens without a post-processing error`, async ({ getPageAs }) => {
-        test.fixme(knownBroken, "known bug: the form engine rejects this form model (tmp/BUGS.md #4)");
         const page = await getPageAs("admin");
         const errors: string[] = [];
         page.on("console", (message) => {
@@ -43,6 +42,14 @@ for (const [module, cell, knownBroken] of MODULES) {
         }
         await rows.first().click();
         await base.finishedLoading();
+
+        // Wait for the form to actually be there, rather than only for the absence of an error.
+        // `finishedLoading()` snapshots the overlays that exist *at call time*, so if none had
+        // appeared yet it returned instantly and the console error had not been emitted — which is
+        // the whole of the "intermittency" these two tests were `fixme`d for.
+        await expect(page.getByRole("form").first(), `${module} form did not render`).toBeVisible({
+            timeout: 15_000,
+        });
 
         const postProcessing = errors.filter((error) => error.includes("Post processing"));
         expect(postProcessing, `${module} form failed to load`).toHaveLength(0);

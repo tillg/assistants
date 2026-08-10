@@ -68,6 +68,23 @@ const WATCHER_FIELDS = {
     Process_DM: ["f_createdAt", "f_idempotencyKey"],
 };
 
+/**
+ * The six keys `isFormModelContent()` requires of every form model's `content`.
+ *
+ * Taken from the form engine itself (`formengine-core`'s `FormModelGuards`): it tests `"key" in
+ * value` for each, and `unmarshallFormModel` throws before touching anything else if one is absent.
+ * An empty object is a perfectly good value — six of the eight forms ship `"subHeaderBox": {"id":
+ * "subHeaderBox1"}` and render no extra chrome for it.
+ */
+const FORM_CONTENT_KEYS = [
+    "subHeaderBox",
+    "footerBox",
+    "screens",
+    "fieldConfiguration",
+    "groupConfiguration",
+    "defaults",
+];
+
 const errors = [];
 const warnings = [];
 
@@ -225,6 +242,22 @@ for (const [id, { file, model }] of models) {
     }
 
     if (isForm) {
+        // The form engine gates every form model on `isFormModelContent()`, which is a plain
+        // `"key" in content` check over these six. A missing key is not a default: `unmarshallFormModel`
+        // throws "Json is no valid FormModel!" as its first statement, the client reports only
+        // `Post processing for model "X" failed.` — swallowing the real cause into a `source` field
+        // nothing logs — and the form never renders at all. Two forms shipped that way, for days,
+        // and neither the model checker nor the converter nor this validator noticed.
+        for (const key of FORM_CONTENT_KEYS) {
+            if (!(key in (model.content ?? {}))) {
+                errors.push(
+                    `${where}: content is missing the mandatory key "${key}" — the form engine's ` +
+                        `isFormModelContent() gate rejects the whole model, so the form will not open ` +
+                        `at all ("Post processing for model failed")`,
+                );
+            }
+        }
+
         const configured = (model.content?.fieldConfiguration?.field ?? []).map((f) => f.elementRef);
         const seen = new Set();
         for (const ref of configured) {
