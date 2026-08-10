@@ -138,7 +138,10 @@ test.describe.serial("Surviving a restart", () => {
         const status = await waitForConversationToContinue(store, question.conversationThingId);
         expect(["running", "waiting", "done"]).toContain(status);
 
+        // The answer is what the User typed, and `AnsweredAt` stays empty — see the invoice slice.
+        // The Conversation having continued at all is the assertion that matters here.
         const answered = await store.body(question.docRef, "OpenQuestion");
-        expect(String(answered["AnsweredAt"] ?? "")).not.toBe("");
+        expect(String(answered["Text"] ?? "")).toContain("Answered after a restart");
+        expect(String(answered["AnsweredAt"] ?? "")).toBe("");
     });
 });

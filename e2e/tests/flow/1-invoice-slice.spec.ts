@@ -109,10 +109,16 @@ test.describe.serial("Invoice slice", () => {
             text: "Yes, please book it against Expenses:Health. Nothing is paid yet."
         });
 
-        // The answer is on the Thing the Runtime will read.
+        // The answer is on the Thing the Runtime will read — and `AnsweredAt` is **empty**, because
+        // nothing on the form marks it as required, it has no default, and the page object no longer
+        // fills it in on the User's behalf. This assertion used to demand the opposite, which is how
+        // BUG-01 shipped: the suite answered in a way no User can, so the product's single most
+        // important interaction could fail silently with a green suite. The Conversation continuing
+        // past this point is now the proof that a timestamp-less answer is an answer.
         const answered = await store.body(question.docRef, "OpenQuestion");
         expect(answered["Confirmed"]).toBeTruthy();
-        expect(String(answered["AnsweredAt"] ?? "")).not.toBe("");
+        expect(String(answered["Text"] ?? "")).toContain("book it");
+        expect(String(answered["AnsweredAt"] ?? "")).toBe("");
 
         // --- the Accountant books it ----------------------------------------------------------
         await waitForConversationsDone(store, document.thingId, AGENT_TIMEOUT_MS);
