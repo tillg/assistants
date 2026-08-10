@@ -10,6 +10,7 @@
  * `domain/types.ts`, plus the query paths (`/Party/Name`) the watcher filters on.
  */
 
+import { log } from "../log.js";
 import {
     A12Client,
     type A12Document,
@@ -41,6 +42,12 @@ export interface ModelSpec {
     /** TypeScript property → { group name, inner field map } for repeating groups. */
     groups?: Record<string, { name: string; fields: Record<string, string> }>;
 }
+
+/**
+ * The store's ceiling on an `exact_match` value, measured. Shorter than the 200-character fields it
+ * searches, so a storable idempotency key can be an unsearchable one.
+ */
+const EXACT_MATCH_MAX_LENGTH = 100;
 
 const MACHINE_FIELDS = {
     idempotencyKey: "IdempotencyKey",
@@ -402,13 +409,51 @@ export class ThingRepository {
         spec: ModelSpec,
         data: T & { idempotencyKey?: string },
     ): Promise<Stored<T>> {
-        if (data.idempotencyKey) {
-            const existing = await this.findByIdempotencyKey<T>(spec, data.idempotencyKey);
+        const key = data.idempotencyKey;
+        if (key !== undefined) {
+            // Omitting the field is a legitimate "I have no key". Supplying a blank one is a caller
+            // bug, and treating it as "no key" switched deduplication off *silently* — on the very
+            // path that exists to make a retried Turn safe.
+            if (key.trim() === "") {
+                throw new Error(
+                    `Creating a ${spec.model} with a blank idempotency key would silently skip ` +
+                        `deduplication. Omit the field if there genuinely is no key.`,
+                );
+            }
+            // Longer than the store can search for. Caught here rather than inside the lookup, which
+            // is where it used to fail — naming `exact_match` instead of the key. Note this ceiling
+            // is shorter than the field's own maxLength, so a storable key can be unsearchable.
+            if (key.length > EXACT_MATCH_MAX_LENGTH) {
+                throw new Error(
+                    `An idempotency key may be at most ${EXACT_MATCH_MAX_LENGTH} characters ` +
+                        `(this one is ${key.length}); the store cannot search for a longer one.`,
+                );
+            }
+            const existing = await this.findByIdempotencyKey<T>(spec, key);
             if (existing) return existing;
         }
         const stamp = nowIso();
         const withStamps = { ...data, createdAt: data["createdAt"] ?? stamp, updatedAt: stamp };
         const docRef = await this.client.addDocument(spec.model, toDocument(spec, withStamps));
+
+        if (key !== undefined) {
+            // Search-then-create has nothing atomic between the two halves and A12 has no unique
+            // index, so two callers can both get here. Converging on one deterministically chosen
+            // row means every caller ends up referring to the *same* Thing and the loser is left
+            // unreferenced — which is the best available outcome, because the `runtime` identity
+            // deliberately cannot delete (D-007).
+            const all = await this.search<T>(spec, eq(path(spec, "idempotencyKey"), key), 5);
+            if (all.length > 1) {
+                const winner = [...all].sort((a, b) => a.docRef.localeCompare(b.docRef))[0]!;
+                log.warn("two callers created a Thing under one idempotency key; converging", {
+                    model: spec.model,
+                    idempotencyKey: key,
+                    kept: winner.docRef,
+                    orphaned: all.filter((row) => row.docRef !== winner.docRef).map((row) => row.docRef),
+                });
+                return winner;
+            }
+        }
         return {
             docRef,
             thingId: thingIdOf(docRef),
