@@ -112,6 +112,47 @@ function describeRejection(error: FireflyError, splits: PostingSplit[]): string 
     return `Firefly refused this posting.\n${[...lines].map((line) => `- ${line}`).join("\n")}`;
 }
 
+/**
+ * The property that identifies a row within a repeating group.
+ *
+ * Merging by a key rather than appending is what makes both realistic model moves correct: "add
+ * step 4", and "here is the whole list again with step 4 on the end" — which is what a model that
+ * read the Thing first will send. A blind append would duplicate every row in the second case.
+ * A group with no key here is appended to, which is the safe default.
+ */
+const GROUP_ROW_KEYS: Record<string, string> = {
+    steps: "seq",
+    related: "thingId",
+};
+
+/**
+ * Merge supplied rows into the rows already stored.
+ *
+ * A row whose key matches replaces that row; a row with a new key is added; a row that is not
+ * mentioned is kept. An empty array therefore changes nothing — an empty array is not an
+ * instruction to forget, and treating it as one silently emptied the group.
+ */
+function mergeRows(group: string, existing: unknown, supplied: unknown): unknown[] {
+    const before = Array.isArray(existing) ? (existing as Record<string, unknown>[]) : [];
+    const incoming = Array.isArray(supplied) ? (supplied as Record<string, unknown>[]) : [];
+    if (incoming.length === 0) return before;
+
+    const key = GROUP_ROW_KEYS[group];
+    if (!key) return [...before, ...incoming];
+
+    const out = [...before];
+    for (const row of incoming) {
+        const identity = row[key];
+        const at =
+            identity === undefined
+                ? -1
+                : out.findIndex((candidate) => String(candidate[key]) === String(identity));
+        if (at === -1) out.push(row);
+        else out[at] = { ...out[at], ...row };
+    }
+    return out;
+}
+
 /** `chase` also wakes the caller after five minutes to check; `wait` and `detach` do not. */
 function chaseWakeAt(awaitMode: string): string | undefined {
     return awaitMode === "chase" ? nowIso(new Date(Date.now() + 5 * 60_000)) : undefined;
@@ -208,7 +249,9 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
         name: "thingstore.update",
         description:
             "Update fields on an existing Thing. Supply only the fields you are changing; the " +
-            "others are preserved.",
+            "others are preserved. Rows of a repeating list (a Process's steps, its related " +
+            "Things) are merged, not replaced: supply just the row you are adding or correcting. " +
+            "Nothing is ever removed from a list.",
         mutating: true,
         parameters: {
             type: "object",
@@ -230,7 +273,14 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             const spec = specFor(model);
             const docRef = `${model}/${String(args["thingId"] ?? "")}`;
             const current = await things.get<Record<string, unknown>>(spec, docRef);
-            const merged = { ...current.data, ...((args["fields"] ?? {}) as Record<string, unknown>) };
+            const fields = (args["fields"] ?? {}) as Record<string, unknown>;
+            const merged = { ...current.data, ...fields };
+            // Repeating groups are merged row by row, not replaced. A plain spread made "add step 4"
+            // destroy steps 1 to 3 — on the one list README calls append-only — and reported success.
+            for (const group of Object.keys(spec.groups ?? {})) {
+                if (!(group in fields)) continue;
+                merged[group] = mergeRows(group, current.data[group], fields[group]);
+            }
             await things.update(spec, docRef, merged);
             void context;
             return { kind: "value", value: { thingId: current.thingId, model, updated: true } };
