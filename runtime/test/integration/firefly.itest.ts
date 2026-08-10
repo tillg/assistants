@@ -28,6 +28,20 @@ const SOURCE = "Checking";
 const DESTINATION = "Expenses:Household";
 /** The demo household's payables account, which carries what is still owed. */
 const PAYABLES = "Payables";
+/** A demo budget with a limit set for the current month. */
+const BUDGET = "Health";
+
+/** Firefly needs both ends of a period to compute `spent`, and rejects start === end. */
+function thisMonth(): { start: string; end: string } {
+    const now = new Date();
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0));
+    return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+}
+
+function firstOfThisMonth(): string {
+    return thisMonth().start;
+}
 
 /** Firefly's categories, read raw — the Connector has no reason to expose a list of them. */
 async function listCategoryNames(): Promise<string[]> {
@@ -123,6 +137,41 @@ describe.skipIf(!FIREFLY_UP)("Firefly connector against the live Firefly III", (
         expect(accounts.map((account) => account.name)).toContain(PAYABLES);
         expect(accounts.map((account) => account.name)).toContain(SOURCE);
         expect(accounts.map((account) => account.name)).toContain(DESTINATION);
+    });
+
+    it("reports a budget's target and what has been spent against it", async () => {
+        // `listBudgets()` called `GET /budgets` with no period, and Firefly only computes `spent` for
+        // a period — so it answered `spent: null`, which reads to a model as "nothing spent". It never
+        // read the limits at all, so the *target* was not in the answer in any form. Both numbers
+        // absent, from the Operation ACCOUNTING.md specifies as "actual vs. budget per account", with
+        // ADR-0006 making Bookkeeping the Authority so nothing else can supply it.
+        const spend = "200.00";
+        const posted = await firefly.postTransaction({
+            externalId: `${ITEST}budget:${Date.now()}`,
+            splits: [
+                {
+                    type: "withdrawal",
+                    date: firstOfThisMonth(),
+                    amount: spend,
+                    description: `${ITEST}against the Health budget`,
+                    sourceAccount: SOURCE,
+                    destinationAccount: "Expenses:Health",
+                    budgetName: BUDGET,
+                },
+            ],
+        });
+        postedIds.push(posted.id);
+
+        const report = await firefly.listBudgets(thisMonth());
+        const health = report.find((budget) => budget.name === BUDGET);
+        expect(health, `${BUDGET} is not in the budget report`).toBeDefined();
+        // Both numbers, and `spent` as a number rather than Firefly's per-currency array.
+        expect(Number(health!.spent)).toBeGreaterThanOrEqual(Number(spend));
+        expect(Number(health!.limit)).toBeGreaterThan(0);
+
+        // "Nothing spent" must be distinguishable from "unknown": Firefly answers `[]` for an unspent
+        // budget, and reporting that as null is what made the original bug invisible.
+        for (const budget of report) expect(budget.spent).not.toBeNull();
     });
 
     it("reads a balance", async () => {
