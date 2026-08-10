@@ -7,6 +7,7 @@
  * than about the transcript it ends up in.
  */
 
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { buildHarness, nowIso, SPECS, type Harness } from "./support/harness.js";
 import type { ToolContext, ToolOutcome } from "../src/tools/registry.js";
@@ -18,6 +19,33 @@ interface SearchRow {
     thingId: string;
     model: string;
     fields: Record<string, unknown>;
+}
+
+/**
+ * The Operation names from ACCOUNTING.md's "must provide" table, read from the document itself.
+ *
+ * Reading the spec rather than restating it is the point: a copy would drift, and then the test
+ * would be about the copy. An Operation the document lists as **deferred** is excluded, so
+ * deferring one is a deliberate documented act rather than a silent omission.
+ */
+function requiredBookkeepingOperations(): string[] {
+    const document = readFileSync(
+        new URL("../../ACCOUNTING.md", import.meta.url).pathname,
+        "utf8",
+    );
+    const section = document.slice(
+        document.indexOf("## Operations the BookKeeping system must provide"),
+    );
+    const table = section.slice(0, section.indexOf("\n## ", 1));
+    const names: string[] = [];
+    for (const line of table.split("\n")) {
+        if (!line.startsWith("|")) continue;
+        const match = /^\|\s*`([A-Za-z]+)\(/.exec(line);
+        if (!match) continue;
+        if (/\bdeferred\b/i.test(line)) continue;
+        names.push(match[1]!);
+    }
+    return names;
 }
 
 /** Call one Operation the way the loop would, without needing a scripted model. */
@@ -39,6 +67,27 @@ async function call(
         ...overrides,
     });
 }
+
+describe("the Operations ACCOUNTING.md requires", () => {
+    it("registers every Bookkeeping Operation the document says must be provided", async () => {
+        // ACCOUNTING.md is the specification for the Bookkeeping Authority, and five of the ten
+        // Operations it names as required had no Operation at all — `listTransactions` existing on
+        // the connector and never being registered, so no Assistant could reach it, which is also
+        // why the Accountant cannot check its own past bookings.
+        //
+        // Read from the document rather than from a copy of it, so the two cannot drift: whichever
+        // is wrong, this test says so.
+        const required = requiredBookkeepingOperations();
+        expect(required.length).toBeGreaterThan(0);
+
+        const harness = buildHarness([]);
+        const registered = new Set(
+            [...required, "x"].filter((name) => harness.registry.get(`bookkeeping.${name}`)),
+        );
+        const missing = required.filter((name) => !registered.has(name));
+        expect(missing).toEqual([]);
+    });
+});
 
 describe("thingstore.update", () => {
     /** The Process a Receptionist would have built up over several Turns. */
