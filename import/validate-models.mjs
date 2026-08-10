@@ -151,6 +151,32 @@ for (const [, { file, model }] of models) {
         errors.push(`${where}: header must declare both en and de locales`);
     }
 
+    // The WCF converter writes `<header.id>.json`, so a mismatch ships the model under a name no
+    // application model resolves. Never compared: line 108 uses the filename only as a *fallback*
+    // when `header.id` is absent. Silent for FM/AM/QeM; for a _DM it surfaced as three misleading
+    // errors about a model that "does not exist".
+    const expectedId = basename(file, ".json");
+    if (header.id !== undefined && header.id !== expectedId) {
+        errors.push(
+            `${where}: header.id is "${header.id}" but the filename says "${expectedId}" — the WCF ` +
+                `converter writes <header.id>.json, so this would ship under a name nothing resolves`,
+        );
+    }
+
+    // `header.labels` is the model's own title — the string the navigation shows. The bilingual check
+    // below matches the singular key `label`, which headers do not use, so the one label a User is
+    // guaranteed to read was checked in neither language. An error rather than a warning, because
+    // its neighbour `header.locales` is already one.
+    if (Array.isArray(header.labels)) {
+        const codes = header.labels.map((label) => label.locale);
+        if (!codes.includes("en") || !codes.includes("de")) {
+            errors.push(
+                `${where}: header.labels is not bilingual (${codes.join(",") || "empty"}) — this is ` +
+                    `the model's own title, the string the navigation shows`,
+            );
+        }
+    }
+
     // Labels must be bilingual wherever they appear as an array of {locale,text}.
     walk(model, (node) => {
         if (Array.isArray(node.label) && node.label.length > 0 && node.label[0]?.locale) {
@@ -182,6 +208,8 @@ for (const [id, { model }] of models) {
                 name: node.name,
                 indexed: (node.annotations ?? []).some((a) => a.name === "indexed" && a.value === "true"),
                 isMarkdown: Boolean(string?.lineBreaksPermitted),
+                fieldType: node.Field?.fieldType?.type,
+                required: Boolean(node.Field?.requirednessConfig),
             });
         }
         if (node.type === "Group" && node.id) {
@@ -202,6 +230,54 @@ for (const [dm, required] of Object.entries(WATCHER_FIELDS)) {
         const field = fields.get(fieldId);
         if (!field) errors.push(`${dm}: the watcher filters on ${fieldId}, which does not exist`);
         else if (!field.indexed) errors.push(`${dm}.${fieldId}: the watcher filters on it, so it must carry the "indexed" annotation`);
+    }
+}
+
+// An indexed field is one something filters on, so its type is load-bearing: A12 cannot filter an
+// `EnumerationType` the way it filters a String, and CONVENTIONS.md prefaces these rules with "these
+// are load-bearing. Breaking one produces a watcher that silently returns nothing". The validator
+// already owned the list of filtered fields and checked the sibling rule (`indexed`) against it, and
+// simply never inspected the type. Checked for *every* indexed field rather than only the ones
+// WATCHER_FIELDS names, because `tools.ts` exposes field filters the watcher itself does not use.
+for (const [dm, fields] of dmFields) {
+    for (const [fieldId, field] of fields) {
+        if (field.group || !field.indexed) continue;
+        if (field.fieldType !== "StringType" && field.fieldType !== "DateTimeType") {
+            errors.push(
+                `${dm}.${fieldId} (${field.name}) is annotated "indexed" but is a ${field.fieldType ?? "unknown type"} — ` +
+                    `only StringType and DateTimeType can be filtered on, so a query on it returns nothing`,
+            );
+        }
+    }
+}
+
+// The four machine fields, last and in order. CONVENTIONS.md states it and nothing enforced it, so
+// all three of "out of order", "one missing" and "missing on Party/Process specifically" passed
+// clean. The third matters most: `watcher.ts` reads `createdByConversationId` off every
+// trigger-eligible Thing for the guard that stops the Runtime feeding on its own output, and the
+// presence check covered only two of the four trigger-eligible Models.
+const MACHINE_FIELD_TAIL = [
+    "f_idempotencyKey",
+    "f_createdByConversationId",
+    "f_createdAt",
+    "f_updatedAt",
+];
+
+for (const [id, { file, model }] of models) {
+    if (!id.endsWith("_DM")) continue;
+    const where = basename(file);
+    const rootGroups = model.content?.modelRoot?.rootGroups ?? [];
+    if (rootGroups.length !== 1) {
+        errors.push(`${where}: expected exactly one root group, found ${rootGroups.length}`);
+        continue;
+    }
+    const elements = rootGroups[0]?.Group?.elements ?? [];
+    const tail = elements.slice(-MACHINE_FIELD_TAIL.length).map((element) => element.id);
+    if (tail.join(",") !== MACHINE_FIELD_TAIL.join(",")) {
+        errors.push(
+            `${where}: the root group must end with the four machine fields in order ` +
+                `(${MACHINE_FIELD_TAIL.join(",")}) — found ${tail.join(",") || "(nothing)"}`,
+        );
     }
 }
 
