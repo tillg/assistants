@@ -13,7 +13,12 @@ import { ThingRepository, SPECS, nowIso, path as fieldPath, eq } from "../a12/th
 import type { ModelSpec } from "../a12/things.js";
 import type { FireflyConnector, PostingSplit } from "../connectors/firefly.js";
 import type { ToolContext, ToolDefinition, ToolOutcome } from "./registry.js";
-import { isTriggerEligible, type OpenQuestion, type ThingModel } from "../domain/types.js";
+import {
+    isTriggerEligible,
+    type Conversation,
+    type OpenQuestion,
+    type ThingModel,
+} from "../domain/types.js";
 
 export interface ToolDeps {
     things: ThingRepository;
@@ -38,6 +43,11 @@ export interface ToolDeps {
 
 const str = (description: string) => ({ type: "string", description });
 const num = (description: string) => ({ type: "number", description });
+
+/** `chase` also wakes the caller after five minutes to check; `wait` and `detach` do not. */
+function chaseWakeAt(awaitMode: string): string | undefined {
+    return awaitMode === "chase" ? nowIso(new Date(Date.now() + 5 * 60_000)) : undefined;
+}
 
 function specFor(model: string): ModelSpec {
     const spec = (SPECS as Record<string, ModelSpec>)[model];
@@ -309,13 +319,53 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             if (awaitMode === "detach") {
                 return { kind: "value", value: { startedConversationId: childId, awaiting: false } };
             }
-            const wakeAt =
-                awaitMode === "chase" ? nowIso(new Date(Date.now() + 5 * 60_000)) : undefined;
+            const wakeAt = chaseWakeAt(awaitMode);
             return {
                 kind: "pending",
                 waitingFor: "assistant",
                 ...(wakeAt ? { wakeAt } : {}),
                 note: `awaiting conversation ${childId}`,
+            };
+        },
+        /**
+         * The child Conversation is born under the caller's own idempotency key, so "did this call
+         * land?" is a question the store can answer — and this was the one mutating Operation that
+         * never asked it. Without this, an interrupted call escalated to the User about work that
+         * had demonstrably happened.
+         */
+        async reconcile(args, context): Promise<ToolOutcome | undefined> {
+            const child = await things.findByIdempotencyKey<Conversation>(
+                SPECS.Conversation_DM,
+                context.idempotencyKey,
+            );
+            if (!child) {
+                return {
+                    kind: "error",
+                    message:
+                        "This call was interrupted before the other Assistant was started, so it did not take effect. Ask again if you still need them.",
+                };
+            }
+            const awaitMode = String(args["awaitMode"] ?? "wait");
+            if (awaitMode === "detach") {
+                // A detached caller was never waiting, so it must not be suspended now.
+                return { kind: "value", value: { startedConversationId: child.thingId, awaiting: false } };
+            }
+            if (child.data.resultDeliveredAt) {
+                // The answer already reached the transcript; suspending again would wait for a
+                // delivery that has been made and will not be made twice.
+                return {
+                    kind: "value",
+                    value: { startedConversationId: child.thingId, awaiting: false, delivered: true },
+                };
+            }
+            // Still owed an answer. `wakeAt` is re-derived, or recovery would silently downgrade a
+            // chased call to a plain wait.
+            const wakeAt = chaseWakeAt(awaitMode);
+            return {
+                kind: "pending",
+                waitingFor: "assistant",
+                ...(wakeAt ? { wakeAt } : {}),
+                note: `awaiting conversation ${child.thingId}`,
             };
         },
     };
