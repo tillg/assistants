@@ -15,6 +15,7 @@ import type { FireflyConnector, PostingSplit } from "../connectors/firefly.js";
 import type { ToolContext, ToolDefinition, ToolOutcome } from "./registry.js";
 import {
     isTriggerEligible,
+    type Assistant,
     type Conversation,
     type OpenQuestion,
     type ThingModel,
@@ -307,6 +308,26 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             }
             if (assistantKey === context.assistant.data.key) {
                 return { kind: "error", message: "An Assistant may not call itself." };
+            }
+            // The callee has to be able to run, or the birth strands both Conversations somewhere
+            // no scan can reach — which is the disappearance ADR-0015 forbids. Checked here rather
+            // than in `callAssistant` so it is a tool error the model can act on, and so the unit
+            // suite (which supplies its own `callAssistant`) actually exercises it.
+            const [callee] = await things.search<Assistant>(
+                SPECS.Assistant_DM,
+                eq(fieldPath(SPECS.Assistant_DM, "key"), assistantKey),
+                2,
+            );
+            if (!callee) {
+                return { kind: "error", message: `There is no Assistant with key "${assistantKey}".` };
+            }
+            if (callee.data.enabled === false) {
+                return {
+                    kind: "error",
+                    message:
+                        `The "${assistantKey}" assistant is disabled, so it cannot be called and ` +
+                        `nothing would ever pick the work up. Do it yourself, or ask the User.`,
+                };
             }
             const childId = await deps.callAssistant({
                 context,
