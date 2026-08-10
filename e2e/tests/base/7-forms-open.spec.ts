@@ -5,29 +5,32 @@
  * Conversation form threw `Post processing for model "Conversation_FM" failed` and rendered
  * nothing at all, for days, with 21 other specs green. A form model can be structurally valid,
  * convert cleanly, and still be rejected by the form engine at runtime.
+ *
+ * It opens **whatever the first row happens to be**, deliberately. This spec used to name a cell
+ * value per module and skip when it did not match — and "Invoices" named `EUR`, which `Invoice_OM`
+ * has no column for, so that module was skipped on every run since the file was written and its
+ * guard was inert. Naming a value couples a structural guard to the demo fixtures, and an overview
+ * shows only its first page, so any particular value can also fall off the end. A skip here now
+ * means the overview is genuinely empty.
  */
 import { expect, test } from "../../fixtures";
 import { BasePage } from "../../pages/BasePage";
 
-/** module → a cell value present in that overview. */
-const MODULES: ReadonlyArray<readonly [string, string]> = [
-    ["Open Questions", "accountant"],
-    ["Documents", "post"],
-    // "EUR" was never going to match: Invoice_OM has no currency column, so this test silently
-    // skipped every run and the guard for this module was inert. A skip here now means the demo
-    // invoice numbers have drifted, which is worth knowing rather than passing over.
-    ["Invoices", "4471"],
-    ["Processes", "renovation"],
-    ["Parties", "organisation"],
-    ["Assistants", "receptionist"],
+const MODULES: readonly string[] = [
+    "Open Questions",
+    "Documents",
+    "Invoices",
+    "Processes",
+    "Parties",
+    "Assistants",
     // Conversations and Runtime were `fixme` while the cause was unknown: both form models were
     // missing `content.subHeaderBox`, which the form engine's own gate requires (BUG-15). The
     // apparent intermittency was this spec, not the models — see the wait below.
-    ["Conversations", "accountant"],
-    ["Runtime", "the-one"]
+    "Conversations",
+    "Runtime"
 ];
 
-for (const [module, cell] of MODULES) {
+for (const module of MODULES) {
     test(`${module}: a row opens without a post-processing error`, async ({ getPageAs }) => {
         const page = await getPageAs("admin");
         const errors: string[] = [];
@@ -41,11 +44,12 @@ for (const [module, cell] of MODULES) {
         await base.gotoHome();
         await base.clickMenuItem(module);
 
-        const rows = page.getByRole("cell", { name: cell, exact: true });
-        if ((await rows.count()) === 0) {
-            test.skip(true, `no row matching "${cell}" in ${module} — nothing to open`);
+        // The header is `columnheader`, so the first `cell` is the first data row's first column.
+        const firstCell = page.getByRole("cell").first();
+        if ((await page.getByRole("cell").count()) === 0) {
+            test.skip(true, `${module} has no rows at all — nothing to open`);
         }
-        await rows.first().click();
+        await firstCell.click();
         await base.finishedLoading();
 
         // Wait for the form to actually be there, rather than only for the absence of an error.
