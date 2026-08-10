@@ -45,6 +45,14 @@ export interface ToolDeps {
 const str = (description: string) => ({ type: "string", description });
 const num = (description: string) => ({ type: "number", description });
 
+/**
+ * The store's own ceiling on an `exact_match` value, measured: 101 characters is refused with
+ * "Please reduce the input value length to a value lower than 100 for the exact_match operator."
+ * Note this is *shorter* than the 200-character fields it is used to search, so a legal field value
+ * can be an illegal search term.
+ */
+const EXACT_MATCH_MAX_LENGTH = 100;
+
 /** `chase` also wakes the caller after five minutes to check; `wait` and `detach` do not. */
 function chaseWakeAt(awaitMode: string): string | undefined {
     return awaitMode === "chase" ? nowIso(new Date(Date.now() + 5 * 60_000)) : undefined;
@@ -213,10 +221,32 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
                         `${Object.keys(spec.fields).join(", ")}.`,
                 };
             }
-            const constraint =
-                field !== undefined
-                    ? eq(fieldPath(spec, field), String(args["value"] ?? ""))
-                    : undefined;
+            const value = String(args["value"] ?? "");
+            if (field !== undefined && value === "") {
+                // `value` is optional in this tool's schema, so omitting it is a permitted call —
+                // and an `exact_match` with an empty value is not "no filter". The store cannot
+                // build a predicate from it and answers a bare -32057 whose own description is
+                // "Unexpected error during query execution.", so this has to be caught here.
+                //
+                // Deliberately NOT mapped to `undefined_match`: that asks "is the field empty",
+                // a different question, and silently answering a different question is worse than
+                // refusing.
+                return {
+                    kind: "error",
+                    message:
+                        `Searching ${model} by "${field}" needs a value to match. ` +
+                        `Leave "field" out entirely to list Things instead.`,
+                };
+            }
+            if (field !== undefined && value.length > EXACT_MATCH_MAX_LENGTH) {
+                return {
+                    kind: "error",
+                    message:
+                        `That value is ${value.length} characters; ${model} can only be searched ` +
+                        `by a value of up to ${EXACT_MATCH_MAX_LENGTH}.`,
+                };
+            }
+            const constraint = field !== undefined ? eq(fieldPath(spec, field), value) : undefined;
             const found = await things.search<Record<string, unknown>>(spec, constraint, limit);
             return {
                 kind: "value",
