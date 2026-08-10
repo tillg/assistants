@@ -13,7 +13,10 @@ import { BasePage } from "../../pages/BasePage";
 const MODULES: ReadonlyArray<readonly [string, string]> = [
     ["Open Questions", "accountant"],
     ["Documents", "post"],
-    ["Invoices", "EUR"],
+    // "EUR" was never going to match: Invoice_OM has no currency column, so this test silently
+    // skipped every run and the guard for this module was inert. A skip here now means the demo
+    // invoice numbers have drifted, which is worth knowing rather than passing over.
+    ["Invoices", "4471"],
     ["Processes", "renovation"],
     ["Parties", "organisation"],
     ["Assistants", "receptionist"],

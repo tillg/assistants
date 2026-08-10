@@ -182,6 +182,51 @@ than a lost invoice.
 
 ---
 
+## D-007a — `Assistant_DM` is withheld from the `runtime` role, in the store
+
+**Decided**: a project-defined access right `ASSISTANT_WRITE`, held by the `admin` and `user` roles
+and by no machine one, plus a permission in `import/auth/childAuthorizationDefinition.json` on the
+`Document Create`, `Document Update` and `Document Partial Update` scopes that demands it whenever
+the target document model is `Assistant_DM`. `just bootstrap` therefore runs as the User
+(`BOOTSTRAP_USER`, default `human`) rather than as the Runtime.
+
+**Why**: D-007 makes exactly this argument for `DOCUMENT_DELETE` and then stops one model short.
+README's Things table says an Assistant is written by "**User only** — the Runtime reads it", and
+until this decision nothing enforced it: the `runtime` identity could create an Assistant and
+rewrite an existing one's `SystemPrompt`, `Enabled`, `MaxTurns` and `Tools` (BUG-23). `Tools` is the
+list of Operations an Assistant may call, so the only thing between an LLM and granting itself
+`bookkeeping.postTransaction` was the `WRITABLE_MODELS` array in `runtime/src/tools/tools.ts` — a
+guard enforced inside the same LLM-driven process it exists to constrain. D-007's own sentence
+applies verbatim: it turns a hallucinated privilege escalation into a `-32059` rather than a Runtime
+that has rewritten its own instructions.
+
+Bootstrap moving to the User is not a workaround for the guard, it is the guard being consistent.
+Bootstrap seeds what the User owns, so `__meta.creator` on a seeded Assistant now says `human`,
+which is what actually happened.
+
+**Scope, honestly stated**: this closes the *write* half only. `thingstore.search` still has no read
+restriction (same BUG-23 entry), so an Assistant granted it can still read every other Assistant's
+system prompt. And an Assistant only reaches `thingstore.create` at all if the Operation is in its
+own `tools[]`, which the User controls. What this buys is that the last line of defence is the store
+rather than an array inside the process being defended against — the same reason D-007 exists.
+
+**Alternative**: name the role in the policy (`!containsAnyRole({'runtime'})`). Rejected: a
+deny-list that must be edited for every future machine identity, where a positive grant is inherited
+correctly by every future human one.
+
+**Also considered**: leaving it, and relying on `WRITABLE_MODELS`. Rejected for the reason D-007
+gives — a guard that lives inside the LLM-driven process is not a boundary.
+
+**Cost**: the rule has to recognise all three shapes the Data Service passes as `#resource` for
+those scopes — the model name alone (`checkDocumentCreatePermissionByModel`, a pre-check in
+`DefaultDocumentService`), the `DocumentV2` being created, and the `DocumentUpdateResource` on an
+update. Any other shape deliberately falls through to "not an Assistant", so an unforeseen call path
+can never be denied by this rule.
+
+**Reversal cost**: Trivial — two files under `import/auth/`, and two lines of `config.ts`.
+
+---
+
 ## D-008 — The template's copyright-header gate is removed
 
 **Decided**: `copyright/copyright.gradle` and its `check.dependsOn('validateCopyrightHeaders')`

@@ -34,6 +34,10 @@ roles:
   - name: admin
     description: admin role
     accessRights:
+      # Not an A12 built-in right: ours, named here and enforced by the "Assistant Write
+      # Permission" in childAuthorizationDefinition.json. Held by every human role and by no
+      # machine one, which is the whole of an Assistant's write protection (D-007a).
+      - ASSISTANT_WRITE
       - DOCUMENT_CREATE
       - DOCUMENT_UPDATE
       - DOCUMENT_PARTIAL_UPDATE
@@ -50,6 +54,7 @@ roles:
   - name: user
     description: user role
     accessRights:
+      - ASSISTANT_WRITE
       - DOCUMENT_CREATE
       - DOCUMENT_UPDATE
       - DOCUMENT_PARTIAL_UPDATE
@@ -57,8 +62,11 @@ roles:
       - MODEL_READ
       - ATTACHMENT_UPLOAD
       - QUERY
+  # The absent rights are the point. No DOCUMENT_DELETE (D-007) and no ASSISTANT_WRITE (D-007a),
+  # so a hallucinated delete and a self-granted Tool are both a -32059 from the store rather than
+  # something enforced inside the same LLM-driven process that would be doing the escalating.
   - name: runtime
-    description: runtime role - the Assistant Runtime writes Things but must never delete one
+    description: runtime role - the Assistant Runtime writes Things, but never deletes one and never writes an Assistant
     accessRights:
       - DOCUMENT_CREATE
       - DOCUMENT_UPDATE

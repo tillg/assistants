@@ -87,6 +87,8 @@ except Keycloak** ([D-022](DECISIONS.md)):
   a token; the ThingStore runs A12's UAA with `authentication.types=OAUTH2`, which means it only
   verifies tokens and has no login endpoint of its own. Realm roles in the token map to A12 access
   rights through `import/auth/roles.yaml` — the one part of authorization that is still ours.
+  `ASSISTANT_WRITE` in that file is not an A12 built-in but ours, and it is the whole of what
+  keeps an Assistant out of the Runtime's reach ([D-007a](DECISIONS.md)).
 - the **Runtime** has no browser to redirect, so it uses Keycloak's direct access grant against a
   client that is the only one in the realm permitting it.
 - **Firefly III has no OIDC support at all** — `remote_user_guard`, which trusts an HTTP header, is
@@ -231,7 +233,7 @@ a compose-level environment variable rather than a constructor argument, on purp
 
 | Recipe | What it does | When you want it |
 |---|---|---|
-| `just bootstrap` | Loads what the system **is**: the Receptionist, the Accountant and the `RuntimeState` singleton. Idempotent, and it *reconciles* — the Assistant seeds are re-applied on every run, so a prompt edited in the web application is overwritten. The `RuntimeState` is left alone, because it is live state | Called by `dev`. Re-run after editing the seeded Assistant definitions |
+| `just bootstrap` | Loads what the system **is**: the Receptionist, the Accountant and the `RuntimeState` singleton. Runs as the **User** (`BOOTSTRAP_USER`, default `human`), not as the Runtime, because an Assistant is the User's to write ([D-007a](DECISIONS.md)). Idempotent, and it *reconciles* — the Assistant seeds are re-applied on every run, so a prompt edited in the web application is overwritten. The `RuntimeState` is left alone, because it is live state | Called by `dev`. Re-run after editing the seeded Assistant definitions |
 | `just demo-data` | Loads what the household **has**: parties, processes, documents, invoices, and the Firefly books. Pauses the Runtime while loading | A realistic system to look at, without spending anything |
 | `just demo-reset` | `clean` → `build` → `up` → `wait` → `bootstrap` → `demo-data`. Takes the books with it | When the demo state has drifted. Firefly has no bulk delete and its data lives in a named volume, so a full teardown is the only reset symmetric across both Authorities |
 | `just firefly-token` | Prints the Firefly personal access token from the shared volume | Talking to the Firefly API by hand |
@@ -301,10 +303,11 @@ requires. See [MARKDOWN_FIELDS.md](MARKDOWN_FIELDS.md).
 ThingStore every two seconds, in six passes: things that materialised, questions that were
 answered, `wakeAt` deadlines that passed, leases that expired, child results not yet delivered, and
 Conversations with a Turn owing. The **Loop Driver** is one function, `advance(conversationId)`,
-that takes one Conversation exactly one Turn forward and returns holding nothing. Sixteen Tools are
+that takes one Conversation exactly one Turn forward and returns holding nothing. Seventeen Tools are
 registered — ThingStore reads and writes, `ui.askUser`, `assistant.call`, six `bookkeeping.*`
 operations against Firefly, and four Manual Connector operations. It authenticates as a dedicated
-`runtime` user with no `DOCUMENT_DELETE` and no `MODEL_MANAGE` ([D-007](DECISIONS.md)) — a Keycloak
+`runtime` user with no `DOCUMENT_DELETE`, no `MODEL_MANAGE` ([D-007](DECISIONS.md)) and no
+`ASSISTANT_WRITE` ([D-007a](DECISIONS.md)) — a Keycloak
 user like any other, reached through the direct access grant because a headless process has no
 browser to redirect; its health check is "did the last scan finish", not "is the process alive",
 because silence is the one failure the User cannot otherwise detect.
@@ -346,7 +349,7 @@ A12 has no optimistic locking, so every document has exactly one writer at any i
 | `Document` | ThingStore | An item that has arrived but has not yet been understood, plus whatever text was extracted from it | User and Runtime |
 | `Invoice` | ThingStore *(document facts only)* | The extracted invoice: issuer, number, dates, amounts, subject. **No `paid` field and no `bookkeepingRef`** | User and Runtime |
 | `Process` | ThingStore | The routing slip — a title, a status and an append-only list of steps. Passive; nothing executes it | User and Runtime |
-| `Assistant` | ThingStore | An Assistant's definition: key, system prompt, skills, triggers and the Tools it may use | **User only** — the Runtime reads it |
+| `Assistant` | ThingStore | An Assistant's definition: key, system prompt, skills, triggers and the Tools it may use | **User only** — the Runtime reads it, and the ThingStore refuses it write access ([D-007a](DECISIONS.md)) |
 | `Conversation` | ThingStore | One run of one Assistant: status, what it is waiting for, turn count, and an append-only list of entries | **Runtime only** — the form is read-only |
 | `OpenQuestion` | ThingStore | A question put to the User — `free-text`, `confirm`, `choice` or `perform` — and the User's answer to it | Runtime writes it once at creation, then **the User only** |
 | `RuntimeState` | ThingStore | A singleton: the watcher's watermark, the pause flag, the births-per-hour counter, the heartbeat | **Runtime only** |
@@ -477,7 +480,7 @@ This is one running vertical slice, not a finished system. What is honestly miss
 │   ├── src/llm/              provider interface + openai / anthropic / scripted
 │   ├── src/loop/             advance() — one Conversation, one Turn
 │   ├── src/watcher/          the six scans
-│   ├── src/tools/            the Tool registry and the sixteen Operations
+│   ├── src/tools/            the Tool registry and the seventeen Operations
 │   ├── src/connectors/       firefly
 │   ├── src/bootstrap/        seeds the two Assistants and the RuntimeState singleton
 │   ├── src/demo/             the demo household loader

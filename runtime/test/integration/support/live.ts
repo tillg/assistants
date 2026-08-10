@@ -32,12 +32,13 @@ export const KEYCLOAK_REALM = process.env["ITEST_KEYCLOAK_REALM"] ?? "A12Realm";
 export const KEYCLOAK_CLIENT_ID = process.env["ITEST_KEYCLOAK_CLIENT_ID"] ?? "assistants-runtime-client";
 
 /**
- * The janitor: a second identity, used *only* to delete.
+ * The janitor: a second identity, for everything the Runtime may not do.
  *
  * `import/auth/roles.yaml` grants the `runtime` role DOCUMENT_CREATE and DOCUMENT_UPDATE but
  * deliberately not DOCUMENT_DELETE — "the Assistant Runtime writes Things but must never delete
- * one". So the tier cannot clean up as the Runtime; it creates as `runtime` (which is what the
- * Runtime does) and tidies up as a `user`-role account (which is what the User can do).
+ * one" — and, since D-007a, not ASSISTANT_WRITE either. So the tier can neither clean up nor write
+ * an Assistant as the Runtime: it creates as `runtime` (which is what the Runtime does), and
+ * deletes and writes Assistants as a `user`-role account (which is what the User can do).
  */
 export const JANITOR_USER = process.env["ITEST_JANITOR_USER"] ?? "user1";
 export const JANITOR_PASSWORD = process.env["ITEST_JANITOR_PASSWORD"] ?? "A12PT-user1test";
@@ -99,7 +100,13 @@ export function newClient(): A12Client {
     });
 }
 
-/** A client with DOCUMENT_DELETE, for cleanup and for the delete leg of the round trip. */
+/**
+ * A client with DOCUMENT_DELETE, for cleanup and for the delete leg of the round trip.
+ *
+ * Also the identity for anything only the **User** may write. Since D-007a that is `Assistant_DM`:
+ * the `runtime` role has no `ASSISTANT_WRITE`, so the tier round-trips an Assistant as the User —
+ * and asserts the Runtime's refusal on its own rather than quietly designing around it.
+ */
 export function newJanitor(): A12Client {
     return new A12Client({
         baseUrl: THING_STORE_URL,

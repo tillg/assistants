@@ -48,7 +48,7 @@ exactly: BUG-01, BUG-02, BUG-05, BUG-07.
 | [BUG-20](#bug-20) | medium | runtime/tools | Half of the Operations ACCOUNTING.md requires do not exist |
 | [BUG-21](#bug-21) | medium | runtime/tools | Firefly validation errors reach the model as a stack trace naming IDs it never saw |
 | [BUG-22](#bug-22) | medium | runtime/tools | Concurrent search-then-create yields duplicates under one idempotency key |
-| [BUG-23](#bug-23) | medium | thingstore | The `runtime` identity can create and modify `Assistant_DM`, which it is documented never to write |
+| [BUG-23](#bug-23) | medium | thingstore | The `runtime` identity can create and modify `Assistant_DM`, which it is documented never to write — **write half fixed**, read half open |
 | [BUG-24](#bug-24) | medium | models | An Invoice with no number, no issuer, no date and no amount is accepted |
 | [BUG-25](#bug-25) | medium | runtime/loop | The turns-exhausted escalation asks a question the User cannot act on, then kills the Conversation |
 | [BUG-26](#bug-26) | medium | docs | `CONVENTIONS.md` instructs the reader to reintroduce the D-019 overview crash |
@@ -687,6 +687,19 @@ field's `maxLength: 200` fails inside the *lookup query* rather than being caugh
 
 **Severity** medium · **Component** thingstore (authorisation) ·
 **Repro** `npx tsx ../tmp/hunt/thingstore/05-authz.ts`
+
+> **Write half fixed** ([D-007a](DECISIONS.md)). `import/auth/roles.yaml` defines an
+> `ASSISTANT_WRITE` right held by the `admin` and `user` roles and by no machine one, and
+> `childAuthorizationDefinition.json` demands it on the `Document Create`, `Document Update` and
+> `Document Partial Update` scopes when the target model is `Assistant_DM`. The `runtime` identity
+> now gets `-32059` for both `ADD_DOCUMENT` and `MODIFY_DOCUMENT` on an Assistant, and keeps
+> `Conversation_DM`, `OpenQuestion_DM` and `RuntimeState_DM`. `just bootstrap` runs as the User
+> (`BOOTSTRAP_USER`, default `human`), since it seeds what the User owns. Guarded by three tests in
+> `runtime/test/integration/thing-repository.itest.ts`.
+>
+> **The read half is still open.** `thingstore.search` has no read restriction, so an Assistant
+> granted it can still read every other Assistant's system prompt, every Conversation transcript and
+> the `RuntimeState`. That needs a policy on the `Query` scope and is not done here.
 
 ```
 [OK] runtime: ADD_DOCUMENT Assistant_DM (README says User-only) -> "Assistant_DM/1fc1975e-…"

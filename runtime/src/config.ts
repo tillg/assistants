@@ -30,6 +30,14 @@ export interface Config {
     readonly thingStoreUrl: string;
     readonly thingStoreUser: string;
     readonly thingStorePassword: string;
+    /**
+     * `just bootstrap` seeds the two Assistants, and an Assistant is written by the **User** only
+     * — since D-007a the store refuses the `runtime` identity on `Assistant_DM`. So bootstrap
+     * authenticates as the User rather than as the Runtime, which is also what puts `human` in
+     * `__meta.creator` on a seeded Assistant: the provenance we actually want recorded.
+     */
+    readonly bootstrapUser: string;
+    readonly bootstrapPassword: string;
     readonly locale: string;
 
     /**
@@ -70,6 +78,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         thingStoreUrl: optional("THINGSTORE_URL", "http://server:8080"),
         thingStoreUser: optional("THINGSTORE_USER", "runtime"),
         thingStorePassword: optional("THINGSTORE_PASSWORD", "assistants-runtime-dev"),
+        bootstrapUser: optional("BOOTSTRAP_USER", "human"),
+        bootstrapPassword: optional("BOOTSTRAP_PASSWORD", "human"),
         locale: optional("LOCALE", "en"),
 
         keycloakUrl: optional("KEYCLOAK_URL", "http://keycloak:8080"),

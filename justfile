@@ -123,9 +123,16 @@ logs service="":
 # now, not from the ThingStore, so a recipe that overrides only THINGSTORE_URL fails at login.
 host_urls := "THINGSTORE_URL=http://localhost:8082 KEYCLOAK_URL=http://localhost:8089"
 
+# Seeding an Assistant is a User action, not a Runtime one — since D-007a the store refuses the
+# `runtime` identity on `Assistant_DM` — so this authenticates as `human`. The password comes from
+# .env and nowhere else (D-023): the Runtime's own default for `BOOTSTRAP_PASSWORD` is a development
+# fallback, and passing it here is what keeps `just bootstrap` working after the password is changed.
+
 # Load what the system IS: the two Assistants and the runtime state. Idempotent.
 bootstrap:
-    @cd runtime && {{host_urls}} npm run --silent bootstrap
+    @cd runtime && {{host_urls}} \
+        BOOTSTRAP_PASSWORD="$(grep -E '^HUMAN_PASSWORD=' ../.env | cut -d= -f2- | tr -d "\"'")" \
+        npm run --silent bootstrap
 
 # Pauses the Runtime while loading so the demo set lands as history, not as a work queue.
 

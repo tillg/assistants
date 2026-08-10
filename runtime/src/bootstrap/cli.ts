@@ -1,5 +1,10 @@
 /**
  * `just bootstrap` — load the Assistants and the RuntimeState. Also `pause` / `resume`.
+ *
+ * This runs as the **User**, not as the Runtime. An Assistant is the User's to write and the
+ * Runtime's to read, and since D-007a the ThingStore enforces that instead of merely documenting
+ * it: the `runtime` role has no `ASSISTANT_WRITE`, so seeding as the Runtime answers -32059. The
+ * kill switch (`pause` / `resume`) is a User action too, and touches only the `RuntimeState`.
  */
 
 import { loadConfig } from "../config.js";
@@ -13,8 +18,8 @@ async function main(): Promise<void> {
     const config = loadConfig();
     const client = new A12Client({
         baseUrl: config.thingStoreUrl,
-        username: config.thingStoreUser,
-        password: config.thingStorePassword,
+        username: config.bootstrapUser,
+        password: config.bootstrapPassword,
         keycloakUrl: config.keycloakUrl,
         keycloakRealm: config.keycloakRealm,
         keycloakClientId: config.keycloakClientId,

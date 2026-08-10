@@ -15,6 +15,13 @@
       "rules": [
         "hasAccessRight('RELOAD_AUTH_RULES')"
       ]
+    },
+    {
+      "name": "User Has ASSISTANT_WRITE Right For An Assistant",
+      "description": "An Assistant is written by the User only -- the Runtime reads it (D-007a). The Data Service checks the three document write scopes with three different resource shapes, so all three are recognised here: the model name alone (checkDocumentCreatePermissionByModel, the cheap pre-check in DefaultDocumentService), the DocumentV2 being created, and the DocumentUpdateResource carrying the old and new document. Any other shape falls through to 'not an Assistant', so an unforeseen call path can never be denied by this rule.",
+      "rules": [
+        "hasAccessRight('ASSISTANT_WRITE') or !({'Assistant_DM'}.contains(#resource instanceof T(java.lang.String) ? #resource : (#resource instanceof T(com.mgmtp.a12.kernel.md.document.apiV2.immutable.DocumentV2) ? #resource.getDocumentModelId() : null)) or (#resource instanceof T(com.mgmtp.a12.dataservices.authorization.DocumentUpdateResource) and ({'Assistant_DM'}.contains(#resource.getNewDocument()?.getDocumentModelId()) or {'Assistant_DM'}.contains(#resource.getOldDocument()?.getDocumentModelId()))))"
+      ]
     }
   ],
   "permissions": [
@@ -35,6 +42,18 @@
       ],
       "scopes": [
         "Reload Rules"
+      ]
+    },
+    {
+      "name": "Assistant Write Permission",
+      "description": "Withholds Assistant_DM from every role without ASSISTANT_WRITE, which is the `runtime` role. `call-parent-scope` defaults to true, so the parent definition's DOCUMENT_CREATE / DOCUMENT_UPDATE / DOCUMENT_PARTIAL_UPDATE checks still run and every permission on the scope must pass.",
+      "policy-refs": [
+        "User Has ASSISTANT_WRITE Right For An Assistant"
+      ],
+      "scopes": [
+        "Document Create",
+        "Document Update",
+        "Document Partial Update"
       ]
     }
   ]

@@ -9,11 +9,20 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { A12RpcError } from "../../src/a12/client.js";
 import type { A12Client } from "../../src/a12/client.js";
 import { SPECS, ThingRepository, eq, path } from "../../src/a12/things.js";
 import type { ModelSpec } from "../../src/a12/things.js";
 import type { ThingModel } from "../../src/domain/types.js";
-import { LONG_AGO, newClient, newThings, THING_STORE_UP, Trash, unique } from "./support/live.js";
+import {
+    LONG_AGO,
+    newClient,
+    newJanitor,
+    newThings,
+    THING_STORE_UP,
+    Trash,
+    unique,
+} from "./support/live.js";
 
 /** One representative payload per Model, exercising every scalar field and every group. */
 const PAYLOADS: Record<ThingModel, Record<string, unknown>> = {
@@ -148,15 +157,26 @@ const PAYLOADS: Record<ThingModel, Record<string, unknown>> = {
 /** The two Models the Runtime owns; we reuse one fixture each instead of deleting. */
 const KEEP: ThingModel[] = ["Conversation_DM", "OpenQuestion_DM"];
 
+/**
+ * The Models only the **User** may write (D-007a). The round trip is about the model map, not
+ * about authorization, so it uses the identity that is allowed to do it — and the refusal the
+ * Runtime gets is asserted separately, below, rather than being silently designed around.
+ */
+const USER_OWNED: ThingModel[] = ["Assistant_DM"];
+
 describe.skipIf(!THING_STORE_UP)("ThingRepository against the live ThingStore", () => {
     let client: A12Client;
     let things: ThingRepository;
+    let asUser: ThingRepository;
     const trash = new Trash();
 
     beforeAll(async () => {
         client = newClient();
         await client.login();
         things = newThings(client);
+        const janitor = newJanitor();
+        await janitor.login();
+        asUser = newThings(janitor);
     });
 
     afterAll(async () => {
@@ -223,7 +243,11 @@ describe.skipIf(!THING_STORE_UP)("ThingRepository against the live ThingStore", 
                     ? `itest:model-map:${model}`
                     : unique(`model-map:${model}`);
 
-                const created = await things.create(spec, {
+                // An Assistant is the User's to write; everything else is written as the
+                // Runtime, because that is who writes it in production.
+                const writer = USER_OWNED.includes(model) ? asUser : things;
+
+                const created = await writer.create(spec, {
                     ...payload,
                     createdAt: LONG_AGO,
                     idempotencyKey: key,
@@ -277,6 +301,91 @@ describe.skipIf(!THING_STORE_UP)("ThingRepository against the live ThingStore", 
                 { seq: 1, title: "Collect", state: "done", note: "only step left" },
             ]);
             expect(String(loaded.data["updatedAt"] ?? "")).not.toBe(LONG_AGO);
+        });
+    });
+
+    // BUG-23. README's Things table says an Assistant is written by "User only — the Runtime reads
+    // it", and until D-007a nothing but a string array inside the Runtime's own process enforced
+    // it: the `runtime` identity could create an Assistant and rewrite an existing one's
+    // SystemPrompt, Enabled, MaxTurns and Tools — which is the whole of what an Assistant may do.
+    // The store refuses both now. These are the tests that catch it coming back.
+    describe("an Assistant is the User's to write, and the store enforces it", () => {
+        it("refuses to let the Runtime identity CREATE an Assistant", async () => {
+            const denied = await things
+                .create(SPECS.Assistant_DM, {
+                    ...PAYLOADS.Assistant_DM,
+                    key: unique("runtime-may-not-create"),
+                    createdAt: LONG_AGO,
+                    idempotencyKey: unique("assistant:create-denied"),
+                })
+                .then(
+                    (created) => {
+                        // Only reached when the guard is gone. Register it so a red run does not
+                        // leave a rogue Assistant behind in the store.
+                        trash.add(created.docRef);
+                        return created;
+                    },
+                    (error: unknown) => error as A12RpcError,
+                );
+
+            expect(denied).toBeInstanceOf(A12RpcError);
+            const error = denied as A12RpcError;
+            expect(error.rpcError.code).toBe(-32059);
+            expect(error.reason).toMatch(/Access Denied/i);
+        });
+
+        it("refuses to let the Runtime identity MODIFY an Assistant the User created", async () => {
+            const key = unique("assistant:modify-denied");
+            const existing = await asUser.create(SPECS.Assistant_DM, {
+                ...PAYLOADS.Assistant_DM,
+                key: unique("runtime-may-not-modify"),
+                createdAt: LONG_AGO,
+                idempotencyKey: key,
+            });
+            trash.add(existing.docRef);
+
+            const denied = await things
+                .update(SPECS.Assistant_DM, existing.docRef, {
+                    ...PAYLOADS.Assistant_DM,
+                    // The escalation the guard exists to stop: an Assistant granting itself the
+                    // Operation that moves money.
+                    tools: [{ operation: "bookkeeping.postTransaction" }],
+                    enabled: true,
+                    idempotencyKey: key,
+                })
+                .then(
+                    () => undefined,
+                    (error: unknown) => error as A12RpcError,
+                );
+
+            expect(denied).toBeInstanceOf(A12RpcError);
+            expect((denied as A12RpcError).rpcError.code).toBe(-32059);
+
+            // The refusal is a refusal, not a partial write.
+            const loaded = await things.get<Record<string, unknown>>(
+                SPECS.Assistant_DM,
+                existing.docRef,
+            );
+            expect(loaded.data["tools"]).toEqual(PAYLOADS.Assistant_DM["tools"]);
+            expect(loaded.data["enabled"]).toBe(false);
+        });
+
+        it("still lets the Runtime identity write the Models it does own", async () => {
+            // The other half of the guard: deny too much and the whole system stops. A
+            // Conversation and an OpenQuestion are the Runtime's, and it must keep both.
+            for (const model of KEEP) {
+                const spec = (SPECS as Record<string, ModelSpec>)[model]!;
+                const stored = await things.create(spec, {
+                    ...PAYLOADS[model],
+                    createdAt: LONG_AGO,
+                    idempotencyKey: `itest:still-writable:${model}`,
+                });
+                await things.update(spec, stored.docRef, {
+                    ...PAYLOADS[model],
+                    createdAt: LONG_AGO,
+                    idempotencyKey: `itest:still-writable:${model}`,
+                });
+            }
         });
     });
 });
