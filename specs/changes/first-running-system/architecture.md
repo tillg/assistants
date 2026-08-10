@@ -20,6 +20,7 @@ flowchart LR
 
     INIT --> PG
     SRV --> PG
+    FF --> PG
     FE -->|"/api, /cs, /actuator"| SRV
     RT -->|JSON-RPC| SRV
     RT -->|REST| FF

@@ -42,7 +42,7 @@ about markdown fields) · and the change that built this,
 ## How it works
 
 Everything runs in one `docker compose` file: five long-running services and two one-shot init
-containers. No Keycloak, no second database, no message broker, no workflow engine.
+containers. No Keycloak, no second database engine, no message broker, no workflow engine.
 
 ```mermaid
 flowchart LR
@@ -60,12 +60,17 @@ flowchart LR
 
     INIT --> PG
     SRV --> PG
+    FF --> PG
     FE -->|"/api, /cs, /actuator"| SRV
     RT -->|JSON-RPC| SRV
     RT -->|REST| FF
     RT --> LLM
     FB --> FF
 ```
+
+One Postgres container, three databases: `assistants-ds` (the Things), `assistants-cs` (binary
+content) and `assistants-firefly` (the books). The first two are A12's own split — each carries
+its own Liquibase changelog — and Firefly owns the third outright ([D-004](DECISIONS.md)).
 
 The Runtime is a client of the ThingStore with no privileged access, exactly like the
 UserInterface. It polls; it exposes no API and receives no webhooks. That is the whole
