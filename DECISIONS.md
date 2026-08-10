@@ -95,6 +95,18 @@ Firefly's setup once (breaks the zero-touch requirement).
 
 **Reversal cost**: Low — swapping SQLite for MariaDB is a compose edit.
 
+**Superseded 2026-08-10, on the storage half only** (the headless bootstrap stands unchanged):
+Firefly now runs on the stack's existing `postgres` container, in its own database
+`assistants-firefly` under its own role, provisioned by the same
+`compose/postgres/db-init.sh` that already creates the data-service and content-store
+databases. The reversal cost quoted above was accurate — it was a compose edit plus nine lines
+of shell. What changed the trade is that the second engine the original decision was avoiding
+turned out not to be a second *container*: Postgres was already in the stack for the
+ThingStore, so putting Firefly on it removes a storage engine rather than adding one, and the
+books become reachable by the same `psql`, backup and inspection commands as everything else.
+The cost is that Firefly's data no longer survives independently of the ThingStore's database
+volume — `just clean` already took the books with it, so nothing changes operationally there.
+
 ---
 
 ## D-005 — The ThingStore is the only integration surface; the Runtime polls it

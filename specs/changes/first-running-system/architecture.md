@@ -28,8 +28,9 @@ flowchart LR
 ```
 
 Five long-running services (frontend, server, postgres, firefly, runtime) plus two one-shot init containers (server-init, firefly-bootstrap). No Keycloak (the A12 **local-auth** variant
-authenticates against YAML user files — D-003), no second database (Firefly runs on SQLite —
-D-004), no message broker, no workflow engine (AGENTIC_LOOP.md Q5).
+authenticates against YAML user files — D-003), no second database engine (Firefly has its own
+database inside the stack's Postgres — D-004), no message broker, no workflow engine
+(AGENTIC_LOOP.md Q5).
 
 ### Why the Runtime is a separate service and not A12 server code
 
@@ -465,7 +466,8 @@ granularity ADR-0010 argued for, and the chart of accounts is a structural decis
 should be making.
 
 
-Firefly III 6.6.6 on SQLite. A one-shot `firefly-bootstrap` container registers the first user
+Firefly III 6.6.6 on the stack's Postgres, database `assistants-firefly`. A one-shot
+`firefly-bootstrap` container registers the first user
 and mints a Personal Access Token over Firefly's own web endpoints (no artisan command can do
 it), writing the token to a shared volume the Runtime reads.
 

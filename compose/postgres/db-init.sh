@@ -51,3 +51,13 @@ if [[ -n "$CONTENTSTORE_DB" && -n "$CONTENTSTORE_USER" && -n "$CONTENTSTORE_PASS
     create_user_if_not_exists "$CONTENTSTORE_USER" "$CONTENTSTORE_PASSWORD"
     create_database "$CONTENTSTORE_USER" "$CONTENTSTORE_DB"
 fi
+
+# Firefly III (bookkeeping)
+FIREFLY_DB="${FIREFLY_DB:-}"
+FIREFLY_DB_USER="${FIREFLY_DB_USER:-}"
+FIREFLY_DB_PASSWORD="${FIREFLY_DB_PASSWORD:-}"
+
+if [[ -n "$FIREFLY_DB" && -n "$FIREFLY_DB_USER" && -n "$FIREFLY_DB_PASSWORD" ]]; then
+    create_user_if_not_exists "$FIREFLY_DB_USER" "$FIREFLY_DB_PASSWORD"
+    create_database "$FIREFLY_DB_USER" "$FIREFLY_DB"
+fi

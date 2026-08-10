@@ -222,8 +222,8 @@ a compose-level environment variable rather than a constructor argument, on purp
 |---|---|---|
 | `frontend` | 8081 | UserInterface — the A12 web application |
 | `server` | 8082 | ThingStore — the A12 Data Service |
-| `postgres` | 8083 | The ThingStore's database (data service + content store) |
-| `firefly` | 8084 | Bookkeeping — Firefly III 6.6.6 on SQLite |
+| `postgres` | 8083 | The stack's database (data service + content store + the books) |
+| `firefly` | 8084 | Bookkeeping — Firefly III 6.6.6 on Postgres |
 | `runtime` | — | The Runtime; no port, it only makes outbound calls |
 | `server-init`, `firefly-bootstrap` | — | One-shot init containers |
 
@@ -256,7 +256,9 @@ operations against Firefly, and four Manual Connector operations. It authenticat
 check is "did the last scan finish", not "is the process alive", because silence is the one failure
 the User cannot otherwise detect.
 
-**Bookkeeping** (`compose/firefly/`) — Firefly III on SQLite, in the same compose file, brought up
+**Bookkeeping** (`compose/firefly/`) — Firefly III on the stack's Postgres, in its own database
+(`assistants-firefly`) under its own role, created by `compose/postgres/db-init.sh` alongside the
+ThingStore's two databases. In the same compose file, brought up
 with zero manual steps: a one-shot container registers the first user and mints a personal access
 token into a volume the Runtime reads ([D-004](DECISIONS.md)). The connector never passes account
 *names* to Firefly, because Firefly silently creates an account it does not recognise; it resolves
