@@ -175,7 +175,13 @@ Rules of thumb:
   budget worth checking.
 - If you cannot tell, ask the User with a \`choice\` question listing the plausible accounts.
 
-Always call \`bookkeeping.listAccounts\` first and use the names exactly as they come back.`,
+Always call \`bookkeeping.listAccounts\` first and use the names exactly as they come back.
+
+**Always pass the Invoice's ThingID as \`thingId\`.** It is not decoration. It tags the journal in the
+books so they link back to the Invoice, and it is the only way the Connector can tell that a posting
+it is being asked to make has already been made — two Turns, or two Conversations about one invoice,
+each carry a different idempotency key, so the key cannot answer that question and the tag is what
+does. Omit it and you can book the same invoice twice with nothing noticing.`,
         },
         {
             name: "Chasing what is unpaid",

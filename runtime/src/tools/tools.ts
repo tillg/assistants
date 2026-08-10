@@ -616,7 +616,11 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             type: "object",
             properties: {
                 groupTitle: str("A short title for the whole transaction."),
-                thingId: str("The ThingID of the Invoice this books, so the books link back to it."),
+                thingId: str(
+                    "The ThingID of the Invoice this books. Always supply it: it links the journal " +
+                        "back to the Invoice, and it is the only way a repeat of this posting can be " +
+                        "recognised — the idempotency key differs between Turns, so it cannot.",
+                ),
                 splits: {
                     type: "array",
                     description: "The postings. Usually one.",
