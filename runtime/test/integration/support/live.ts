@@ -174,6 +174,15 @@ export function describeRpc(error: unknown): string {
     return `${(error as Error)?.message ?? String(error)} ${data?.description?.default ?? ""}`;
 }
 
+/** Same reason as `deleteTransaction`: the Connector has no delete, and a test that creates an
+ * account has to remove it or the chart grows a little on every run. */
+export async function deleteAccount(id: string): Promise<void> {
+    await fetch(`${FIREFLY_URL.replace(/\/+$/, "")}/api/v1/accounts/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${FIREFLY_TOKEN}`, Accept: "application/json" },
+    }).catch(() => undefined);
+}
+
 /** Firefly has no delete in the Connector — cleaning up a posted transaction is raw REST. */
 export async function deleteTransaction(id: string): Promise<void> {
     await fetch(`${FIREFLY_URL.replace(/\/+$/, "")}/api/v1/transactions/${id}`, {

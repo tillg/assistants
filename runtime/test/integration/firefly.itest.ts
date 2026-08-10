@@ -15,6 +15,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { FireflyConnector, FireflyError } from "../../src/connectors/firefly.js";
 import {
+    deleteAccount,
     deleteTransaction,
     FIREFLY_TOKEN,
     FIREFLY_UP,
@@ -57,6 +58,7 @@ async function listCategoryNames(): Promise<string[]> {
 describe.skipIf(!FIREFLY_UP)("Firefly connector against the live Firefly III", () => {
     let firefly: FireflyConnector;
     const postedIds: string[] = [];
+    const createdAccountIds: string[] = [];
 
     beforeAll(async () => {
         firefly = newFirefly();
@@ -64,12 +66,15 @@ describe.skipIf(!FIREFLY_UP)("Firefly connector against the live Firefly III", (
 
     afterEach(async () => {
         // Every transaction this suite posts is removed again, so the demo balances are the
-        // ones the demo data seeded and nothing else.
+        // ones the demo data seeded and nothing else — and so is every account it creates, or the
+        // chart of accounts would grow a little on every run.
         while (postedIds.length > 0) await deleteTransaction(postedIds.pop()!);
+        while (createdAccountIds.length > 0) await deleteAccount(createdAccountIds.pop()!);
     });
 
     afterAll(async () => {
         while (postedIds.length > 0) await deleteTransaction(postedIds.pop()!);
+        while (createdAccountIds.length > 0) await deleteAccount(createdAccountIds.pop()!);
     });
 
     it("lists the demo accounts", async () => {
@@ -433,6 +438,54 @@ describe.skipIf(!FIREFLY_UP)("Firefly connector against the live Firefly III", (
 
         expect(paid.alreadyExisted).toBe(false);
         expect(paid.id).not.toBe(booked.id);
+    });
+
+    it("refuses a foreign-currency amount rather than booking it as euros", async () => {
+        // The report says the connector drops `currencyCode`. It does not — it sends
+        // `currency_code` faithfully, and *Firefly* overrides it from the source asset account. So a
+        // split posted as 50.00 USD was stored as 50.00 EUR: no error, no foreign-amount fields, no
+        // conversion. A foreign-currency invoice booked at the wrong value with nothing to notice it
+        // by, which for a Bookkeeping Authority (ADR-0006) means nothing holds a copy to disagree.
+        //
+        // ACCOUNTING.md lists multi-currency as "nice to have, not required", so refusing is in scope
+        // and mis-booking is not.
+        const externalId = `${ITEST}usd:${Date.now()}`;
+        await expect(
+            firefly.postTransaction({
+                externalId,
+                splits: [
+                    {
+                        type: "withdrawal",
+                        date: new Date().toISOString().slice(0, 10),
+                        amount: "50.00",
+                        description: `${ITEST}a dollar invoice`,
+                        sourceAccount: SOURCE,
+                        destinationAccount: DESTINATION,
+                        currencyCode: "USD",
+                    },
+                ],
+            }),
+        ).rejects.toThrow(/USD.*EUR|EUR.*USD/s);
+
+        expect(await firefly.findByExternalId(externalId)).toBeUndefined();
+    });
+
+    it("refuses an ambiguous account name instead of silently picking one", async () => {
+        // Firefly allows two accounts whose names differ only by case within one type, and one name
+        // under two different types. `resolveAccountId` used three successive `find` calls, so it
+        // returned whichever Firefly listed first — and worse, two *spellings* of one name resolved to
+        // two different accounts. Name→id resolution exists precisely so the model cannot address the
+        // wrong account.
+        const base = `${ITEST}Ambig-${Date.now()}`;
+        const created = [
+            await firefly.createAccount({ name: base, type: "expense" }),
+            await firefly.createAccount({ name: base.toLowerCase(), type: "expense" }),
+        ];
+        createdAccountIds.push(...created.map((account) => account.id));
+
+        await expect(firefly.resolveAccountId(base.toUpperCase())).rejects.toThrow(/ambiguous/i);
+        // An exact match is still unambiguous, so the ordinary path is untouched.
+        expect(await firefly.resolveAccountId(base)).toBe(created[0]!.id);
     });
 
     it("refuses to post to an account that does not exist", async () => {
