@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import { buildHarness, nowIso, type Harness } from "./support/harness.js";
 import { SPECS } from "../src/a12/things.js";
 import { RUNTIME_STATE_KEY } from "../src/watcher/watcher.js";
+import { isPaused, setPaused } from "../src/bootstrap/bootstrap.js";
 import type { Conversation, RuntimeState, Stored } from "../src/domain/types.js";
 
 /** The watermark the Runtime would have had when the batch landed. */
@@ -157,5 +158,85 @@ describe("the materialised scan (scan 1)", () => {
         expect((await subjectsBirthed(harness)).has(blockedInvoice.thingId)).toBe(false);
         // The Document's progress must not carry the watermark past the Invoice that was skipped.
         expect((await state(harness)).data.watermark! < nowIso(new Date(t0 + 60_000))).toBe(true);
+    });
+});
+
+describe("the RuntimeState the scan writes back", () => {
+    it("does not undo a pause issued while the scan was in flight", async () => {
+        // The global kill switch. `scan()` reads the state at the top of a pass that takes seconds
+        // and the watermark write at the end used to put the whole stale copy back, silently
+        // reverting a `just pause` issued in between — measured at 3 reverts in 25 attempts, with
+        // `just pause` still logging "runtime paused" and exiting 0.
+        //
+        // The pause is injected deterministically rather than by racing: at the moment the birth
+        // writes its Conversation, which is inside the window between the read and the write.
+        const t0 = Date.now() - 3_600_000;
+        const harness = buildHarness([], { maxBirthsPerHour: 1000 });
+        await harness.seedAssistant();
+        const seededWatermark = nowIso(new Date(t0));
+        await seedState(harness, seededWatermark);
+        await harness.things.create(SPECS.Document_DM, {
+            title: "the Thing whose birth opens the window",
+            createdAt: nowIso(new Date(t0 + 60_000)),
+            idempotencyKey: "opens-the-window",
+        });
+
+        const addDocument = harness.store.addDocument.bind(harness.store);
+        let injected = false;
+        harness.store.addDocument = async (model, document) => {
+            const docRef = await addDocument(model, document);
+            if (model === "Conversation_DM" && !injected) {
+                injected = true;
+                await setPaused(harness.things, true);
+            }
+            return docRef;
+        };
+
+        await harness.watcher.scan();
+
+        expect(injected).toBe(true);
+        expect(await isPaused(harness.things)).toBe(true);
+        // ...and the watermark write really did happen, so the pause survived a real write rather
+        // than there being nothing to survive.
+        expect((await state(harness)).data.watermark).not.toBe(seededWatermark);
+    });
+
+    it("does not roll back a watermark another writer has moved forward", async () => {
+        // `paused` was the only field carried forward, so anything else a second writer had
+        // advanced was trampled by the stale in-memory copy. `just demo-data` moves the watermark
+        // forward for exactly this reason, and losing that puts the demo set back on the work queue.
+        const t0 = Date.now() - 3_600_000;
+        const harness = buildHarness([], { maxBirthsPerHour: 1000 });
+        await harness.seedAssistant();
+        await seedState(harness, nowIso(new Date(t0)));
+
+        await harness.things.create(SPECS.Document_DM, {
+            title: "the Thing whose birth opens the window",
+            createdAt: nowIso(new Date(t0 + 60_000)),
+            idempotencyKey: "opens-the-window",
+        });
+
+        // A second writer moves the watermark forward *while* the scan holds its own copy — the
+        // same window the pause test uses, because it is the same window.
+        const ahead = nowIso(new Date(t0 + 600_000));
+        const addDocument = harness.store.addDocument.bind(harness.store);
+        let injected = false;
+        harness.store.addDocument = async (model, document) => {
+            const docRef = await addDocument(model, document);
+            if (model === "Conversation_DM" && !injected) {
+                injected = true;
+                const loaded = await harness.watcher.loadState();
+                await harness.things.update(SPECS.RuntimeState_DM, loaded.docRef, {
+                    ...loaded.data,
+                    watermark: ahead,
+                });
+            }
+            return docRef;
+        };
+
+        await harness.watcher.scan();
+
+        expect(injected).toBe(true);
+        expect((await state(harness)).data.watermark).toBe(ahead);
     });
 });
