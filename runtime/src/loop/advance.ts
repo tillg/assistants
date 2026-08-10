@@ -230,8 +230,8 @@ export class LoopDriver {
         // sequence has moved on) — which is exactly how you book the same invoice twice.
         const unresolved = unresolvedIntent(conversation);
         if (unresolved) {
-            const settled = await this.reconcile(stored, assistant, unresolved);
-            if (!settled) {
+            const outcome = await this.reconcile(stored, assistant, unresolved);
+            if (!outcome) {
                 await this.escalate(
                     stored,
                     assistant,
@@ -242,6 +242,12 @@ export class LoopDriver {
                         `then answer to tell me what to do.`,
                 );
                 return { status: conversation.status ?? "waiting", turnsRun: 0, note: "unreconcilable intent" };
+            }
+            // `pending` means the suspension still holds — the question is still open, the payment
+            // still unmade. Falling through to a fresh Turn here let the Conversation reach `done`
+            // without the answer, and cleared the `currentQuestionId` that was the only way back.
+            if (outcome.kind === "pending") {
+                return this.suspend(stored, unresolved.toolName ?? "", outcome, 0);
             }
             await this.write(stored);
         }
@@ -361,18 +367,7 @@ export class LoopDriver {
                     }),
                     idempotencyKey,
                 });
-                conversation.status = "waiting";
-                conversation.waitingFor = outcome.waitingFor;
-                conversation.wakeAt = outcome.wakeAt ?? "";
-                conversation.currentQuestionId = outcome.questionId ?? "";
-                conversation.leaseUntil = "";
-                await this.write(stored);
-                log.info("conversation suspended", {
-                    conversationId: stored.thingId,
-                    waitingFor: outcome.waitingFor,
-                    tool: operation,
-                });
-                return { status: "waiting", turnsRun: 1, note: `pending ${operation}` };
+                return this.suspend(stored, operation, outcome, 1);
             }
 
             appendEntry(conversation, {
@@ -394,16 +389,48 @@ export class LoopDriver {
     }
 
     /**
+     * Put the Conversation back to sleep.
+     *
+     * The **only** writer of the suspended state, deliberately: the normal pending path and the
+     * recovery path both need it, and keeping two copies is what let recovery forget to set
+     * `status`, `waitingFor` and `currentQuestionId` and finish a Conversation whose question was
+     * still open.
+     */
+    private async suspend(
+        stored: Stored<Conversation>,
+        operation: string,
+        outcome: Extract<ToolOutcome, { kind: "pending" }>,
+        turnsRun: number,
+    ): Promise<AdvanceResult> {
+        const conversation = stored.data;
+        conversation.status = "waiting";
+        conversation.waitingFor = outcome.waitingFor;
+        conversation.wakeAt = outcome.wakeAt ?? "";
+        conversation.currentQuestionId = outcome.questionId ?? "";
+        conversation.leaseUntil = "";
+        await this.write(stored);
+        log.info("conversation suspended", {
+            conversationId: stored.thingId,
+            waitingFor: outcome.waitingFor,
+            tool: operation,
+        });
+        return { status: "waiting", turnsRun, note: `pending ${operation}` };
+    }
+
+    /**
      * Ask the Connector whether an interrupted call landed. Never re-execute.
      *
-     * Returns true when the question was settled (either way) and the transcript now has a result
-     * for that intent; false when nothing can answer it, in which case the caller escalates.
+     * Returns the Operation's own verdict — and `undefined` when nothing can answer, in which case
+     * the caller escalates. The verdict is returned rather than a boolean because a `pending` one
+     * means something quite different from "settled": the suspension still holds, and the caller
+     * has to honour it instead of taking a Turn. Either way the transcript now carries a result for
+     * the intent, so `unresolvedIntent` will not find it again.
      */
     private async reconcile(
         stored: Stored<Conversation>,
         assistant: Stored<Assistant>,
         intent: Entry,
-    ): Promise<boolean> {
+    ): Promise<ToolOutcome | undefined> {
         const conversation = stored.data;
         const operation = intent.toolName ?? "";
         const key = intent.idempotencyKey ?? "";
@@ -417,31 +444,34 @@ export class LoopDriver {
             idempotencyKey: key,
         });
 
-        if (!tool) {
-            // The Operation is gone (renamed, or revoked from this Assistant). Nothing did it.
+        const settle = (verdict: ToolOutcome, text: string): ToolOutcome => {
             appendEntry(conversation, {
                 role: "tool",
                 kind: "tool-result",
                 toolName: operation,
-                toolResult: `Error: this call was interrupted, and "${operation}" is no longer available, so it did not take effect.`,
+                toolResult: text,
                 idempotencyKey: key,
             });
-            return true;
+            return verdict;
+        };
+
+        if (!tool) {
+            // The Operation is gone (renamed, or revoked from this Assistant). Nothing did it.
+            return settle(
+                { kind: "error", message: `"${operation}" is no longer available` },
+                `Error: this call was interrupted, and "${operation}" is no longer available, so it did not take effect.`,
+            );
         }
 
         if (!tool.mutating) {
             // Read-only: repeating it is free and cannot be wrong.
-            appendEntry(conversation, {
-                role: "tool",
-                kind: "tool-result",
-                toolName: operation,
-                toolResult: "This call was interrupted. It only reads, so nothing was changed — ask again if you still need it.",
-                idempotencyKey: key,
-            });
-            return true;
+            return settle(
+                { kind: "value", value: null },
+                "This call was interrupted. It only reads, so nothing was changed — ask again if you still need it.",
+            );
         }
 
-        if (!tool.reconcile) return false;
+        if (!tool.reconcile) return undefined;
 
         const context: ToolContext = { conversation: stored, assistant, idempotencyKey: key };
         let outcome: ToolOutcome | undefined;
@@ -452,23 +482,18 @@ export class LoopDriver {
                 tool: operation,
                 error: describeError(error),
             });
-            return false;
+            return undefined;
         }
-        if (!outcome) return false;
+        if (!outcome) return undefined;
 
-        appendEntry(conversation, {
-            role: "tool",
-            kind: "tool-result",
-            toolName: operation,
-            toolResult:
-                outcome.kind === "error"
-                    ? `Error: ${outcome.message}`
-                    : outcome.kind === "pending"
-                      ? JSON.stringify({ pending: true, waitingFor: outcome.waitingFor })
-                      : JSON.stringify(outcome.value ?? null),
-            idempotencyKey: key,
-        });
-        return true;
+        return settle(
+            outcome,
+            outcome.kind === "error"
+                ? `Error: ${outcome.message}`
+                : outcome.kind === "pending"
+                  ? JSON.stringify({ pending: true, waitingFor: outcome.waitingFor })
+                  : JSON.stringify(outcome.value ?? null),
+        );
     }
 
     /**
