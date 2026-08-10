@@ -15,7 +15,7 @@
  *      rather than doing it again. A result log cannot answer that question; an intent log can.
  */
 
-import { log, describeError } from "../log.js";
+import { log, describeError, describeForModel } from "../log.js";
 import { nowIso, parseIso, SPECS, ThingRepository } from "../a12/things.js";
 import type {
     Assistant,
@@ -393,7 +393,16 @@ export class LoopDriver {
                 outcome = await tool.execute(call.arguments, context);
             } catch (error) {
                 // Recoverable by the model: it sees the error as a tool result and self-corrects.
-                outcome = { kind: "error", message: describeError(error) };
+                // Which requires the message to say what was wrong — so the model gets the
+                // Authority's own reason, and the operator gets the stack in the log. Putting the
+                // stack in the transcript instead gave the model nothing to correct against, cost
+                // tokens on every failure, and leaked host paths into the prompt.
+                log.error("a tool call threw", {
+                    conversationId: stored.thingId,
+                    tool: operation,
+                    error: describeError(error),
+                });
+                outcome = { kind: "error", message: describeForModel(error) };
             }
 
             if (outcome.kind === "pending") {

@@ -20,8 +20,23 @@ export const log = {
     error: (m: string, f?: Record<string, unknown>) => emit("error", m, f),
 };
 
-/** Errors are logged everywhere; this keeps the shape consistent. */
+/** Errors are logged everywhere; this keeps the shape consistent. For operators: keeps the stack. */
 export function describeError(error: unknown): string {
     if (error instanceof Error) return error.stack ?? `${error.name}: ${error.message}`;
+    return String(error);
+}
+
+/**
+ * The same failure, written for the model rather than for an operator.
+ *
+ * A stack trace is the wrong thing to put in a prompt three times over: the model cannot act on
+ * it, it costs tokens on every failure, and it puts absolute host paths into an LLM request. The
+ * message alone is what the model can self-correct against — which is why it matters that the
+ * message carries the Authority's own reason (see `A12RpcError.reason`, `FireflyError.details`).
+ *
+ * Operators lose nothing: every caller logs `describeError` alongside.
+ */
+export function describeForModel(error: unknown): string {
+    if (error instanceof Error) return error.message || error.name;
     return String(error);
 }

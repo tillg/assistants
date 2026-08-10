@@ -24,13 +24,39 @@ export interface A12Error {
 }
 
 export class A12RpcError extends Error {
+    /**
+     * Why the store refused, in its own words.
+     *
+     * `rpcError.message` is always the same generic sentence — "Could not create document", or
+     * "JSON-RPC Request failed and rollback was performed" — for every one of a dozen
+     * structurally different rejections. The reason lives in `data.description.default`, and
+     * omitting it from the message meant an Assistant was told only that something went wrong,
+     * which it cannot correct itself against. (`data.exception` and `data.stacktrace` are always
+     * null, so there is nothing else in there worth carrying.)
+     */
+    readonly reason: string | undefined;
+
     constructor(
         readonly method: string,
         readonly rpcError: A12Error,
     ) {
-        super(`${method} failed: ${rpcError.message} (code ${rpcError.code})`);
+        const reason = reasonOf(rpcError);
+        super(
+            `${method} failed: ${rpcError.message} (code ${rpcError.code})` +
+                (reason ? ` — ${reason}` : ""),
+        );
         this.name = "A12RpcError";
+        this.reason = reason;
     }
+}
+
+/** The store's reason, flattened to one line and bounded so it cannot bloat every prompt. */
+function reasonOf(rpcError: A12Error): string | undefined {
+    const description = (rpcError.data as { description?: { default?: string } } | undefined)
+        ?.description?.default;
+    if (!description) return undefined;
+    const oneLine = description.replace(/\s+/g, " ").trim();
+    return oneLine.length > 500 ? `${oneLine.slice(0, 500)}…` : oneLine;
 }
 
 export interface RpcRequest {
