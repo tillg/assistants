@@ -20,22 +20,18 @@ import { log } from "../log.js";
 const REQUEST_TIMEOUT_MS = 20_000;
 
 /**
- * The account types a transaction can actually be posted to or from.
+ * Firefly's own bookkeeping accounts, which are not part of anybody's chart of accounts.
  *
- * Note the plural in `liabilities`: Firefly's *write* API takes `liability` and its *read* API
- * answers `liabilities` (the mismatch behind BUG-02), so both spellings are accepted here. Getting
- * that wrong would silently drop the payables account from the chart and from `resolveAccountId`,
- * which is a worse version of the bug it comes from — hence the assertion beside this filter's test.
+ * A **deny**-list rather than an allow-list, deliberately. BUG-02 was an allow-list that did not know
+ * Firefly answers `liabilities` where it accepts `liability`, and it silently hid the payables account
+ * — so the failure mode of getting this wrong is "a real account disappears", which is exactly what
+ * must not happen again. Inverted, an account type nobody anticipated stays visible and only these
+ * three are hidden.
  */
+const INTERNAL_ACCOUNT_TYPES = new Set(["initial-balance", "reconciliation", "import"]);
+
 function isBookable(type: string): boolean {
-    const normalised = type.toLowerCase();
-    return (
-        normalised === "asset" ||
-        normalised === "expense" ||
-        normalised === "revenue" ||
-        normalised.startsWith("liabilit") ||
-        normalised === "debt"
-    );
+    return !INTERNAL_ACCOUNT_TYPES.has(type.toLowerCase());
 }
 
 export interface FireflyAccount {

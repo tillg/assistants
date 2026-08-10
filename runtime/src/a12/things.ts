@@ -10,7 +10,7 @@
  * `domain/types.ts`, plus the query paths (`/Party/Name`) the watcher filters on.
  */
 
-import { log } from "../log.js";
+import { describeError, log } from "../log.js";
 import {
     A12Client,
     type A12Document,
@@ -442,16 +442,31 @@ export class ThingRepository {
             // row means every caller ends up referring to the *same* Thing and the loser is left
             // unreferenced — which is the best available outcome, because the `runtime` identity
             // deliberately cannot delete (D-007).
-            const all = await this.search<T>(spec, eq(path(spec, "idempotencyKey"), key), 5);
-            if (all.length > 1) {
-                const winner = [...all].sort((a, b) => a.docRef.localeCompare(b.docRef))[0]!;
-                log.warn("two callers created a Thing under one idempotency key; converging", {
+            //
+            // Never fatal. The write has already succeeded at this point, so letting a failed *check*
+            // throw would report a created Thing as an error — and the caller's retry would then find
+            // it by key anyway. A duplicate we failed to notice is a lesser problem than a Thing the
+            // caller believes does not exist.
+            try {
+                const all = await this.search<T>(spec, eq(path(spec, "idempotencyKey"), key), 5);
+                if (all.length > 1) {
+                    const winner = [...all].sort((a, b) => a.docRef.localeCompare(b.docRef))[0]!;
+                    log.warn("two callers created a Thing under one idempotency key; converging", {
+                        model: spec.model,
+                        idempotencyKey: key,
+                        kept: winner.docRef,
+                        orphaned: all
+                            .filter((row) => row.docRef !== winner.docRef)
+                            .map((row) => row.docRef),
+                    });
+                    return winner;
+                }
+            } catch (error) {
+                log.warn("could not check for a duplicate after creating; carrying on", {
                     model: spec.model,
                     idempotencyKey: key,
-                    kept: winner.docRef,
-                    orphaned: all.filter((row) => row.docRef !== winner.docRef).map((row) => row.docRef),
+                    error: describeError(error),
                 });
-                return winner;
             }
         }
         return {
