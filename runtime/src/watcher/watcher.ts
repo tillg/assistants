@@ -641,27 +641,50 @@ export class Watcher {
     }
 
     /**
-     * Write the RuntimeState without trampling the fields a human owns.
+     * Write the RuntimeState without trampling what another writer has done.
      *
      * `paused` is the global kill switch and the User may flip it at any moment, including
      * halfway through a scan. A12 has no compare-and-swap, so the least-bad thing available is
      * to re-read immediately before writing and carry those fields forward. If it cannot be
      * re-read, do not write at all — a stale heartbeat is the honest outcome and the health
      * probe reports it.
+     *
+     * `watermark` needs the same care for a different reason: `just demo-data` moves it forward so
+     * the demo set lands as history rather than as a work queue, and a scan holding an older copy
+     * used to put it straight back — re-queueing the entire household. Carried forward only when
+     * the fresh one is **ahead**, so this cannot mask the scan's own progress; a deliberate
+     * rollback to reprocess would be overridden, which is the trade and is why it is one-directional.
+     *
+     * The remaining window cannot be closed without compare-and-swap: another writer landing
+     * between this re-read and the write still loses. Recorded rather than papered over.
      */
     private async savePreservingHumanFields(state: Stored<RuntimeState>): Promise<void> {
-        let paused: boolean | undefined;
+        let fresh: Stored<RuntimeState>;
         try {
-            const fresh = await this.deps.things.get<RuntimeState>(
-                SPECS.RuntimeState_DM,
-                state.docRef,
-            );
-            paused = fresh.data.paused;
+            fresh = await this.deps.things.get<RuntimeState>(SPECS.RuntimeState_DM, state.docRef);
         } catch {
             return;
         }
-        await this.saveState({ ...state, data: { ...state.data, paused } });
+        const paused = fresh.data.paused;
+        const ours = state.data.watermark ?? "";
+        const theirs = fresh.data.watermark ?? "";
+        const watermarkIsTheirs = theirs > ours;
+
+        await this.saveState({
+            ...state,
+            data: {
+                ...state.data,
+                paused,
+                ...(watermarkIsTheirs
+                    ? { watermark: theirs, watermarkDocRefs: fresh.data.watermarkDocRefs }
+                    : {}),
+            },
+        });
         state.data.paused = paused ?? state.data.paused;
+        if (watermarkIsTheirs) {
+            state.data.watermark = theirs;
+            state.data.watermarkDocRefs = fresh.data.watermarkDocRefs;
+        }
     }
 }
 
