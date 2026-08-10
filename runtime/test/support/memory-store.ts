@@ -25,6 +25,15 @@ export class MemoryStore {
     readonly rows = new Map<string, Row>();
     /** Every write, in order — used to assert that recovery did not re-execute anything. */
     readonly writes: Array<{ method: string; docRef: string }> = [];
+    /**
+     * Make the next `ADD_DOCUMENT` fail, exactly as the real store does.
+     *
+     * The store rejects a document for a dozen structurally different reasons and the reason is
+     * never in `error.message` — it sits in `error.data.description.default`. Reproducing a
+     * rejection therefore needs the real error *object*, not a bare `throw new Error`, or the test
+     * would be about a shape the store never produces.
+     */
+    failNextAdd: Error | undefined;
 
     async login(): Promise<void> {}
 
@@ -33,6 +42,11 @@ export class MemoryStore {
     }
 
     async addDocument(documentModelName: string, document: A12Document): Promise<string> {
+        if (this.failNextAdd) {
+            const failure = this.failNextAdd;
+            this.failNextAdd = undefined;
+            throw failure;
+        }
         counter += 1;
         const docRef = `${documentModelName}/${documentModelName.toLowerCase()}-${counter}`;
         this.rows.set(docRef, { docRef, documentModelName, document: structuredClone(document) });

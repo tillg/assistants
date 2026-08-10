@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import { buildHarness, nowIso, type Harness } from "./support/harness.js";
 import { SPECS } from "../src/a12/things.js";
 import { buildMessages } from "../src/loop/advance.js";
+import { A12RpcError } from "../src/a12/client.js";
 import type { Conversation } from "../src/domain/types.js";
 
 describe("one turn", () => {
@@ -77,6 +78,57 @@ describe("one turn", () => {
         );
         expect(conversationWrites.length).toBeGreaterThan(0);
         expect(firstConversationWrite).toBeLessThan(partyCreate);
+    });
+});
+
+describe("what a failure tells the model", () => {
+    it("passes on the store's own reason for a rejection, not a stack trace", async () => {
+        // The store gives a precise reason for each of a dozen structurally different mistakes —
+        // missing mandatory field, over-length string, unsupported character, three decimals on an
+        // amount, a year-1000 date. All of them arrived at the model as the same sentence, because
+        // `A12RpcError` is built from `rpcError.message` (always the same generic string) and never
+        // touches `rpcError.data`, and because the tool result was `error.stack`.
+        //
+        // `advance.ts` says the error path is "recoverable by the model: it sees the error as a tool
+        // result and self-corrects". It cannot self-correct from "Could not create document"; the
+        // likely behaviour is retrying identical input until maxTurns.
+        const harness = buildHarness([
+            {
+                turn: 0,
+                toolCalls: [
+                    {
+                        name: "thingstore__create",
+                        arguments: { model: "Party_DM", fields: { name: "Klinik 🏥", kind: "organisation" } },
+                    },
+                ],
+            },
+        ]);
+        const assistant = await harness.seedAssistant();
+        const docRef = await harness.birth({ assistant });
+
+        // Verbatim from the live store, including the code and where the reason actually lives.
+        harness.store.failNextAdd = new A12RpcError("ADD_DOCUMENT", {
+            code: -32002,
+            message: "Could not create document",
+            data: {
+                description: {
+                    default:
+                        "Document is not valid:\n[Entity: PartiallyKnownDocumentMultiPointerImpl" +
+                        "[/Party/Name, [1, 1]] Type: VALUE_ERROR Message: The field contains one or " +
+                        "several unsupported signs. ErrorCode: ZeichenNichtImZeichensatz " +
+                        "Rule: formalePruefung]",
+                },
+            },
+        });
+
+        await harness.driver.advance(docRef);
+
+        const conversation = await harness.conversation(docRef);
+        const result = (conversation.data.entries ?? []).find((entry) => entry.kind === "tool-result");
+        expect(result?.toolResult).toMatch(/unsupported signs|ZeichenNichtImZeichensatz/);
+        // No stack frames, and no absolute host paths leaking into an LLM prompt.
+        expect(result?.toolResult).not.toMatch(/\n\s+at /);
+        expect(result?.toolResult).not.toMatch(/\/Users\//);
     });
 });
 
