@@ -11,6 +11,7 @@
 import { log } from "../log.js";
 import { ThingRepository, SPECS, byCreatedAt, nowIso, path as fieldPath, eq } from "../a12/things.js";
 import type { ModelSpec } from "../a12/things.js";
+import { FireflyError } from "../connectors/firefly.js";
 import type { FireflyConnector, PostingSplit } from "../connectors/firefly.js";
 import type { ToolContext, ToolDefinition, ToolOutcome } from "./registry.js";
 import {
@@ -55,6 +56,61 @@ const EXACT_MATCH_MAX_LENGTH = 100;
 
 /** The store refuses a `pageSize` above this, so it is a hard ceiling and not a preference. */
 const PAGE_SIZE_MAX = 100;
+
+/**
+ * Firefly's field names, in the vocabulary the model was actually given.
+ *
+ * The model only ever handles account *names* — `bookkeeping.listAccounts` returns names and the
+ * connector resolves them to ids on the way out — so a 422 about `transactions.0.source_id` is
+ * about a field it has no word for, quoting a number it has never seen.
+ */
+const FIREFLY_FIELD_NAMES: Record<string, keyof PostingSplit> = {
+    source_id: "sourceAccount",
+    source_name: "sourceAccount",
+    destination_id: "destinationAccount",
+    destination_name: "destinationAccount",
+    budget_name: "budgetName",
+    category_id: "categoryName",
+    category_name: "categoryName",
+    currency_code: "currencyCode",
+    amount: "amount",
+    date: "date",
+    description: "description",
+    type: "type",
+    notes: "notes",
+};
+
+/**
+ * A Firefly rejection, rewritten for the model that caused it.
+ *
+ * `details.errors` is keyed `transactions.<index>.<field>`, so the split and the field are both
+ * recoverable — and once the field is known, so is the value the model supplied for it, which is
+ * what replaces the internal id in Firefly's own sentence.
+ */
+function describeRejection(error: FireflyError, splits: PostingSplit[]): string {
+    const errors = (error.details as { errors?: Record<string, string[]> } | undefined)?.errors;
+    if (!errors || Object.keys(errors).length === 0) return error.message;
+
+    const lines = new Set<string>();
+    for (const [key, messages] of Object.entries(errors)) {
+        const match = /^transactions\.(\d+)\.(.+)$/.exec(key);
+        const index = match ? Number(match[1]) : 0;
+        const field = match ? match[2]! : key;
+        const property = FIREFLY_FIELD_NAMES[field];
+        const supplied = property ? splits[index]?.[property] : undefined;
+        const label = property ?? field;
+        const where = splits.length > 1 ? ` (posting ${index + 1})` : "";
+        const said = messages
+            .join(" ")
+            // The internal id, replaced by the name the model actually gave.
+            .replace(/ID "\d+"/g, supplied ? `"${String(supplied)}"` : "that account")
+            .replace(/ or name ""\.?/g, "");
+        lines.add(
+            `${label}${where}${supplied === undefined ? "" : ` "${String(supplied)}"`}: ${said.trim()}`,
+        );
+    }
+    return `Firefly refused this posting.\n${[...lines].map((line) => `- ${line}`).join("\n")}`;
+}
 
 /** `chase` also wakes the caller after five minutes to check; `wait` and `detach` do not. */
 function chaseWakeAt(awaitMode: string): string | undefined {
@@ -508,12 +564,26 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             if (!Array.isArray(splits) || splits.length === 0) {
                 return { kind: "error", message: "postTransaction needs at least one split." };
             }
-            const result = await firefly.postTransaction({
-                groupTitle: args["groupTitle"] ? String(args["groupTitle"]) : undefined,
-                externalId: context.idempotencyKey,
-                thingId: args["thingId"] ? String(args["thingId"]) : undefined,
-                splits,
-            });
+            let result;
+            try {
+                result = await firefly.postTransaction({
+                    groupTitle: args["groupTitle"] ? String(args["groupTitle"]) : undefined,
+                    externalId: context.idempotencyKey,
+                    thingId: args["thingId"] ? String(args["thingId"]) : undefined,
+                    splits,
+                });
+            } catch (error) {
+                if (!(error instanceof FireflyError)) throw error;
+                // Translated here rather than left to the generic error path, because only the
+                // caller knows which account *name* the model supplied for the id Firefly is
+                // complaining about. The raw 422 stays in the log for whoever has to debug Firefly.
+                log.error("firefly refused a posting", {
+                    status: error.status,
+                    message: error.message,
+                    details: error.details,
+                });
+                return { kind: "error", message: describeRejection(error, splits) };
+            }
             return {
                 kind: "value",
                 value: {
