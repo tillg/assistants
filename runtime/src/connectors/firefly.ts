@@ -73,6 +73,8 @@ export class FireflyError extends Error {
 export class FireflyConnector {
     private accountCache: FireflyAccount[] | undefined;
     private categoryCache: Array<{ id: string; name: string }> | undefined;
+    /** One post at a time per idempotency key — see `postTransaction`. */
+    private readonly postsInFlight = new Map<string, Promise<{ id: string; alreadyExisted: boolean }>>();
     private token: string;
 
     constructor(
@@ -292,7 +294,38 @@ export class FireflyConnector {
      * Returns the existing group when the key already landed, which is what makes lease recovery
      * safe: recovery asks rather than re-executes.
      */
-    async postTransaction(input: {
+    postTransaction(input: {
+        groupTitle?: string;
+        externalId: string;
+        thingId?: string;
+        splits: PostingSplit[];
+    }): Promise<{ id: string; alreadyExisted: boolean }> {
+        // One post at a time per key. `postOnce` is check-then-act and Firefly puts no uniqueness
+        // constraint on `external_id`, so two callers interleaved between the probe and the POST both
+        // landed. Chaining them means the second one's probe runs *after* the first has finished and
+        // therefore finds it. This closes the real single-replica window and nothing wider: two
+        // Runtime processes would still race, which is why compose runs exactly one (ADR-0014).
+        const previous = this.postsInFlight.get(input.externalId);
+        const work = previous
+            ? previous.then(
+                  () => this.postOnce(input),
+                  () => this.postOnce(input),
+              )
+            : this.postOnce(input);
+        this.postsInFlight.set(input.externalId, work);
+        // The caller still sees the rejection; this only stops the *chain* counting as unhandled.
+        void work.catch(() => undefined);
+        void work
+            .catch(() => undefined)
+            .finally(() => {
+                if (this.postsInFlight.get(input.externalId) === work) {
+                    this.postsInFlight.delete(input.externalId);
+                }
+            });
+        return work;
+    }
+
+    private async postOnce(input: {
         groupTitle?: string;
         externalId: string;
         thingId?: string;
@@ -341,12 +374,92 @@ export class FireflyConnector {
             });
         }
 
-        const { data } = await this.call<{ data: { id: string } }>("POST", "/transactions", {
+        // The same posting may already be booked under a *different* key: two Turns, or two
+        // Conversations about one invoice, each mint their own. `error_if_duplicate_hash` cannot see
+        // those as duplicates because `external_id` participates in the hash it compares — so the key
+        // that differs is the very thing that defeats the guard. The `thing:` tag is the question the
+        // connector can ask instead, and never did.
+        if (input.thingId) {
+            const already = await this.findSamePostingForThing(input.thingId, transactions);
+            if (already) {
+                log.info("firefly: this posting is already booked for this Thing", {
+                    thingId: input.thingId,
+                    externalId: input.externalId,
+                    id: already,
+                });
+                return { id: already, alreadyExisted: true };
+            }
+        }
+
+        const body = {
             ...(input.groupTitle ? { group_title: input.groupTitle } : {}),
-            error_if_duplicate_hash: true,
             transactions,
-        });
-        return { id: data.data.id, alreadyExisted: false };
+        };
+        try {
+            const { data } = await this.call<{ data: { id: string } }>("POST", "/transactions", {
+                ...body,
+                error_if_duplicate_hash: true,
+            });
+            return { id: data.data.id, alreadyExisted: false };
+        } catch (error) {
+            const duplicateOf = duplicateHashVictim(error);
+            if (duplicateOf === undefined) throw error;
+            // Firefly's duplicate-hash index outlives a delete while its search does not, so a
+            // journal the User removed as a correction blocks its own key for ever, with an error
+            // naming a transaction that no longer exists. Retrying without the flag is safe *only*
+            // once the named journal is confirmed gone — otherwise this would re-open the
+            // double-booking hole the flag exists to close.
+            if (await this.transactionExists(duplicateOf)) throw error;
+            log.warn("firefly: re-booking over the hash of a deleted transaction", {
+                externalId: input.externalId,
+                deleted: duplicateOf,
+            });
+            const { data } = await this.call<{ data: { id: string } }>("POST", "/transactions", {
+                ...body,
+                error_if_duplicate_hash: false,
+            });
+            return { id: data.data.id, alreadyExisted: false };
+        }
+    }
+
+    /**
+     * Is this exact posting already booked against this Thing, under any key?
+     *
+     * Compared on the content — date, amount, type and both account ids — and **not** on the tag
+     * alone. ACCOUNTING.md gives one invoice up to four legitimate journals (book the payable, pay it,
+     * claim from the insurer, the insurer pays), all carrying the same ThingID, so "one transaction
+     * per Thing" would make the payment leg a silent no-op: a worse bug than the one being fixed.
+     */
+    private async findSamePostingForThing(
+        thingId: string,
+        wanted: Array<Record<string, unknown>>,
+    ): Promise<string | undefined> {
+        const query = encodeURIComponent(`tag_is:"thing:${thingId}"`);
+        const { data } = await this.call<{
+            data?: Array<{ id: string; attributes?: { transactions?: Array<Record<string, unknown>> } }>;
+        }>("GET", `/search/transactions?query=${query}&limit=25`);
+
+        for (const group of data.data ?? []) {
+            const booked = group.attributes?.transactions ?? [];
+            if (booked.length !== wanted.length) continue;
+            const allMatched = wanted.every((split) => booked.some((candidate) => sameSplit(split, candidate)));
+            if (allMatched) return group.id;
+        }
+        return undefined;
+    }
+
+    /** Does that journal still exist? Firefly answers a missing one with 401, not 404 — measured. */
+    private async transactionExists(id: string): Promise<boolean> {
+        try {
+            await this.call("GET", `/transactions/${id}`);
+            return true;
+        } catch (error) {
+            // 401 for "gone" is Firefly's own oddity. Reading it as gone is safe here because the
+            // search by `external_id` already succeeded moments earlier in this same method — a token
+            // that had really stopped working would have failed there first.
+            const status = error instanceof FireflyError ? error.status : 0;
+            return status !== 401 && status !== 404;
+        }
     }
 
     async getBalance(accountName: string): Promise<{ account: string; balance: string; currency: string }> {
@@ -490,6 +603,39 @@ export class FireflyConnector {
             return false;
         }
     }
+}
+
+/**
+ * The transaction Firefly says this one duplicates, if that is why it refused.
+ *
+ * The message is "Duplicate of transaction #14." and it arrives under a per-split key such as
+ * `transactions.0.description`, so the index varies with the split — matched across all of them
+ * rather than on one literal key.
+ */
+function duplicateHashVictim(error: unknown): string | undefined {
+    if (!(error instanceof FireflyError) || error.status !== 422) return undefined;
+    const errors = (error.details as { errors?: Record<string, string[]> } | undefined)?.errors ?? {};
+    for (const messages of Object.values(errors)) {
+        for (const message of messages) {
+            const match = /Duplicate of transaction #(\d+)/i.exec(message);
+            if (match) return match[1];
+        }
+    }
+    const match = /Duplicate of transaction #(\d+)/i.exec(error.message);
+    return match ? match[1] : undefined;
+}
+
+/** Two postings are the same posting when their money, their date and their accounts all agree. */
+function sameSplit(wanted: Record<string, unknown>, booked: Record<string, unknown>): boolean {
+    const amount = (value: unknown) => Number(Number(value ?? NaN).toFixed(2));
+    return (
+        String(booked["date"] ?? "").slice(0, 10) === String(wanted["date"] ?? "").slice(0, 10) &&
+        amount(booked["amount"]) === amount(wanted["amount"]) &&
+        Number.isFinite(amount(wanted["amount"])) &&
+        String(booked["type"] ?? "") === String(wanted["type"] ?? "") &&
+        String(booked["source_id"] ?? "") === String(wanted["source_id"] ?? "") &&
+        String(booked["destination_id"] ?? "") === String(wanted["destination_id"] ?? "")
+    );
 }
 
 function safeJson(text: string): unknown {
