@@ -629,6 +629,11 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
                             description: str("What this posting is."),
                             sourceAccount: str("Exact name of the account money leaves."),
                             destinationAccount: str("Exact name of the account money arrives at."),
+                            currencyCode: str(
+                                "The amount's currency, if it is not the account's own. A posting in " +
+                                    "another currency is refused rather than booked at the same " +
+                                    "number — convert it first, or ask the User.",
+                            ),
                             budgetName: str("Optional budget to charge."),
                             categoryName: str("Optional category."),
                             notes: str("Optional notes."),

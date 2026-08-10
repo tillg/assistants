@@ -156,20 +156,35 @@ export class FireflyConnector {
         return this.accountCache;
     }
 
-    /** Resolve a name to an id, or fail loudly. Never let Firefly invent an account. */
+    /**
+     * Resolve a name to an id, or fail loudly. Never let Firefly invent an account, and never guess
+     * which of two accounts was meant.
+     *
+     * Firefly permits two accounts whose names differ only by case within one type, and one name
+     * under two different types. Three successive `find` calls therefore returned whichever Firefly
+     * listed first — so `"Ambig"` and `"  AMBIG  "` could resolve to two *different* accounts, which
+     * empties the whole point of resolving names at all.
+     */
     async resolveAccountId(name: string): Promise<string> {
-        const accounts = await this.listAccounts();
-        const exact = accounts.find((account) => account.name === name);
-        if (exact) return exact.id;
-        const caseless = accounts.find(
-            (account) => account.name.toLowerCase() === name.trim().toLowerCase(),
-        );
-        if (caseless) return caseless.id;
+        const pick = (accounts: FireflyAccount[]): FireflyAccount | undefined => {
+            // An exact match wins outright, however many near-misses share it.
+            const exact = accounts.filter((account) => account.name === name);
+            if (exact.length === 1) return exact[0];
+            if (exact.length > 1) throw ambiguous(name, exact);
+
+            const caseless = accounts.filter(
+                (account) => account.name.toLowerCase() === name.trim().toLowerCase(),
+            );
+            if (caseless.length === 1) return caseless[0];
+            if (caseless.length > 1) throw ambiguous(name, caseless);
+            return undefined;
+        };
+
+        const found = pick(await this.listAccounts());
+        if (found) return found.id;
 
         const refreshed = await this.listAccounts(true);
-        const retry = refreshed.find(
-            (account) => account.name.toLowerCase() === name.trim().toLowerCase(),
-        );
+        const retry = pick(refreshed);
         if (retry) return retry.id;
 
         throw new FireflyError(
@@ -178,6 +193,12 @@ export class FireflyConnector {
                 .join(", ")}`,
             404,
         );
+    }
+
+    /** The currency an account keeps its books in, if Firefly reports one. */
+    private async currencyOf(name: string): Promise<string | undefined> {
+        const id = await this.resolveAccountId(name);
+        return (await this.listAccounts()).find((account) => account.id === id)?.currencyCode;
     }
 
     /**
@@ -348,6 +369,25 @@ export class FireflyConnector {
         for (const split of input.splits) {
             const sourceId = await this.resolveAccountId(split.sourceAccount);
             const destinationId = await this.resolveAccountId(split.destinationAccount);
+            // Firefly takes a withdrawal's currency from its source account and *ignores* the
+            // `currency_code` on the split — it validates it, but does not honour it. So a 50.00 USD
+            // amount was stored as 50.00 EUR: silently the wrong number, in the Authority that no
+            // other system holds a copy of. Refusing is what ACCOUNTING.md's "multi-currency: nice to
+            // have, not required" licenses; mis-booking is not. Recording it properly needs
+            // `foreign_amount` + `foreign_currency_code` and the currency enabled in Firefly, which is
+            // the change to make if multi-currency is ever wanted.
+            if (split.currencyCode) {
+                const accountCurrency = await this.currencyOf(split.sourceAccount);
+                if (accountCurrency && split.currencyCode.toUpperCase() !== accountCurrency.toUpperCase()) {
+                    throw new FireflyError(
+                        `"${split.sourceAccount}" keeps its books in ${accountCurrency}, and this ` +
+                            `posting is in ${split.currencyCode}. Firefly would silently store it as ` +
+                            `${accountCurrency} at the same number, so it is refused. Convert the ` +
+                            `amount to ${accountCurrency} first, or ask the User which rate to use.`,
+                        422,
+                    );
+                }
+            }
             transactions.push({
                 type: split.type,
                 date: split.date,
@@ -635,6 +675,16 @@ function sameSplit(wanted: Record<string, unknown>, booked: Record<string, unkno
         String(booked["type"] ?? "") === String(wanted["type"] ?? "") &&
         String(booked["source_id"] ?? "") === String(wanted["source_id"] ?? "") &&
         String(booked["destination_id"] ?? "") === String(wanted["destination_id"] ?? "")
+    );
+}
+
+/** Two accounts one name could mean. Naming both, with their types, is the actionable part. */
+function ambiguous(name: string, candidates: FireflyAccount[]): FireflyError {
+    return new FireflyError(
+        `The account name "${name}" is ambiguous — it matches ${candidates
+            .map((account) => `"${account.name}" [${account.type}]`)
+            .join(" and ")}. Use the exact name as it appears in the chart of accounts.`,
+        409,
     );
 }
 
