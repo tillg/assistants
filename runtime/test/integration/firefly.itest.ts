@@ -18,6 +18,8 @@ import { deleteTransaction, FIREFLY_UP, ITEST, newFirefly, unique } from "./supp
 
 const SOURCE = "Checking";
 const DESTINATION = "Expenses:Household";
+/** The demo household's payables account, which carries what is still owed. */
+const PAYABLES = "Payables";
 
 describe.skipIf(!FIREFLY_UP)("Firefly connector against the live Firefly III", () => {
     let firefly: FireflyConnector;
@@ -67,6 +69,21 @@ describe.skipIf(!FIREFLY_UP)("Firefly connector against the live Firefly III", (
         const after = await firefly.listAccounts(true);
         expect(after.map((account) => account.name)).not.toContain(bogus);
         expect(after).toHaveLength(before.length);
+    });
+
+    it("lists a payable with a non-zero balance as an open item", async () => {
+        // Firefly's *write* API takes `type: "liability"`; its *read* API answers `"liabilities"`.
+        // Matching only the singular made `listOpenItems` return an empty list while thousands were
+        // owed — and the Accountant's own skill says to report from this call and nothing else, so it
+        // stated confidently that nothing was outstanding. Fixed in 495310a and guarded by nothing:
+        // the unit fake returns `[]`, so it agreed with the bug.
+        //
+        // The plural is asserted explicitly. That single word is the whole of the regression.
+        const items = await firefly.listOpenItems();
+        const payables = items.find((account) => account.name === PAYABLES);
+        expect(payables, `${PAYABLES} is not reported as an open item`).toBeDefined();
+        expect(payables!.type).toBe("liabilities");
+        expect(Math.abs(Number(payables!.currentBalance))).toBeGreaterThan(0);
     });
 
     it("reads a balance", async () => {

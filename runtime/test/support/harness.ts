@@ -29,9 +29,12 @@ export interface Harness {
 /** A working Firefly stand-in that records what it was asked to do. */
 export class FakeFirefly {
     readonly posted: Array<{ externalId: string; amount: string }> = [];
+    // `liabilities`, PLURAL, because that is what Firefly's read API answers — its write API takes
+    // the singular. The fake used to say `liability`, which is exactly the mistake that made
+    // `listOpenItems` report nothing while thousands were owed: a fake agreeing with the bug.
     accounts = [
         { id: "1", name: "Checking", type: "asset" },
-        { id: "2", name: "Payables", type: "liability" },
+        { id: "2", name: "Payables", type: "liabilities" },
         { id: "3", name: "Expenses:Health", type: "expense" },
     ];
 
