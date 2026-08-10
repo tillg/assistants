@@ -62,6 +62,14 @@ export interface AdvanceResult {
 
 const CONVERSATION = SPECS.Conversation_DM;
 
+/**
+ * How many more Turns an answered turns-exhausted escalation buys.
+ *
+ * Small on purpose: the point is to make the question answerable, not to remove the bound. Three
+ * escalations is the cap, so this is the most a Conversation can gain three times over.
+ */
+const TURN_GRANT_ON_ESCALATION = 5;
+
 export function nextSeq(conversation: Conversation): number {
     const entries = conversation.entries ?? [];
     return entries.reduce((max, entry) => Math.max(max, entry.seq ?? 0), 0) + 1;
@@ -210,11 +218,22 @@ export class LoopDriver {
 
         const maxTurns = conversation.maxTurns ?? assistant.data.maxTurns ?? 20;
         if ((conversation.turnCount ?? 0) >= maxTurns) {
+            // The grant is what makes the question answerable. Without it the guard returned with
+            // the budget untouched, so the answer arrived into a Conversation still at its limit
+            // and the next Turn re-entered this same branch: three identical questions, then
+            // `failed`, without a single Turn having been taken. ADR-0015 asks for an Open Question
+            // here rather than a silent stop — and a question the User cannot act on is the silent
+            // stop with extra steps.
+            //
+            // Escalation is still capped at three, so the worst case is three asks and three
+            // grants, each following real work.
+            conversation.maxTurns = maxTurns + TURN_GRANT_ON_ESCALATION;
             await this.escalate(
                 stored,
                 assistant,
                 "limit",
-                `This conversation reached its limit of ${maxTurns} turns without finishing.`,
+                `This conversation reached its limit of ${maxTurns} turns without finishing.\n\n` +
+                    `Answer to let it run ${TURN_GRANT_ON_ESCALATION} more turns, or leave it to stop here.`,
             );
             return { status: conversation.status ?? "waiting", turnsRun: 0, note: "max turns" };
         }
