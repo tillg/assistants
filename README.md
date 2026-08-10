@@ -254,7 +254,7 @@ a compose-level environment variable rather than a constructor argument, on purp
 
 | Recipe | What it does | When you want it |
 |---|---|---|
-| `just check` | Typechecks the Runtime, typechecks and lints the client, validates the models | The fast feedback loop; no Docker needed |
+| `just check` | Typechecks the Runtime; typechecks, lints and format-checks the client and `e2e`; validates the models and the documentation claims `scripts/check-docs.mjs` can verify | The fast feedback loop; no Docker needed. Needs `just install` once, for `e2e/node_modules` |
 | `just clean` | Removes containers, volumes and every build output. **Takes the books with it** | When the state is wrong rather than the code |
 | `just clean-all` | `clean`, plus every `node_modules` | When a dependency tree has gone wrong |
 | `just install` | `npm install` in `runtime`, `client` and `e2e` | Usually unnecessary — the builds do it |

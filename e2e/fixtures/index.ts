@@ -39,12 +39,12 @@ type WorkerFixtureOptions = {
     getPageAs: (userName: TestUsername) => Promise<Page>;
 };
 
-export const test = base.extend<{}, WorkerFixtureOptions>({
+export const test = base.extend<object, WorkerFixtureOptions>({
     getPageAs: [
         async ({ browser }, use) => {
             const sessionStorageCache: Map<TestUsername, SessionStorageData> = new Map();
             const contexts: BrowserContext[] = [];
-        
+
             async function getPageAs(username: TestUsername): Promise<Page> {
                 let sessionData = sessionStorageCache.get(username);
                 if (!sessionData) {
@@ -66,13 +66,15 @@ export const test = base.extend<{}, WorkerFixtureOptions>({
             }
             await use(getPageAs);
 
-            await Promise.allSettled(contexts.map(async (context) => {
-                try {
-                    await context.close();
-                } catch (error) {
-                    console.warn('Failed to close browser context:', error);
-                }
-            }));
+            await Promise.allSettled(
+                contexts.map(async (context) => {
+                    try {
+                        await context.close();
+                    } catch (error) {
+                        console.warn("Failed to close browser context:", error);
+                    }
+                })
+            );
         },
         { scope: "worker" }
     ]

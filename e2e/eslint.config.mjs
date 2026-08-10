@@ -46,7 +46,11 @@ export default [
         rules: {
             "@typescript-eslint/no-namespace": "off",
             "max-nested-callbacks": ["error", 5],
-            "import/no-extraneous-dependencies": ["error", { devDependencies: true }]
+            "import/no-extraneous-dependencies": ["error", { devDependencies: true }],
+            // A Playwright fixture has no other channel: a context that will not close, or a
+            // sessionStorage write refused inside the browser, is worth saying out loud in the run
+            // output. `console.log` stays banned — that is the one that gets left behind by accident.
+            "no-console": ["error", { allow: ["warn", "error"] }]
         }
     }
 ];

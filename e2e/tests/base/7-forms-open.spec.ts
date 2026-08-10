@@ -21,7 +21,7 @@ const MODULES: ReadonlyArray<readonly [string, string]> = [
     // missing `content.subHeaderBox`, which the form engine's own gate requires (BUG-15). The
     // apparent intermittency was this spec, not the models — see the wait below.
     ["Conversations", "accountant"],
-    ["Runtime", "the-one"],
+    ["Runtime", "the-one"]
 ];
 
 for (const [module, cell] of MODULES) {
@@ -29,7 +29,9 @@ for (const [module, cell] of MODULES) {
         const page = await getPageAs("admin");
         const errors: string[] = [];
         page.on("console", (message) => {
-            if (message.type() === "error") errors.push(message.text());
+            if (message.type() === "error") {
+                errors.push(message.text());
+            }
         });
 
         const base = new BasePage(page);
@@ -48,7 +50,7 @@ for (const [module, cell] of MODULES) {
         // appeared yet it returned instantly and the console error had not been emitted — which is
         // the whole of the "intermittency" these two tests were `fixme`d for.
         await expect(page.getByRole("form").first(), `${module} form did not render`).toBeVisible({
-            timeout: 15_000,
+            timeout: 15_000
         });
 
         const postProcessing = errors.filter((error) => error.includes("Post processing"));

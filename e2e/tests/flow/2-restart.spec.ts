@@ -44,8 +44,9 @@
  * runs serially and alone.
  */
 
-import { expect, test } from "../../fixtures";
 import type { Browser, Page } from "@playwright/test";
+
+import { expect, test } from "../../fixtures";
 import { OpenQuestionPage } from "../../pages/OpenQuestionPage";
 import {
     createArrivingDocument,
@@ -53,10 +54,9 @@ import {
     waitForConversationToContinue,
     waitForRaisedQuestion
 } from "../../utils/agents";
-import { AGENT_TIMEOUT_MS } from "../../utils/config";
+import { AGENT_TIMEOUT_MS, BASE_URL } from "../../utils/config";
 import { restartServices, waitForStack } from "../../utils/stack";
 import { ThingStore, waitFor } from "../../utils/thingstore";
-import { BASE_URL } from "../../utils/config";
 import users from "../../fixtures/users.json" with { type: "json" };
 
 /**
@@ -87,7 +87,6 @@ async function loginFreshly(browser: Browser, username: string, password: string
 
 test.describe.serial("Surviving a restart", () => {
     test("should keep an Open Question, and continue it, across a restart of the Runtime and the store", async ({
-        getPageAs,
         browser
     }) => {
         // A document restart takes as long as the stack takes to come up, twice over.
