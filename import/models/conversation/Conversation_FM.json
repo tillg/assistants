@@ -440,8 +440,43 @@
           }
         },
         {
+          "elementRef": "f_entry_seq",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_entry_at",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_entry_role",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_entry_kind",
+          "readonly": true
+        },
+        {
           "elementRef": "f_entry_text",
-          "exposition": "AREA"
+          "exposition": "AREA",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_entry_toolName",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_entry_toolArgs",
+          "exposition": "AREA",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_entry_toolResult",
+          "exposition": "AREA",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_entry_idempotencyKey",
+          "readonly": true
         }
       ]
     },
