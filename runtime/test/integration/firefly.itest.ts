@@ -14,12 +14,31 @@
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { FireflyConnector, FireflyError } from "../../src/connectors/firefly.js";
-import { deleteTransaction, FIREFLY_UP, ITEST, newFirefly, unique } from "./support/live.js";
+import {
+    deleteTransaction,
+    FIREFLY_TOKEN,
+    FIREFLY_UP,
+    FIREFLY_URL,
+    ITEST,
+    newFirefly,
+    unique,
+} from "./support/live.js";
 
 const SOURCE = "Checking";
 const DESTINATION = "Expenses:Household";
 /** The demo household's payables account, which carries what is still owed. */
 const PAYABLES = "Payables";
+
+/** Firefly's categories, read raw — the Connector has no reason to expose a list of them. */
+async function listCategoryNames(): Promise<string[]> {
+    const response = await fetch(`${FIREFLY_URL.replace(/\/+$/, "")}/api/v1/categories?limit=200`, {
+        headers: { Authorization: `Bearer ${FIREFLY_TOKEN}`, Accept: "application/json" },
+    });
+    const payload = (await response.json()) as {
+        data?: Array<{ attributes?: { name?: string } }>;
+    };
+    return (payload.data ?? []).map((row) => String(row.attributes?.name ?? "")).sort();
+}
 
 describe.skipIf(!FIREFLY_UP)("Firefly connector against the live Firefly III", () => {
     let firefly: FireflyConnector;
@@ -84,6 +103,26 @@ describe.skipIf(!FIREFLY_UP)("Firefly connector against the live Firefly III", (
         expect(payables, `${PAYABLES} is not reported as an open item`).toBeDefined();
         expect(payables!.type).toBe("liabilities");
         expect(Math.abs(Number(payables!.currentBalance))).toBeGreaterThan(0);
+    });
+
+    it("does not offer Firefly's internal accounts as bookable", async () => {
+        // `bookkeeping.listAccounts` hands this list straight to the model as the chart of accounts,
+        // with the instruction "always look here before booking". It included
+        // `Initial balance for "Checking"` — type `initial-balance` — which is Firefly's own
+        // bookkeeping and cannot be posted to: all three directions come back 422 quoting an internal
+        // id and an empty name, which tells the model nothing it can act on.
+        const accounts = await firefly.listAccounts(true);
+        expect(accounts.map((account) => account.type)).not.toContain("initial-balance");
+        expect(accounts.map((account) => account.name)).not.toContain('Initial balance for "Checking"');
+        await expect(
+            firefly.resolveAccountId('Initial balance for "Checking"'),
+        ).rejects.toThrow(/No account named/);
+
+        // The same filter is what could silently drop `Payables` if the plural were got wrong, which
+        // would resurrect BUG-02 in a worse form. Asserted here, next to the filter it guards.
+        expect(accounts.map((account) => account.name)).toContain(PAYABLES);
+        expect(accounts.map((account) => account.name)).toContain(SOURCE);
+        expect(accounts.map((account) => account.name)).toContain(DESTINATION);
     });
 
     it("reads a balance", async () => {
@@ -174,6 +213,40 @@ describe.skipIf(!FIREFLY_UP)("Firefly connector against the live Firefly III", (
             expect(found?.id).toBe(first.id);
         },
     );
+
+    it("refuses an unknown category instead of letting Firefly create it", async () => {
+        // The file's own header says the connector exists so that "Firefly never invents an account",
+        // because a hallucinated name would *succeed* and corrupt a balance no test would catch. That
+        // was implemented for accounts and not for categories, on the same request: a typo
+        // (`categoryName: "Medcal"`) created a category.
+        //
+        // Budgets behave the opposite way and already fail loudly, which is why only categories needed
+        // this.
+        const before = await listCategoryNames();
+        const externalId = `${ITEST}bad-category:${Date.now()}`;
+        const bogus = `${ITEST}Medcal`;
+
+        await expect(
+            firefly.postTransaction({
+                externalId,
+                splits: [
+                    {
+                        type: "withdrawal",
+                        date: new Date().toISOString().slice(0, 10),
+                        amount: "1.00",
+                        description: `${ITEST}should never land`,
+                        sourceAccount: SOURCE,
+                        destinationAccount: DESTINATION,
+                        categoryName: bogus,
+                    },
+                ],
+            }),
+        ).rejects.toThrow(/No category named/);
+
+        // Nothing landed, and no category was invented on the way.
+        expect(await firefly.findByExternalId(externalId)).toBeUndefined();
+        expect(await listCategoryNames()).toEqual(before);
+    });
 
     it("refuses to post to an account that does not exist", async () => {
         const externalId = `${ITEST}bad-account:${Date.now()}`;
