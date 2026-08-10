@@ -382,6 +382,27 @@
                     "width": 3,
                     "sortable": false,
                     "elementRef": "f_entry_text"
+                  },
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "col_entry_toolName",
+                    "width": 1,
+                    "sortable": false,
+                    "elementRef": "f_entry_toolName"
+                  },
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "col_entry_toolArgs",
+                    "width": 2,
+                    "sortable": false,
+                    "elementRef": "f_entry_toolArgs"
+                  },
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "col_entry_toolResult",
+                    "width": 3,
+                    "sortable": false,
+                    "elementRef": "f_entry_toolResult"
                   }
                 ],
                 "groupRef": "f_entries",
