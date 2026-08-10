@@ -194,6 +194,7 @@ check:
     @cd runtime && npm run typecheck
     @cd client && npx tsc --noEmit && npm run lint
     node import/validate-models.mjs
+    node scripts/check-docs.mjs
 
 # Remove containers, volumes and every build output. Takes the books with it.
 clean:
