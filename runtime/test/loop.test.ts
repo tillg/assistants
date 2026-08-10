@@ -516,6 +516,43 @@ describe("guards", () => {
     });
 
 
+    it("lets the User's answer buy more turns instead of asking the same question three times", async () => {
+        // The max-turns guard returned before changing anything, so answering left `turnCount` at
+        // the limit and the next Turn re-entered the same guard. The User was asked three times,
+        // the fourth escalation flipped the Conversation to `failed` — and not one Turn was ever
+        // taken. The prompt said "Answer to tell it what to do next"; answering demonstrably did
+        // nothing.
+        const harness = buildHarness([{ turn: 3, text: "Finished.", finishReason: "answered" }]);
+        const assistant = await harness.seedAssistant({ maxTurns: 3 });
+        const docRef = await harness.birth({ assistant });
+        const born = await harness.conversation(docRef);
+        await harness.things.update(SPECS.Conversation_DM, docRef, {
+            ...born.data,
+            turnCount: 3,
+            maxTurns: 3,
+        });
+
+        await harness.driver.advance(docRef);
+
+        const asked = await harness.conversation(docRef);
+        expect(asked.data.status).toBe("waiting");
+        expect(asked.data.waitingFor).toBe("user");
+        expect(asked.data.finishReason).toBe("limit");
+        // The ask is honest: there is now budget for the answer to be acted on.
+        expect(asked.data.maxTurns).toBeGreaterThan(3);
+        expect(await harness.questions()).toHaveLength(1);
+
+        const [question] = await harness.questions();
+        await harness.answer(question!.thingId, { text: "Carry on please." });
+        await harness.watcher.scan();
+
+        const after = await harness.conversation(docRef);
+        expect(after.data.turnCount).toBe(4); // a real Turn was taken
+        expect(after.data.status).toBe("done");
+        expect(after.data.escalationCount).toBe(1);
+        expect(await harness.questions()).toHaveLength(1); // asked once, not three times
+    });
+
     it("escalates rather than dying when the Assistant it names no longer exists", async () => {
         const harness = buildHarness([]);
         const assistant = await harness.seedAssistant({ key: "receptionist" });
