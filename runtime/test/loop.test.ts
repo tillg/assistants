@@ -709,6 +709,36 @@ describe("answering", () => {
         expect(conversation.data.status).toBe("done");
     });
 
+    it("recognises a timestamp-less answer when recovering an interrupted question too", async () => {
+        // The watcher's scan treats any filled answer field as answered. The two `reconcile` paths
+        // still keyed on `answeredAt` alone, so recovery disagreed with the scan about whether the
+        // same question had been answered — and a User who typed an answer and pressed Save had, by
+        // the watcher's own rule, answered.
+        const harness = buildHarness([
+            {
+                turn: 0,
+                toolCalls: [{ name: "ui__askUser", arguments: { kind: "confirm", prompt: "Book it?" } }],
+            },
+            { turn: 1, text: "Booked.", finishReason: "answered" },
+        ]);
+        const assistant = await harness.seedAssistant({ tools: [{ operation: "ui.askUser" }] });
+        const docRef = await harness.birth({ assistant });
+        await harness.driver.advance(docRef);
+
+        // The User answers exactly as the UI produces it, and *then* the process dies before the
+        // suspension was written.
+        const [question] = await harness.questions();
+        await harness.answer(question!.thingId, { confirmed: true, text: "Yes, go ahead.", answeredAt: "" });
+        await crashAfterIntent(harness, docRef);
+
+        await harness.watcher.scan();
+
+        // Reconciliation saw the answer, so one scan is enough.
+        const after = await harness.conversation(docRef);
+        expect(after.data.status).toBe("done");
+        expect(after.data.escalationCount ?? 0).toBe(0);
+    });
+
     it("treats a bare 'no' as an answer", async () => {
         const harness = buildHarness([
             {

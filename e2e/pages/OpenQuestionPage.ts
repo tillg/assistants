@@ -37,8 +37,11 @@
  * the User completes it in the ordinary instance form. Two writers, never concurrent — which is
  * why there is no separate Answer model and why this page object only ever *fills in* fields.
  *
- * `answeredAt` is filled in deliberately rather than stamped for the User: the watcher's second
- * scan is "an OpenQuestion with `answeredAt` set", so setting it is what hands the turn back.
+ * `answeredAt` is deliberately **not** filled in. The watcher treats any filled answer field as
+ * answered (`isAnswered`, `runtime/src/watcher/watcher.ts`), because a User who types an answer and
+ * presses Save has answered — nothing on the form marks the timestamp as required, it has no default,
+ * and no text anywhere says it matters. This page object therefore does what a User does, and
+ * leaving the timestamp empty is what makes these specs the guard for that.
  */
 
 import { expect, type Page } from "../fixtures";
@@ -84,7 +87,7 @@ export class OpenQuestionPage extends FormPage {
         );
     }
 
-    /** Answer it: confirm or refuse, say something, and stamp it as answered. */
+    /** Answer it exactly as a User does: confirm or refuse, say something, save. No timestamp. */
     async answer(input: { confirmed: boolean; text: string }) {
         await this.startEditing();
 
@@ -95,33 +98,7 @@ export class OpenQuestionPage extends FormPage {
             type: DataType.Select
         });
         await this.typeMarkdown("Answer", input.text);
-        await this.setAnsweredAt(new Date());
 
         await this.saveEdits();
     }
-
-    /**
-     * The date-time control parses on blur and accepts only the localised `MM/dd/yyyy hh:mm AM/PM`
-     * form — anything else raises "Only dates in the format … are allowed" and the save is refused.
-     * The value surviving the blur is the proof that it parsed.
-     */
-    private async setAnsweredAt(when: Date) {
-        const value = formatAnsweredAt(when);
-        const input = getByLabelWithOptionalAsterisk(this.form, "Answered at", DataType.String);
-        await input.fill(value);
-        await input.press("Tab");
-        await expect(input).toHaveValue(value);
-    }
-}
-
-/** `MM/dd/yyyy hh:mm AM/PM`, in UTC — every document model in this application declares `UTC`. */
-function formatAnsweredAt(date: Date): string {
-    const pad = (value: number) => String(value).padStart(2, "0");
-    const hours24 = date.getUTCHours();
-    const period = hours24 < 12 ? "AM" : "PM";
-    const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
-    return (
-        `${pad(date.getUTCMonth() + 1)}/${pad(date.getUTCDate())}/${date.getUTCFullYear()} ` +
-        `${pad(hours12)}:${pad(date.getUTCMinutes())} ${period}`
-    );
 }
