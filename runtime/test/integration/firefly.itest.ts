@@ -300,6 +300,141 @@ describe.skipIf(!FIREFLY_UP)("Firefly connector against the live Firefly III", (
         expect(await listCategoryNames()).toEqual(before);
     });
 
+    it("can re-book a transaction the User deleted in Firefly, under its original key", async () => {
+        // Firefly's duplicate-hash index survives a delete while its *search* does not, so the
+        // connector's own probe said "not there" and Firefly then refused the post as
+        // "Duplicate of transaction #14" — naming a journal that no longer exists. Permanent
+        // deadlock for that key: the User's correction in Firefly left the Assistant unable ever to
+        // redo the booking it is responsible for, with an error pointing at nothing.
+        const externalId = `${ITEST}redo:${Date.now()}`;
+        const input = {
+            externalId,
+            splits: [
+                {
+                    type: "withdrawal" as const,
+                    date: new Date().toISOString().slice(0, 10),
+                    amount: "7.77",
+                    description: `${ITEST}deleted and re-booked`,
+                    sourceAccount: SOURCE,
+                    destinationAccount: DESTINATION,
+                },
+            ],
+        };
+
+        const first = await firefly.postTransaction(input);
+        expect(first.alreadyExisted).toBe(false);
+
+        // The User deletes it in Firefly, as a correction.
+        await deleteTransaction(first.id);
+        expect(await firefly.findByExternalId(externalId)).toBeUndefined();
+
+        const again = await firefly.postTransaction(input);
+        postedIds.push(again.id);
+        expect(again.alreadyExisted).toBe(false);
+        expect(again.id).not.toBe(first.id);
+        // And it is findable by its key again, so idempotency still holds afterwards.
+        expect((await firefly.findByExternalId(externalId))?.id).toBe(again.id);
+    });
+
+    it("two concurrent posts under one idempotency key produce one journal", async () => {
+        // `postTransaction` probes for the key and then posts, with nothing between the two halves and
+        // no uniqueness constraint on `external_id` behind them, so two callers interleaved both land.
+        // Latent today — one Runtime replica, and a lease serialises a Conversation's Turns — but it is
+        // the guarantee ADR-0012 and `reconcile()` lean on, so it should not quietly be false.
+        const externalId = `${ITEST}race:${Date.now()}`;
+        const split = (amount: string) => ({
+            externalId,
+            splits: [
+                {
+                    type: "withdrawal" as const,
+                    date: new Date().toISOString().slice(0, 10),
+                    amount,
+                    description: `${ITEST}raced posting`,
+                    sourceAccount: SOURCE,
+                    destinationAccount: DESTINATION,
+                },
+            ],
+        });
+
+        const [a, b] = await Promise.all([
+            firefly.postTransaction(split("11.11")),
+            firefly.postTransaction(split("22.22")),
+        ]);
+        postedIds.push(a.id);
+        if (b.id !== a.id) postedIds.push(b.id);
+
+        // One of them did the work and the other recognised it, rather than both landing.
+        expect(b.id).toBe(a.id);
+        expect([a.alreadyExisted, b.alreadyExisted].filter(Boolean)).toHaveLength(1);
+    });
+
+    it("books one invoice once, even from two Conversations with different keys", async () => {
+        // Two Turns, or two Conversations about one invoice, produce two different idempotency keys
+        // for the same posting — and `external_id` participates in Firefly's duplicate hash, so
+        // `error_if_duplicate_hash` cannot see them as duplicates. The live demo books already showed
+        // twelve identical journals for one consultation, EUR 1,062 of them.
+        //
+        // The Invoice's ThingID is already written as a `thing:` tag, so this is a question the
+        // connector can ask and never did.
+        const thingId = `00000000-0000-4000-8000-${String(Date.now()).slice(-12)}`;
+        const posting = (key: string) => ({
+            externalId: key,
+            thingId,
+            splits: [
+                {
+                    type: "withdrawal" as const,
+                    date: new Date().toISOString().slice(0, 10),
+                    amount: "96.50",
+                    description: `${ITEST}Consultation, one invoice`,
+                    sourceAccount: SOURCE,
+                    destinationAccount: DESTINATION,
+                },
+            ],
+        });
+
+        const first = await firefly.postTransaction(posting(`${ITEST}conv-a:1`));
+        postedIds.push(first.id);
+        const second = await firefly.postTransaction(posting(`${ITEST}conv-b:1`));
+        if (second.id !== first.id) postedIds.push(second.id);
+
+        expect(second.alreadyExisted).toBe(true);
+        expect(second.id).toBe(first.id);
+    });
+
+    it("still books a second, genuinely different posting for the same invoice", async () => {
+        // The guard above must not become "one transaction per Thing". ACCOUNTING.md gives one invoice
+        // up to four legitimate journals — book the payable, pay it, claim from the insurer, the
+        // insurer pays — all carrying the same ThingID. Deduplicating on the tag alone would make the
+        // payment leg a silent no-op, which is worse than the bug it fixes.
+        const thingId = `00000000-0000-4000-8000-${String(Date.now() + 1).slice(-12)}`;
+        const leg = (key: string, amount: string, description: string) => ({
+            externalId: key,
+            thingId,
+            splits: [
+                {
+                    type: "withdrawal" as const,
+                    date: new Date().toISOString().slice(0, 10),
+                    amount,
+                    description,
+                    sourceAccount: SOURCE,
+                    destinationAccount: DESTINATION,
+                },
+            ],
+        });
+
+        const booked = await firefly.postTransaction(
+            leg(`${ITEST}leg-a:1`, "96.50", `${ITEST}booked the payable`),
+        );
+        postedIds.push(booked.id);
+        const paid = await firefly.postTransaction(
+            leg(`${ITEST}leg-b:1`, "40.00", `${ITEST}part payment`),
+        );
+        postedIds.push(paid.id);
+
+        expect(paid.alreadyExisted).toBe(false);
+        expect(paid.id).not.toBe(booked.id);
+    });
+
     it("refuses to post to an account that does not exist", async () => {
         const externalId = `${ITEST}bad-account:${Date.now()}`;
         await expect(
