@@ -95,9 +95,16 @@ export async function createArrivingDocument(
             Source: "scan",
             MediaType: "text/plain",
             ExtractedText: INVOICE_TEXT,
-            IdempotencyKey: `${E2E_PREFIX}:document:${runId}`,
-            CreatedAt: stamp,
-            UpdatedAt: stamp
+            IdempotencyKey: `${E2E_PREFIX}:document:${runId}`
+            // No `CreatedAt` and no `UpdatedAt`, deliberately. Those are two of the four machine
+            // fields, they are on no form, and A12's form engine has no save hook that could set
+            // one — so a Document a *human* creates in the web application has neither. This helper
+            // used to stamp both, which meant the suite tested a shape only the Runtime and the demo
+            // loader produce, and never the shape the User produces. That is how a Document created
+            // in the UI came to be invisible to the trigger watcher for ever with a green suite.
+            //
+            // Leaving them out costs one extra scan — the Runtime stamps `CreatedAt` on a Thing that
+            // has none and births it on the next pass — and buys the guard for that bug.
         }
     });
     return { docRef, thingId: thingIdOf(docRef), title };
