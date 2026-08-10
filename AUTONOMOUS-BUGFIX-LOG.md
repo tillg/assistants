@@ -71,8 +71,8 @@ cd client && npm test             288/288                                       
 node import/validate-models.mjs            26 models checked — 0 error(s), 0 warning(s)
 node import/validate-models.selftest.mjs   10 validator checks exercised — 0 not enforced
 just check                                 clean (now including e2e lint + format, and the docs checker)
-cd runtime && npm test                     77 passed   (was 44)
-cd runtime && npm run test:integration     64 passed   (was 51)
+cd runtime && npm test                     78 passed   (was 44)
+cd runtime && npm run test:integration     65 passed   (was 51)
 cd client  && npm test                    288 passed
 cd e2e     && npm test                     30 passed   (was 21 collected, 2 fixme, 1 silently skipping)
 ```
