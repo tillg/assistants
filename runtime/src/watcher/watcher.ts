@@ -13,6 +13,7 @@
 import { log, describeError } from "../log.js";
 import {
     and,
+    byCreatedAt,
     eq,
     nowIso,
     not,
@@ -55,6 +56,9 @@ export interface WatcherDeps {
 }
 
 export const RUNTIME_STATE_KEY = "the-one";
+
+/** The store refuses a `pageSize` above 100, so this is a ceiling and not a preference. */
+const PAGE_SIZE = 100;
 
 export interface ScanReport {
     births: number;
@@ -116,8 +120,22 @@ export class Watcher {
         const watermark = state.data.watermark;
         const seen = new Set((state.data.watermarkDocRefs ?? []).map((row) => row.docRef ?? ""));
         let births = 0;
-        let newestSeen = watermark ?? "";
-        const boundaryDocRefs: string[] = [];
+
+        // The watermark may only pass a **contiguous run of decided Things**, which is stronger
+        // than "a Thing that reached a decision" and is what the two losses had in common.
+        //
+        //   newestDecided — the newest Thing this pass actually decided.
+        //   ceiling       — what the watermark may not pass: the lowest per-Model frontier, where a
+        //                   Model contributes one only if it might still be hiding an undecided
+        //                   Thing at or after that point. Two ways that happens: it froze on one,
+        //                   or its page was full so there is more behind it that this pass never
+        //                   saw. A Model whose page was short and wholly decided contributes
+        //                   nothing — otherwise one quiet Model would pin the watermark for ever.
+        let newestDecided = watermark ?? "";
+        let ceiling: string | undefined;
+        const decidedAt = new Map<string, string[]>();
+        const lowest = (current: string | undefined, candidate: string) =>
+            current === undefined || candidate < current ? candidate : current;
 
         if (!this.withinBirthBudget(state)) {
             log.warn("birth budget for this hour is exhausted; skipping the materialised scan");
@@ -139,11 +157,30 @@ export class Watcher {
 
             let candidates: Stored<Record<string, unknown>>[];
             try {
-                candidates = await this.deps.things.search<Record<string, unknown>>(spec, constraint, 100);
+                // Ordered oldest-first, which is what makes "a contiguous run" meaningful: without
+                // it the page is an arbitrary window and its maximum `createdAt` says nothing about
+                // what lies between the watermark and there.
+                candidates = await this.deps.things.search<Record<string, unknown>>(
+                    spec,
+                    constraint,
+                    PAGE_SIZE,
+                    byCreatedAt(spec, "ASC"),
+                );
             } catch (error) {
                 log.error("materialised scan failed", { model, error: describeError(error) });
+                // A Model whose query failed decided nothing, so it may not let the watermark move.
+                ceiling = lowest(ceiling, watermark ?? "");
                 continue;
             }
+
+            /** The newest Thing in this Model with everything at or before it decided. */
+            let frontier: string | undefined;
+            let frozen = false;
+            const freeze = () => {
+                if (frozen) return;
+                frozen = true;
+                if (frontier === undefined) frontier = watermark ?? "";
+            };
 
             for (const thing of candidates) {
                 const createdAt = String(thing.data["createdAt"] ?? "");
@@ -153,7 +190,10 @@ export class Watcher {
                 // Never birth from a Thing whose creating Conversation is still running: that is
                 // what stops the Runtime feeding on its own output part-way through a chain.
                 const creator = String(thing.data["createdByConversationId"] ?? "");
-                if (creator && (await this.isConversationRunning(creator))) continue;
+                if (creator && (await this.isConversationRunning(creator))) {
+                    freeze();
+                    continue;
+                }
 
                 let decided = true;
                 for (const assistant of triggered) {
@@ -190,20 +230,33 @@ export class Watcher {
                     state.data.birthsThisHour = (state.data.birthsThisHour ?? 0) + 1;
                 }
 
-                // The watermark may only pass a Thing that reached a decision. Advancing it past
-                // one that was *skipped* — because the budget ran out, or because its creating
-                // Conversation was still running — would put it permanently behind the watermark
-                // and it would never be birthed at all.
-                if (!decided) continue;
-                if (createdAt > newestSeen) {
-                    newestSeen = createdAt;
-                    boundaryDocRefs.length = 0;
-                    boundaryDocRefs.push(thing.docRef);
-                } else if (createdAt === newestSeen) {
-                    boundaryDocRefs.push(thing.docRef);
+                // The budget ran out on this Thing: same rule as a running creator.
+                if (!decided) {
+                    freeze();
+                    continue;
                 }
+                if (createdAt > newestDecided) newestDecided = createdAt;
+                decidedAt.set(createdAt, [...(decidedAt.get(createdAt) ?? []), thing.docRef]);
+                // A Thing after the freeze point is still birthed — birth is exactly-once by query,
+                // so that is safe, and it keeps latency low. It just may not move the frontier.
+                if (!frozen && (frontier === undefined || createdAt > frontier)) frontier = createdAt;
+            }
+
+            if (frozen) {
+                ceiling = lowest(ceiling, frontier ?? watermark ?? "");
+            } else if (candidates.length >= PAGE_SIZE && frontier !== undefined) {
+                // A full page means there is more behind it that this pass never saw. Cap the
+                // watermark at the newest row the page did contain; the rest stays in front of it
+                // and is picked up on the next scan.
+                ceiling = lowest(ceiling, frontier);
             }
         }
+
+        const newestSeen =
+            ceiling !== undefined && ceiling < newestDecided ? ceiling : newestDecided;
+        // Only the rows sitting exactly ON the new watermark: `date_range.from` is inclusive, so
+        // those come back on the next scan and this is what stops them being birthed twice.
+        const boundaryDocRefs = decidedAt.get(newestSeen) ?? [];
 
         if (newestSeen && newestSeen !== watermark) {
             state.data.watermark = newestSeen;

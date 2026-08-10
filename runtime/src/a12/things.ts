@@ -10,7 +10,13 @@
  * `domain/types.ts`, plus the query paths (`/Party/Name`) the watcher filters on.
  */
 
-import { A12Client, type A12Document, type Constraint, type QueryEntry } from "./client.js";
+import {
+    A12Client,
+    type A12Document,
+    type Constraint,
+    type QueryEntry,
+    type QuerySpec,
+} from "./client.js";
 import {
     type Assistant,
     type Conversation,
@@ -278,6 +284,23 @@ export const eq = (field: string, value: string | number | boolean): Constraint 
     value: String(value),
 });
 
+/**
+ * Order by our own `createdAt`.
+ *
+ * All three of `direction`, `nullHandling` and `ignoreCase` are required — the server rejects a
+ * null in any of them, and the field names are its own rather than the obvious ones (`direction`,
+ * not `order`). Verified against the live store on all eight Models, including alongside
+ * `exact_match` and `date_range`, and on a second page.
+ */
+export const byCreatedAt = (spec: ModelSpec, direction: "ASC" | "DESC"): QuerySpec["sort"] => [
+    {
+        field: path(spec, "createdAt"),
+        direction,
+        nullHandling: "NULLS_LAST",
+        ignoreCase: false,
+    },
+];
+
 export const unset = (field: string): Constraint => ({ operator: "undefined_match", field });
 
 /**
@@ -339,10 +362,24 @@ export class ThingRepository {
         });
     }
 
-    async search<T>(spec: ModelSpec, constraint?: Constraint, pageSize = 100): Promise<Stored<T>[]> {
+    /**
+     * One page of Things.
+     *
+     * `sort` is opt-in and defaults to none, which means the store returns rows in whatever order
+     * it likes — it promises none. Any caller that reasons about *which* rows it got (rather than
+     * just "some matching rows") has to ask for an order, or it is reasoning about an arbitrary
+     * window. That is what {@link byCreatedAt} is for.
+     */
+    async search<T>(
+        spec: ModelSpec,
+        constraint?: Constraint,
+        pageSize = 100,
+        sort?: QuerySpec["sort"],
+    ): Promise<Stored<T>[]> {
         const result = await this.client.query({
             targetDocumentModel: spec.model,
             ...(constraint ? { constraint } : {}),
+            ...(sort ? { sort } : {}),
             paging: { pageNumber: 0, pageSize },
         });
         return result.entries.map((entry: QueryEntry) => this.toStored<T>(spec, entry));
