@@ -89,16 +89,20 @@ wait:
 down:
     {{compose}} --profile server-init down
 
-# Restarting `server` on its own is a trap: nginx in the frontend resolves its upstreams once at
-# startup, so the server's new container IP leaves every /api call answering 502 and the login
-# form never renders. Restarting the server therefore takes the frontend with it.
+# Restarting `server` on its own is a trap, twice over. nginx in the frontend resolves its upstreams
+# once at startup, so the server's new container IP leaves every /api call answering 502 and the login
+# form never renders. And the Runtime holds a keep-alive connection pool to the old IP: every scan
+# then fails with a bare `TypeError: fetch failed` — the container goes unhealthy and the heartbeat
+# goes stale, but nothing says why, and it does not recover on its own. (Measured: 51 consecutive
+# failed scans, while a *fresh* process in the same container reached `server:8080` perfectly well.)
+# Restarting the server therefore takes both of them with it.
 
 # Restart one service, or all of them.
 restart service="":
     #!/usr/bin/env bash
     set -uo pipefail
     if [ "{{service}}" = "server" ]; then
-        {{compose}} restart server frontend
+        {{compose}} restart server frontend runtime
     else
         {{compose}} restart {{service}}
     fi
