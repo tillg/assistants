@@ -41,36 +41,59 @@ about markdown fields) · and the change that built this,
 
 ## How it works
 
-Everything runs in one `docker compose` file: five long-running services and two one-shot init
-containers. No Keycloak, no second database engine, no message broker, no workflow engine.
+Everything runs in one `docker compose` file: seven long-running services and two one-shot init
+containers. No second database engine, no message broker, no workflow engine.
 
 ```mermaid
 flowchart LR
     subgraph compose["docker compose"]
         direction TB
         PG[("postgres<br/>:8083")]
+        KC["keycloak<br/>= identity provider<br/>:8089"]
         SRV["server — A12 Data Service<br/>= ThingStore<br/>:8082"]
         INIT["server-init<br/>schema + model import"]
         FE["frontend — A12 web app<br/>= UserInterface<br/>:8081"]
         RT["runtime<br/>trigger watcher + loop driver"]
-        FF["firefly — Firefly III<br/>= Bookkeeping<br/>:8084"]
-        FB["firefly-bootstrap<br/>one-shot: user + token"]
+        FP["firefly-proxy — oauth2-proxy<br/>:8084"]
+        FF["firefly — Firefly III<br/>= Bookkeeping<br/>(no published port)"]
+        FB["firefly-bootstrap<br/>one-shot: token"]
     end
     LLM["LLM API<br/>(scripted by default)"]
 
     INIT --> PG
     SRV --> PG
     FF --> PG
+    KC --> PG
     FE -->|"/api, /cs, /actuator"| SRV
     RT -->|JSON-RPC| SRV
     RT -->|REST| FF
     RT --> LLM
     FB --> FF
+    FP -->|"X-Forwarded-Email"| FF
+    SRV -.->|"verify the token"| KC
+    RT -.->|"get a token"| KC
+    FP -.->|"OIDC"| KC
 ```
 
-One Postgres container, three databases: `assistants-ds` (the Things), `assistants-cs` (binary
-content) and `assistants-firefly` (the books). The first two are A12's own split — each carries
-its own Liquibase changelog — and Firefly owns the third outright ([D-004](DECISIONS.md)).
+One Postgres container, four databases: `assistants-ds` (the Things), `assistants-cs` (binary
+content), `assistants-firefly` (the books) and `assistants-keycloak` (the users). The first two are
+A12's own split — each carries its own Liquibase changelog — and Firefly and Keycloak own one
+outright each ([D-004](DECISIONS.md)).
+
+The dotted edges are the whole of authentication. **Nobody in this system checks a password
+except Keycloak** ([D-022](DECISIONS.md)):
+
+- the **web application** has no login form. Opening it redirects to Keycloak and comes back with
+  a token; the ThingStore runs A12's UAA with `authentication.types=OAUTH2`, which means it only
+  verifies tokens and has no login endpoint of its own. Realm roles in the token map to A12 access
+  rights through `import/auth/roles.yaml` — the one part of authorization that is still ours.
+- the **Runtime** has no browser to redirect, so it uses Keycloak's direct access grant against a
+  client that is the only one in the realm permitting it.
+- **Firefly III has no OIDC support at all** — `remote_user_guard`, which trusts an HTTP header, is
+  the whole of its support for an external identity provider. So `firefly-proxy` (oauth2-proxy)
+  owns port 8084, runs the OIDC flow, and forwards the request with `X-Forwarded-Email` set.
+  Firefly publishes no port of its own, because anything that could reach it directly could set
+  that header itself.
 
 The Runtime is a client of the ThingStore with no privileged access, exactly like the
 UserInterface. It polls; it exposes no API and receives no webhooks. That is the whole
@@ -127,27 +150,39 @@ pinned in `.npmrc` and `settings.gradle`, so no VPN and no credentials are neede
 ### Run it
 
 ```
+just setup
 just dev
 just demo-data
 ```
 
+`just setup` writes `.env` from the committed `.env.example` and generates every machine
+credential in it. Run it once per clone; it refuses to overwrite an existing `.env`, because the
+database passwords are baked into the Postgres volume the first time it starts
+([D-023](DECISIONS.md)).
+
 `just dev` builds the models, the server jars, the client bundle and every image, brings the
-stack up, waits until all three services answer, and loads the two Assistants and the Runtime
-state. It is idempotent — run it again after any change. `just demo-data` then loads a household:
+stack up, waits until the ThingStore, Firefly, Keycloak and the frontend all answer, and loads the
+two Assistants and the Runtime state. It is idempotent — run it again after any change. `just demo-data` then loads a household:
 parties, a renovation Process, documents and invoices in several states, and matching Firefly
 accounts, budgets and transactions. It pauses the Runtime while loading, so the demo set lands as
 history rather than as a work queue.
 
 Then:
 
-- **<http://localhost:8081>** — the A12 web application. Log in as `admin` / `A12PT-admintest`.
-  The navigation has one entry per Thing: Open Questions, Documents, Invoices, Processes,
-  Parties, Assistants, Conversations, Runtime. Start at **Open Questions** — that is the User's
-  actual inbox. **Assistants** is where you read and edit a prompt, in the markdown editor.
+- **<http://localhost:8081>** — the A12 web application. It redirects to Keycloak; log in as
+  `human` / `human`. The navigation has one entry per Thing: Open Questions, Documents, Invoices,
+  Processes, Parties, Assistants, Conversations, Runtime. Start at **Open Questions** — that is the
+  User's actual inbox. **Assistants** is where you read and edit a prompt, in the markdown editor.
+- **<http://localhost:8084>** — Firefly III, the books, behind oauth2-proxy. The same
+  `human` / `human` through the same Keycloak, and if you are already signed in at 8081 it lets you
+  straight through. `just firefly-token` prints the personal access token the bootstrap container
+  minted, if you want to talk to its API yourself — `/api/` bypasses the proxy, because Firefly
+  checks that token on a guard of its own.
+- **<http://localhost:8089>** — the Keycloak admin console, `admin` / `admin`. Realm `A12Realm`
+  holds every user: `human`, the service account `runtime`, and `admin` / `user1` / `user2`, which
+  the end-to-end tier uses.
 - **<http://localhost:8082>** — the ThingStore's A12 JSON-RPC and REST interface;
   `/actuator/health` is the liveness endpoint `just wait` polls.
-- **<http://localhost:8084>** — Firefly III, the books. `just firefly-token` prints the personal
-  access token the bootstrap container minted, if you want to talk to its API yourself.
 
 To watch an Assistant work, `just logs runtime`. A Conversation's transcript is also stored on the
 Conversation Thing and visible in the UI, though as a data grid rather than a transcript view.
@@ -181,10 +216,12 @@ a compose-level environment variable rather than a constructor argument, on purp
 | Recipe | What it does | When you want it |
 |---|---|---|
 | `just` | Lists every recipe, unsorted | To remember what exists |
-| `just dev` | `build` → `up` → `wait` → `bootstrap`, then prints the URLs. Idempotent | The one command to get from a fresh clone to a running system |
+| `just setup` | Writes `.env` from `.env.example`, generating every machine credential, then renders the Keycloak files. Refuses to overwrite an existing `.env` | Once, on a fresh clone, before anything else |
+| `just dev` | `build` → `up` → `wait` → `bootstrap`, then prints the URLs. Idempotent | The one command to get from a set-up clone to a running system |
 | `just build` | Converts the models, builds the server jars and images, builds the runtime image | After changing a model, the client, the server or the Runtime |
-| `just up` | Starts the stack in the background, including the `server-init` profile | When the images are already built |
-| `just wait` | Polls the ThingStore, Firefly and the frontend for up to four minutes | Called by `dev`; useful on its own in scripts |
+| `just up` | Renders the Keycloak secrets, then starts the stack in the background, including the `server-init` profile | When the images are already built |
+| `just render-secrets` | Regenerates `compose/keycloak/*` from the templates and `.env` | Called by `setup` and `up`. On its own after editing a password in `.env` |
+| `just wait` | Polls the ThingStore, Firefly, Keycloak and the frontend for up to four minutes | Called by `dev`; useful on its own in scripts |
 | `just down` | Stops the stack and keeps the data | End of the day |
 | `just restart [service]` | Restarts one service, or all of them | The ADR-0004 restart test: suspend on a question, restart, confirm it survived |
 | `just ps` | Shows what is running | First thing to check when something is wrong |
@@ -227,14 +264,23 @@ a compose-level environment variable rather than a constructor argument, on purp
 |---|---|---|
 | `frontend` | 8081 | UserInterface — the A12 web application |
 | `server` | 8082 | ThingStore — the A12 Data Service |
-| `postgres` | 8083 | The stack's database (data service + content store + the books) |
-| `firefly` | 8084 | Bookkeeping — Firefly III 6.6.6 on Postgres |
+| `postgres` | 8083 | The stack's database (data service + content store + the books + the users) |
+| `firefly-proxy` | 8084 | oauth2-proxy — the only way into Firefly from outside |
+| `keycloak` | 8089 | The identity provider; realm `A12Realm`, console `admin` / `admin` |
+| `firefly` | — | Bookkeeping — Firefly III 6.6.6 on Postgres. No published port, on purpose |
 | `runtime` | — | The Runtime; no port, it only makes outbound calls |
 | `server-init`, `firefly-bootstrap` | — | One-shot init containers |
 
-Every host port is published on `127.0.0.1` only. `compose/.env` is committed (D-013) and carries
-the database passwords and the Firefly credentials, so the stack must not be reachable from the
-network it happens to be on.
+Every host port is published on `127.0.0.1` only, and every credential in the stack lives in one
+gitignored file, `.env` at the root ([D-023](DECISIONS.md)). `just setup` writes it from the
+committed `.env.example`, generating the machine credentials — the four database passwords,
+Firefly's app key and cron token, and oauth2-proxy's client and cookie secrets — so no two clones
+share one. The four login passwords are *not* generated: they are the development defaults this
+README quotes, and they are safe only because of that `127.0.0.1`.
+
+Nothing else holds a credential. The files Keycloak imports would, so they are generated too:
+`compose/keycloak/*.template` is committed and `just render-secrets` renders the real ones from
+`.env` on every `just up`.
 
 **ThingStore** (`server/`, `import/models/`) — an A12 Data Service holding every Thing and
 exposing A12's JSON-RPC interface. It is the only integration surface in the system: the
@@ -257,17 +303,35 @@ Conversations with a Turn owing. The **Loop Driver** is one function, `advance(c
 that takes one Conversation exactly one Turn forward and returns holding nothing. Sixteen Tools are
 registered — ThingStore reads and writes, `ui.askUser`, `assistant.call`, six `bookkeeping.*`
 operations against Firefly, and four Manual Connector operations. It authenticates as a dedicated
-`runtime` user with no `DOCUMENT_DELETE` and no `MODEL_MANAGE` ([D-007](DECISIONS.md)); its health
-check is "did the last scan finish", not "is the process alive", because silence is the one failure
-the User cannot otherwise detect.
+`runtime` user with no `DOCUMENT_DELETE` and no `MODEL_MANAGE` ([D-007](DECISIONS.md)) — a Keycloak
+user like any other, reached through the direct access grant because a headless process has no
+browser to redirect; its health check is "did the last scan finish", not "is the process alive",
+because silence is the one failure the User cannot otherwise detect.
 
 **Bookkeeping** (`compose/firefly/`) — Firefly III on the stack's Postgres, in its own database
 (`assistants-firefly`) under its own role, created by `compose/postgres/db-init.sh` alongside the
 ThingStore's two databases. In the same compose file, brought up
-with zero manual steps: a one-shot container registers the first user and mints a personal access
-token into a volume the Runtime reads ([D-004](DECISIONS.md)). The connector never passes account
+with zero manual steps: a one-shot container mints a personal access token into a volume the
+Runtime reads ([D-004](DECISIONS.md)). The connector never passes account
 *names* to Firefly, because Firefly silently creates an account it does not recognise; it resolves
 names to IDs and returns an error the model can correct itself against.
+
+Its identity comes from Keycloak, but not by Firefly's own doing ([D-022](DECISIONS.md)): Firefly
+III has no OIDC client, only `remote_user_guard`, which takes the user from an HTTP header and
+validates nothing. So `firefly-proxy` authenticates the browser against Keycloak and sets
+`X-Forwarded-Email`, and `FIREFLY_EMAIL` in `.env` must stay equal to the `email` of the
+Keycloak user who browses the books — otherwise the bootstrap container mints its token for one
+Firefly account and the human reads another.
+
+**Identity** (`compose/keycloak/`) — Keycloak 26 with the A12 Project Template's own realm:
+`A12Realm`, the public SPA client `a12-spa-client`, and the realm roles `admin`, `user`,
+`systemAdmin` and `runtime`. Two clients are ours rather than the template's —
+`assistants-runtime-client` (the only one with the direct access grant, for the Runtime and the
+test tiers) and `firefly-oauth2-proxy` (confidential, for the proxy). `KC_HOSTNAME` pins the issuer
+to `http://localhost:8089` so a token minted over the internal `keycloak:8080` address still
+validates; without it the proxy, which redeems its authorization code internally, would get tokens
+the ThingStore rejects. Realm import is create-only — editing these files changes nothing until
+`just clean` drops the volume.
 
 ## The Things
 
@@ -358,11 +422,18 @@ silently returns nothing.
 
 This is one running vertical slice, not a finished system. What is honestly missing:
 
-- **Authentication is development-grade.** The A12 local-auth variant reads users from YAML files
-  under `import/auth/users/`, with plaintext passwords committed to the repository. The A12
-  template's own README says it is for development, demo and training only. Do not expose this
-  stack beyond localhost without replacing it — and the same goes for the Firefly credentials in
-  `compose/.env`.
+- **Authentication is real, its configuration is development-grade.** The mechanism is the one A12
+  intends — Keycloak as the identity provider, OIDC, no password checked anywhere else. No
+  credential is committed any more ([D-023](DECISIONS.md)), but what is *generated* still is not
+  production-ready: Keycloak runs `start-dev` over plain HTTP, its console is `admin` / `admin`,
+  and the realm's password policy is relaxed far enough to allow `human` / `human` — the four
+  login passwords in `.env.example` are development defaults, not generated secrets. Every one of
+  those is deliberate for a stack published on `127.0.0.1`. Do not expose it beyond localhost
+  without replacing all of them.
+- **Firefly III trusts a header.** `remote_user_guard` performs no validation of `X-Forwarded-Email`
+  whatsoever, so Firefly is only as protected as the network path to it. Inside the compose network
+  it is wide open, which is what lets the Runtime and `firefly-bootstrap` use it; the security
+  argument is entirely that it publishes no host port. Give it one and authentication is gone.
 - **Email and Bank are Manual Connectors.** `email.send`, `email.fetch` and `bank.sendMoney` do not
   talk to anything; they raise an Open Question and the User does the work by hand and reports
   back. This is deliberate — ADR-0004 says the system must run end to end with every External
@@ -408,9 +479,12 @@ This is one running vertical slice, not a finished system. What is honestly miss
 │   └── fixtures/             the scripted LLM transcript
 ├── import/
 │   ├── models/               the eight Things (DM/FM/OM) + the application model
-│   ├── auth/                 roles.yaml and users/*.yaml (local auth)
+│   ├── auth/                 roles.yaml — realm role → A12 access rights
 │   └── validate-models.mjs   the model validator just test-models runs
+├── .env.example              every credential the stack needs; just setup turns it into .env
 ├── compose/                  docker-compose.yml, the Firefly and postgres bootstrap scripts
+│   └── keycloak/             the A12Realm import, as *.template + the renderer
+├── scripts/setup-env.mjs     writes .env and generates the machine credentials
 ├── e2e/                      Playwright
 ├── specs/changes/            proposal, domain, architecture and plan, per change
 ├── docs/                     adr/ — ten architecture decision records; logo/ — design explorations

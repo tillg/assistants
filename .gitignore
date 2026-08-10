@@ -8,11 +8,19 @@
 
 # Dev configs
 **/developer.properties
+
+# Every secret in the stack lives in one file, `.env` at the root, and it is never committed
+# (D-023). `.env.example` is, and `just setup` turns it into a working `.env`. Nothing else
+# should hold a credential -- if you find one somewhere else, that is a bug.
 .env
 compose/.env.local
-# ...but compose/.env holds the local stack's development defaults and must be committed,
-# or `just dev` cannot work from a fresh clone. It contains no real secrets.
-!compose/.env
+
+# Rendered from compose/keycloak/*.template by `just render-secrets`, because Keycloak's realm
+# import stores `${env.VAR}` literally instead of substituting it (D-023). The templates are
+# committed; these outputs carry the passwords and are not.
+compose/keycloak/A12Realm-realm.json
+compose/keycloak/A12Realm-users-0.json
+compose/keycloak/keycloak.env
 
 # Build tools
 **/.gradle/

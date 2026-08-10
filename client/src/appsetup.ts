@@ -41,8 +41,7 @@ import {
     APPLICATION_MODEL_PLACEHOLDER,
     ModelActions,
     type A12ApplicationConfig,
-    ApplicationFactories,
-    addWrapper
+    ApplicationFactories
 } from "@com.mgmtp.a12.client/client-core";
 import { withPlatformModelLoader } from "@com.mgmtp.a12.client/client-core/modelLoader";
 import { withDirtyHandling } from "@com.mgmtp.a12.client/client-core/dirtyHandling";
@@ -64,7 +63,6 @@ import { withDeepLinking } from "@com.mgmtp.a12.client/client-core/deepLinking";
 import { withDataServicesConfiguration } from "@com.mgmtp.a12.client/client-core/dataServicesAdapter";
 import { withContentEngine } from "@com.mgmtp.a12.contentengine/contentengine-core";
 import { DefaultElementLibrary } from "@com.mgmtp.a12.contentengine/contentengine-default-element-library";
-import { withUaa } from "@com.mgmtp.a12.uaa/uaa-authentication-a12-client";
 
 import { MarkdownTextArea } from "./components/markdown-editor/control/MarkdownTextArea";
 import { createModelElementBridge } from "./components/ModelElementBridge";
@@ -76,7 +74,8 @@ import { enginesViewMap } from "./app/EnginesViewMap";
 import { stabilizeModifications } from "./app/stabilizeModifications";
 import { CustomApplicationFrameLayout } from "./app/LayoutProvider";
 import { DEFAULT_TRANSLATIONS, supportedLocales, getDateTimeResource } from "./localization";
-import { AuthBarrier } from "./app/AuthBarrier";
+import { withKeycloak } from "./uaa/withKeycloak";
+import { withUaa } from "./uaa/withUaa";
 
 function assertFullyConfigured(
     config: A12ApplicationConfig
@@ -125,6 +124,10 @@ export function setup() {
             getDateTimeResource
         },
         uaa: {
+            // No identity provider is named here: the server publishes its own OIDC
+            // self-configuration under /api, and `UaaClient.init` fetches it. Which realm and
+            // which client the application uses is therefore a server-side setting -- see
+            // `client-selfconfiguration.oidc` in server/app/.../application-dev.properties.
             configuration: {
                 serverURL: "/api",
                 automaticallyLogin: true
@@ -156,8 +159,7 @@ export function setup() {
         addView("FormEngine", enginesViewMap.FormEngine),
         addView("OverviewEngine", enginesViewMap.OverviewEngine),
         addView("ContentEngine", enginesViewMap.ContentEngine),
-        addLayout("ApplicationFrame", { component: CustomApplicationFrameLayout }),
-        addWrapper(AuthBarrier)
+        addLayout("ApplicationFrame", { component: CustomApplicationFrameLayout })
     );
 
     const applicationFeatures = combineFeatures(
@@ -171,6 +173,9 @@ export function setup() {
             withLocalization,
             withNotifications,
             withUaa,
+            // Order matters: withKeycloak reads `uaa.configuration` and contributes the
+            // wrapper that gates the application on a token, so it must come after withUaa.
+            withKeycloak,
             a12Features,
             a12ExtensionFeatures,
             applicationFeatures

@@ -63,18 +63,24 @@ import users from "../../fixtures/users.json" with { type: "json" };
  * A page authenticated *after* the restart.
  *
  * The `getPageAs` fixture caches each user's session data for the whole worker and replays it
- * into `sessionStorage`. That token was minted by the server we just restarted, so replaying it
- * lands on the login screen and every locator times out. Logging in again is not a workaround —
- * it is what a human would do, and ADR-0004's claim is about the Open Question surviving in the
- * store, not about a browser session surviving a server restart.
+ * into a context. That session was established before the restart, so replaying it lands on the
+ * login screen and every locator times out. Logging in again is not a workaround — it is what a
+ * human would do, and ADR-0004's claim is about the Open Question surviving in the store, not
+ * about a browser session surviving a server restart.
+ *
+ * The form is Keycloak's, not the application's — the application has none. `storageState:
+ * undefined` means no Keycloak SSO cookie either, so this really does start from nothing, which
+ * is the point.
  */
 async function loginFreshly(browser: Browser, username: string, password: string): Promise<Page> {
     const context = await browser.newContext({ storageState: undefined });
     const page = await context.newPage();
     await page.goto(BASE_URL);
-    await page.getByRole("textbox", { name: "Username" }).fill(username);
-    await page.getByRole("textbox", { name: "Password" }).fill(password);
-    await page.getByRole("button", { name: "Login" }).click();
+    // Keycloak's own login page. Its ids are stable across themes; its accessible names are not
+    // ("Username or email", "Sign In"), which is why these are selected by id.
+    await page.fill("#username", username);
+    await page.fill("#password", password);
+    await page.press("#password", "Enter");
     await expect(page.getByRole("link", { name: "Open Questions" })).toBeVisible({ timeout: 60_000 });
     return page;
 }

@@ -69,6 +69,15 @@ export const RESOURCE_KEYS = {
         de: ""
     },
 
+    keycloak: {
+        processing: {
+            message: ""
+        },
+        error: {
+            message: ""
+        }
+    },
+
     markdownEditor: {
         mode: {
             visual: "",

@@ -2,9 +2,9 @@
  * The raw JSON-RPC client, against the real Data Service.
  *
  * The unit tier drives an in-memory store, which by construction agrees with whatever the client
- * sends. Everything the store could disagree about — the `access_token` response header, the
- * `UAABearer` scheme, the batch-shaped body, whether a markdown string survives a round trip —
- * is only observable here.
+ * sends. Everything the store could disagree about — that Keycloak's direct access grant yields a
+ * token the store accepts, the `Bearer` scheme, the batch-shaped body, whether a markdown string
+ * survives a round trip — is only observable here.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";

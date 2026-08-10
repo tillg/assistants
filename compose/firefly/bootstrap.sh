@@ -33,19 +33,28 @@
 # Headless bootstrap for Firefly III:
 #   0. reuse an existing, still-valid token from $TOKEN_FILE (idempotency)
 #   1. wait for /healthcheck
-#   2. register the first user (becomes owner/admin) -- or log in if it exists
-#   3. mint a Personal Access Token -> $TOKEN_FILE
+#   2. mint a Personal Access Token -> $TOKEN_FILE
 #
 # No artisan command can mint a PAT, so this drives the same HTTP endpoints the
 # web UI uses. Only sh, curl and the busybox text tools are required -- deliberately
 # nothing that has to be installed at start-up, so an offline `up` still works.
+#
+# There is no password anywhere in here. Firefly runs with AUTHENTICATION_GUARD=
+# remote_user_guard, so it takes the user's identity from X-Forwarded-Email and creates
+# the account on first sight -- which is what firefly-proxy does for a browser after
+# Keycloak has authenticated it, and what this script does directly. $EMAIL must be the
+# `email` of the Keycloak user who will browse the books, or the Runtime writes its
+# transactions into an account nobody looks at.
 set -eu
 
 BASE="${BASE:-http://firefly:8080}"
 EMAIL="${FIREFLY_EMAIL:-bot@example.com}"
-PASSWORD="${FIREFLY_PASSWORD:-correct-horse-battery-staple}"   # min 16 chars
 TOKEN_NAME="${TOKEN_NAME:-assistants-runtime}"
 TOKEN_FILE="${TOKEN_FILE:-/firefly-token/pat.txt}"
+
+# Every authenticated request carries it; the guard performs no validation beyond
+# "is it non-empty", which is why Firefly publishes no port of its own.
+AUTH_HEADER="X-Forwarded-Email: $EMAIL"
 
 WORK="$(mktemp -d)"
 CJ="$WORK/cookies"
@@ -76,51 +85,22 @@ if [ -s "$TOKEN_FILE" ]; then
   echo "token:      $TOKEN_FILE exists but is not accepted -- minting a new one"
 fi
 
-get_form_token() {
-  curl -sS -b "$CJ" -c "$CJ" "$BASE$1" \
-    | grep -oE 'name="_token" value="[^"]+"' | head -1 | cut -d'"' -f4 || true
-}
-
-# ------------------------------------------------------------ 2. register
-# On a fresh install this creates the owner/admin and opens the session.
-# On a re-run it bounces back to /register with a validation error, which is
-# fine -- the login step below picks it up.
-curl -sS -b "$CJ" -c "$CJ" -o /dev/null -w 'register:   HTTP %{http_code} -> %{redirect_url}\n' \
-  -X POST "$BASE/register" \
-  --data-urlencode "_token=$(get_form_token /register)" \
-  --data-urlencode "email=$EMAIL" \
-  --data-urlencode "password=$PASSWORD" \
-  --data-urlencode "password_confirmation=$PASSWORD"
-
-# --------------------------------------------------------------- 3. login
-# GET /login redirects to /home when the session is already authenticated, so
-# an empty form token means "registration already logged us in".
-LT="$(get_form_token /login)"
-if [ -n "$LT" ]; then
-  curl -sS -b "$CJ" -c "$CJ" -o /dev/null -w 'login:      HTTP %{http_code} -> %{redirect_url}\n' \
-    -X POST "$BASE/login" \
-    --data-urlencode "_token=$LT" \
-    --data-urlencode "email=$EMAIL" \
-    --data-urlencode "password=$PASSWORD"
-else
-  echo 'login:      skipped (already authenticated)'
-fi
-
-# ---------------------------------------------------------- 4. oauth page
-# REQUIRED: this page lazily creates the Passport "personal access grant"
-# client. Without it the next step fails. Take the CSRF token from its
-# <meta name="csrf-token"> -- the XSRF-TOKEN cookie is stale after the session
-# was regenerated and yields "CSRF token mismatch".
-CSRF="$(curl -sS -b "$CJ" -c "$CJ" "$BASE/profile/oauth" \
+# ---------------------------------------------------------- 2. oauth page
+# REQUIRED, and it does three things at once: the guard creates the account for
+# $EMAIL if this is the first request it has ever seen, Firefly opens a session, and
+# the page lazily creates the Passport "personal access grant" client the next step
+# needs. Take the CSRF token from its <meta name="csrf-token"> -- the XSRF-TOKEN
+# cookie is stale after the session was regenerated and yields "CSRF token mismatch".
+CSRF="$(curl -sS -b "$CJ" -c "$CJ" -H "$AUTH_HEADER" "$BASE/profile/oauth" \
         | grep -oE '<meta name="csrf-token" content="[^"]+"' | cut -d'"' -f4)"
 if [ -z "$CSRF" ]; then
-  echo 'FAILED: not authenticated -- /profile/oauth carried no csrf-token'
+  echo "FAILED: not authenticated as $EMAIL -- /profile/oauth carried no csrf-token"
   exit 1
 fi
-echo "oauth page: csrf $(printf '%.8s' "$CSRF")..."
+echo "oauth page: authenticated as $EMAIL, csrf $(printf '%.8s' "$CSRF")..."
 
-# ----------------------------------------------------------- 5. mint a PAT
-curl -sS -b "$CJ" -c "$CJ" -X POST "$BASE/oauth/personal-access-tokens" \
+# ----------------------------------------------------------- 3. mint a PAT
+curl -sS -b "$CJ" -c "$CJ" -H "$AUTH_HEADER" -X POST "$BASE/oauth/personal-access-tokens" \
   -H 'Content-Type: application/json' -H 'Accept: application/json' \
   -H "X-CSRF-TOKEN: $CSRF" \
   -d "{\"name\":\"$TOKEN_NAME\",\"scopes\":[]}" \
@@ -144,7 +124,7 @@ chmod 0644 "$TOKEN_FILE"
 echo "accessTokenId: $(grep -oE '"accessTokenId" *: *"?[^",}]+' "$WORK/pat.json" | head -1 | cut -d: -f2- | tr -d '" ')"
 echo "-> $TOKEN_FILE ($(printf '%s' "$ACCESS_TOKEN" | wc -c | tr -d ' ') chars)"
 
-# ------------------------------------------------------------- 6. verify
+# ------------------------------------------------------------- 4. verify
 curl -fsS -o /dev/null \
   -H "Authorization: Bearer $(cat "$TOKEN_FILE")" \
   -H 'Accept: application/json' "$BASE/api/v1/about"

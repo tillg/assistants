@@ -59,6 +59,9 @@ today. The interface keeps the choice from spreading through the code.
 2. It uses **UAA `LOCAL` authentication instead of Keycloak** — users are YAML files under
    `import/auth/users/`. That removes an entire service (and a realm import, and a second
    database) from the compose stack the brief asks to keep to one.
+   *(Superseded by [D-022](#d-022--keycloak-is-the-only-place-a-password-is-checked): the service,
+   the realm import and the database are all back, on purpose. The rest of this entry stands — the
+   template choice, the registries and the 2026.06 line are unaffected.)*
 3. Its base images come from `docker.io` (`dockerRegistryForRead=docker.io`,
    `dockerUseCredentials=false`).
 
@@ -73,7 +76,8 @@ or the 2025.06 line (would force a backport of the editor).
 
 **Note for the user**: the template's own README warns that LOCAL auth is for
 development/demo/training only, not production. For a single-household system run on a laptop
-that is the right trade, but it is a real limitation and worth knowing about.
+that is the right trade, but it is a real limitation and worth knowing about. *(This note is what
+D-022 acted on.)*
 
 ---
 
@@ -330,6 +334,13 @@ defaults for a laptop stack, not secrets, and says so in a comment.
 
 **Reversal cost**: Trivial. But note the file *would* hold real secrets the day this stack leaves
 localhost, and at that point it must come back out.
+
+**Superseded by [D-023](#d-023--every-secret-lives-in-one-gitignored-env), 2026-08-10.** It came
+back out. The trigger was not the stack leaving localhost but D-022 adding an oauth2-proxy cookie
+secret — session-forging material rather than another laptop database password — and GitGuardian
+flagging the file on every push. The two reasons above were real and both survive: `.env` is still
+one file that a plain `docker compose --env-file` can read, and a fresh clone is still one command
+away from running. It is `just setup` now instead of `git clone`.
 
 ---
 
@@ -650,3 +661,136 @@ The three highest-value things to do next, if the ranking is useful: BUG-01, bec
 not work without it; BUG-02, because an Accountant that answers "nothing outstanding" is worse than
 one that says nothing; and BUG-15, because a Conversation you cannot open is a system you cannot
 debug — and it is the surface every other finding here would be diagnosed from.
+
+---
+
+## D-022 — Keycloak is the only place a password is checked
+
+**Decided**: The stack authenticates through Keycloak, the way A12 intends, and nothing else
+verifies a credential. Concretely: the A12 server moves from `mgmtp.a12.uaa.authentication.types=
+LOCAL` to `OAUTH2`, `import/auth/users/*.yaml` is deleted, the web application loses its login form
+and gains a redirect, the Runtime gets its token from Keycloak's direct access grant, and Firefly
+III sits behind an oauth2-proxy that does the OIDC flow on its behalf. Realm `A12Realm` holds
+`human` / `human`, the service account `runtime`, and `admin` / `user1` / `user2` for the test
+tiers; the Keycloak console is `admin` / `admin`.
+
+**Why**: the ask was to use Keycloak, and to use it *the A12 way* rather than invent an
+integration. So the realm, the client (`a12-spa-client`), the property names and the client-side
+wiring are all lifted from the A12 Project Template's own Keycloak variant, not designed here. Two
+of the three pieces were straightforward; the third was not, and is the substance of this entry.
+
+**The one real finding: Firefly III cannot speak OIDC.** Version 6.6.6 has exactly two
+authentication modes — `AUTHENTICATION_GUARD=web` (its own login form) and `remote_user_guard`
+(take the user from an HTTP header, validate nothing). Native OIDC is an open feature request. So
+"Firefly uses the same Keycloak and the same users" is only achievable with an authenticating proxy
+in front, and I confirmed with the user before adding a container for it.
+
+There is a second, sharper reason it had to be the proxy rather than Firefly's own login: Firefly
+validates registration passwords with `min:16|secure_password` and wants an email address as the
+username. **`human` / `human` is not a password Firefly will accept.** The requested credential is
+therefore only possible if Keycloak holds it and Firefly never sees one — which is precisely what
+`remote_user_guard` behind oauth2-proxy gives.
+
+**What the proxy costs, and the four things that were not obvious**:
+1. **Firefly must publish no host port.** The guard trusts `X-Forwarded-Email` blindly, so any
+   reachable path to Firefly is an authentication bypass. The proxy owning 8084 is the entire
+   security argument.
+2. **But `/api/` bypasses the proxy on purpose.** Firefly's REST API authenticates on a separate
+   Passport guard, so the Runtime's personal access token is checked whether or not the proxy has a
+   session. Routing those requests through OIDC would break the Runtime, `just demo-data` and both
+   test tiers, and would buy nothing. `OAUTH2_PROXY_SKIP_AUTH_ROUTES` covers `^/api/` and
+   `^/healthcheck`.
+3. **`KC_HOSTNAME` is load-bearing.** oauth2-proxy redeems its authorization code over the internal
+   `keycloak:8080` address while the browser uses `localhost:8089`. Without a pinned hostname
+   Keycloak derives `iss` from the request host, so tokens minted internally and externally claim
+   different issuers and exactly one of the two fails validation. Pinning it also lets the server
+   fetch keys internally while checking `iss` against the public URL.
+4. **`FIREFLY_EMAIL` and Keycloak's `human` must agree.** Firefly identifies its user by that
+   address, and the bootstrap container mints the Runtime's token against it. Disagreement is
+   silent and nasty: the human browses one set of books while the Runtime writes to another. There
+   is no longer a `FIREFLY_PASSWORD` at all.
+
+**Two settings were relaxed for the development stack, deliberately**: the realm's password policy
+(the stock A12 policy demands twelve characters with mixed classes, which forbids `human`), and
+`accessTokenLifespan`, from 300 s to 1800 s. The second is not cosmetic — the end-to-end tier
+restores a captured session into a *fresh* browser context, which has no Keycloak SSO cookie, so a
+silent renewal cannot succeed and a five-minute token would expire mid-suite. 1800 s restores the
+property the UAA `LOCAL` token had.
+
+**Alternative considered and rejected**: leave Firefly on its own login and give it a separate
+16-character password, so only A12 uses Keycloak. Cheaper by one container, but it cannot deliver
+`human` / `human` on Firefly and it leaves two identity stores. Put to the user, who chose the
+proxy.
+
+**Reversal cost**: Moderate. The server-side switch is a handful of properties; the client-side
+wiring is four small files under `client/src/uaa/`; the proxy is one compose service. The realm
+import, however, is create-only — Keycloak reads `compose/keycloak/*.json` once and never again, so
+changing a user or a client means `just clean` to drop the volume. That is the sharpest edge this
+decision leaves behind.
+
+**Note for the user**: the *mechanism* is now production-shaped; the *configuration* is not.
+Keycloak runs `start-dev` over plain HTTP, its console is `admin` / `admin`, the realm password
+policy is relaxed, the user passwords are committed in plaintext under `compose/keycloak/`, and
+oauth2-proxy's client and cookie secrets are committed in `compose/.env`. All of that is a
+development default for a stack bound to `127.0.0.1` (D-013) and all of it must be replaced before
+the stack is reachable from anywhere else.
+
+---
+
+## D-023 — Every secret lives in one gitignored `.env`
+
+**Decided**: `compose/.env` moves to `.env` at the repository root, is gitignored, and is the only
+file in the stack that holds a credential. `.env.example` is committed in its place, and
+`just setup` turns one into the other — generating the four database passwords, Firefly's app key
+and cron token, and oauth2-proxy's client and cookie secrets, so no two clones share any of them.
+This reverses [D-013](#d-013--composeenv-is-committed).
+
+**Why**: the user asked for it, after GitGuardian flagged `compose/.env` on two consecutive pushes.
+Their framing was the right one — all the secrets in one file, that file ignored, a sample committed
+so a reader can see what is required — and it is worth being precise about which part of that is
+the actual improvement. Most of what was flagged was a laptop database password, a true positive in
+shape and close to a non-incident in blast radius. But D-022 had just added
+`FIREFLY_PROXY_COOKIE_SECRET`, which signs browser session cookies: on any host reachable by
+somebody else, that one is forgeable-session material, and it does not belong in git. So the
+scanner was noisy and also right.
+
+**The finding that shaped the design: Keycloak substitutes nothing.** The obvious way to keep the
+realm's user passwords in `.env` is a `${env.HUMAN_PASSWORD}` placeholder in the realm JSON. The
+Keycloak documentation suggests this works. It does not — I booted a throwaway 26.5.3 with a realm
+containing `"secret": "${env.PROBE_SECRET}"` and read it back through the admin API, and the stored
+value was that literal string. It is a long-standing gap (keycloak/keycloak#20199, #12069) and the
+usual workaround is a third-party tool, keycloak-config-cli, with a different syntax.
+
+Hence the templates. `compose/keycloak/*.template` is committed with `${VAR}` markers, the rendered
+files are gitignored, and `just render-secrets` produces them from `.env`. It runs on every
+`just up` rather than only in `just setup`, because `.env` can be edited afterwards and a realm
+rendered from a stale password fails only at login — the worst place to discover it. The renderer
+is node, not `envsubst` (absent on macOS by default) and not `sed -i` (different arguments on macOS
+and Linux); node is already required by the Runtime and the client. It substitutes strictly and
+writes nothing unless every variable resolved, because a missing one would otherwise reach Keycloak
+as a literal `${HUMAN_PASSWORD}` — an import that succeeds and a password nobody can guess.
+
+**What is deliberately *not* generated**: the four login passwords — `human`/`human`, the Keycloak
+console's `admin`/`admin`, and the `A12PT-*` accounts the end-to-end tier uses. They are quoted in
+README.md as the way to sign in, so hiding them in a generated file would be theatre, and the
+e2e fixtures have to agree with them anyway. They are weak on purpose and are safe only because
+every port binds to `127.0.0.1`. This is the honest limit of what this change buys: it removes
+machine credentials from git, not the development logins.
+
+**`just setup` refuses to overwrite an existing `.env`**, which is not politeness. The database
+passwords are baked into the Postgres volume when it is first created, so regenerating them on a
+stack that has already run locks the server out of its own data until `just clean` drops the volume
+— taking the Things and the books with it.
+
+**Alternative**: keep `compose/.env` committed and add a `.gitguardian.yaml` to silence the
+scanner. Cheaper, and defensible for the database passwords alone, but it would have left the
+cookie secret in git and it does not answer the question the user actually asked.
+
+**Reversal cost**: Low, and worth stating precisely because it is asymmetric. Undoing the file move
+is trivial. Undoing the *generation* is not: once a clone has a `.env` with generated passwords and
+a Postgres volume built on them, going back to committed fixed values needs `just clean`.
+
+**Note for the user**: `.env.example` still contains the four development login passwords in
+plaintext, so GitGuardian may flag it. That would be a true positive about credentials this README
+publishes on purpose. If the mail is unwelcome, a `.gitguardian.yaml` scoping `.env.example` out is
+the right answer — say so and I will add one.

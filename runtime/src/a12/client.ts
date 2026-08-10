@@ -3,9 +3,11 @@
  *
  * Two things about this API are easy to get wrong and expensive to discover:
  *
- *   1. Authentication is UAA LOCAL: POST /api/user/local/login with a JSON body, and the JWT
- *      comes back in a **response header**, not the body. Subsequent calls use the scheme
- *      `UAABearer`, not `Bearer`.
+ *   1. Authentication is Keycloak, not the ThingStore. The store runs UAA with
+ *      `authentication.types=OAUTH2`, which means it has no login endpoint at all -- it only
+ *      verifies tokens somebody else signed. So this client asks Keycloak for one with the
+ *      OAuth 2.0 password grant (the "direct access grant"), which is the flow for a process
+ *      with no browser to redirect, and sends it as an ordinary `Bearer` token.
  *   2. The RPC body is always a JSON **array** (a batch), even for a single call, and mutations
  *      must precede queries within one batch.
  */
@@ -91,6 +93,14 @@ export interface A12ClientOptions {
     baseUrl: string;
     username: string;
     password: string;
+    /** Keycloak's base URL, e.g. `http://keycloak:8080` — no realm path. */
+    keycloakUrl: string;
+    keycloakRealm: string;
+    /**
+     * The realm client to authenticate against. It must have the direct access grant enabled,
+     * which `a12-spa-client` deliberately does not — hence a separate one for the Runtime.
+     */
+    keycloakClientId: string;
     locale?: string;
     fetchImpl?: typeof fetch;
 }
@@ -98,42 +108,52 @@ export interface A12ClientOptions {
 export class A12Client {
     private token: string | undefined;
     private readonly baseUrl: string;
+    private readonly keycloakUrl: string;
     private readonly locale: string;
     private readonly doFetch: typeof fetch;
 
     constructor(private readonly options: A12ClientOptions) {
         this.baseUrl = options.baseUrl.replace(/\/+$/, "");
+        this.keycloakUrl = options.keycloakUrl.replace(/\/+$/, "");
         this.locale = options.locale ?? "en";
         this.doFetch = options.fetchImpl ?? fetch;
     }
 
     /**
-     * UAA LOCAL login. The token arrives in the `access_token` response header.
-     * We never proactively renew: the token lasts 30 minutes and this process talks to the
-     * store every couple of seconds, so re-logging-in on the first 401 is simpler and cheaper
-     * than running the PKCE renew pair.
+     * Keycloak's direct access grant: username and password in, an access token out. The
+     * refresh token that comes with it is deliberately ignored — we never proactively renew,
+     * because the token outlives many scan intervals and re-authenticating on the first 401 is
+     * simpler and cheaper than tracking an expiry we would still have to handle being wrong
+     * about.
      */
     async login(): Promise<void> {
-        const url = `${this.baseUrl}/api/user/local/login`;
+        const url = `${this.keycloakUrl}/realms/${this.options.keycloakRealm}/protocol/openid-connect/token`;
         const response = await this.doFetch(url, {
             method: "POST",
             headers: {
-                "Content-Type": "application/json",
+                "Content-Type": "application/x-www-form-urlencoded",
                 Accept: "application/json",
-                "Accept-Language": this.locale,
             },
             signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-            body: JSON.stringify({ username: this.options.username, password: this.options.password }),
+            body: new URLSearchParams({
+                grant_type: "password",
+                client_id: this.options.keycloakClientId,
+                username: this.options.username,
+                password: this.options.password,
+            }),
         });
         if (!response.ok) {
-            throw new Error(`Login as ${this.options.username} failed: HTTP ${response.status}`);
+            const text = await response.text().catch(() => "");
+            throw new Error(
+                `Login as ${this.options.username} failed: HTTP ${response.status} ${text.slice(0, 200)}`,
+            );
         }
-        const token = response.headers.get("access_token");
-        if (!token) {
-            throw new Error("Login succeeded but no access_token header was returned");
+        const payload = (await response.json()) as { access_token?: string };
+        if (!payload.access_token) {
+            throw new Error("Keycloak accepted the credentials but returned no access_token");
         }
-        this.token = token;
-        log.debug("logged in to the ThingStore", { user: this.options.username });
+        this.token = payload.access_token;
+        log.debug("obtained a token from Keycloak", { user: this.options.username });
     }
 
     private async ensureToken(): Promise<string> {
@@ -157,7 +177,9 @@ export class A12Client {
                     // whole fix, and it is invisible until the first query.
                     "Accept-Language": this.locale,
                     "Content-Type": "application/json;charset=utf8",
-                    Authorization: `UAABearer ${token}`,
+                    // `Bearer`, not `UAABearer`: the token is Keycloak's, and UAA only mints
+                    // (and only recognises) its own under the UAABearer scheme.
+                    Authorization: `Bearer ${token}`,
                 },
                 signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
                 body,

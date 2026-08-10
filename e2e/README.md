@@ -44,6 +44,7 @@ just test-live          # LLM_PROVIDER=openai; needs LLM_API_KEY
 ```
 
 Environment overrides: `BASE_URL` (8081), `THINGSTORE_URL` (8082), `FIREFLY_URL` (8084),
+`KEYCLOAK_URL` (8089), `KEYCLOAK_REALM`, `KEYCLOAK_CLIENT_ID`,
 `FIREFLY_TOKEN` (otherwise read out of the running `runtime` container), `AGENT_TIMEOUT_MS`.
 
 ## What is in here
@@ -90,11 +91,13 @@ from the demo household (`just demo-data`) and never touches the latter.
 
 - `pages/` — page objects. `BasePage` (navigation), `FormPage` (fields, read-only/edit mode,
   markdown controls), `OverviewPage` (tables, search, row actions), `OpenQuestionPage` (answering).
-- `utils/thingstore.ts` — JSON-RPC client for the ThingStore. UAA `LOCAL` login, token in the
-  `access_token` **response header**, scheme `UAABearer`. Also the `waitFor` poll every
+- `utils/thingstore.ts` — JSON-RPC client for the ThingStore. The store runs UAA with
+  `authentication.types=OAUTH2` and has no login endpoint at all, so the token comes from
+  Keycloak's direct access grant and goes out as a plain `Bearer`. Also the `waitFor` poll every
   cross-component assertion uses, and the kill switch.
 - `utils/agents.ts` — the agentic domain as the tests see it: drop a Document in, wait for the
   Conversation, wait for the Open Question, wait for `done`.
 - `utils/firefly.ts` — Firefly III's REST API, and reading the bootstrap token out of the running
-  Runtime container.
+  Runtime container. Port 8084 is oauth2-proxy, not Firefly, but `/api/` is a route the proxy
+  passes straight through — Firefly checks the personal access token on a guard of its own.
 - `utils/stack.ts` — `docker compose restart`, for the ADR-0004 spec only.

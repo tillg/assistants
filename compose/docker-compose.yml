@@ -74,11 +74,20 @@ services:
       MGMTP_A12_UAA_AUTHENTICATION_PRINCIPAL_ACCESS-RIGHTS-RESOURCE: file:/var/lib/a12/data/import/auth/roles.yaml
       MGMTP_A12_UAA_AUTHORIZATION_CHILD-AUTHORIZATION-DEFINITIONS: file:/var/lib/a12/data/import/auth/childAuthorizationDefinition.json
       MGMTP_A12_DATASERVICES_INITIALIZATION_IMPORT_MODELS_PATH: file:/var/lib/a12/data/models/
-      MGMTP_A12_UAA_AUTHENTICATION_PRINCIPAL_LOCAL-CONFIG_USER-RESOURCES: file:/var/lib/a12/data/import/auth/users/*.yaml
       MGMTP_A12_DATASERVICES_INITIALIZATION_SCRIPTS_JSONRPC_ENABLED: false
+
+      # Keys are fetched over the internal address, but the `iss` claim is checked against the
+      # public one, which is what the browser put in the token. Only the JWK set URI is
+      # overridden here; `issuer-uri` stays at the public URL from application-dev.properties.
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK-SET-URI: http://keycloak:8080/realms/${KEYCLOAK_REALM}/protocol/openid-connect/certs
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER-URI: ${KEYCLOAK_PUBLIC_URL}/realms/${KEYCLOAK_REALM}
+      MGMTP_A12_UAA_AUTHENTICATION_CLIENT-SELFCONFIGURATION_OIDC_PUBLIC-CLIENT_IDP-BASE_URL: ${KEYCLOAK_PUBLIC_URL}
+      MGMTP_A12_UAA_AUTHENTICATION_CLIENT-SELFCONFIGURATION_OIDC_PUBLIC-CLIENT_REALM-NAME: ${KEYCLOAK_REALM}
 
     depends_on:
       postgres:
+        condition: service_healthy
+      keycloak:
         condition: service_healthy
       server-init:
         # when applying server-init profile, it must be completed successfully.
@@ -90,7 +99,7 @@ services:
     ports:
       - 127.0.0.1:8082:8080
     volumes:
-      # Read-only: this tree carries the plaintext user YAML and the server only reads it.
+      # Read-only: roles.yaml and the models are inputs, never outputs.
       - ../import:/var/lib/a12/data/import:ro
       - ../build/wcf-output/data/models:/var/lib/a12/data/models
 
@@ -119,7 +128,7 @@ services:
     networks:
       - a12_compose
     volumes:
-      # Read-only: this tree carries the plaintext user YAML and the server only reads it.
+      # Read-only: roles.yaml and the models are inputs, never outputs.
       - ../import:/var/lib/a12/data/import:ro
       - ../build/wcf-output/data/models:/var/lib/a12/data/models
 
@@ -140,12 +149,15 @@ services:
       FIREFLY_DB_USER: ${FIREFLY_DB_USERNAME}
       FIREFLY_DB_PASSWORD: ${FIREFLY_DB_PASSWORD}
       FIREFLY_DB: ${FIREFLY_DB}
+      KEYCLOAK_DATABASE_USER: ${KEYCLOAK_DATABASE_USER}
+      KEYCLOAK_DATABASE_PASSWORD: ${KEYCLOAK_DATABASE_PASSWORD}
+      KEYCLOAK_DATABASE_DB: ${KEYCLOAK_DATABASE_DB}
     healthcheck:
       # Checks whether Postgres is ready.
       test:
         [
           "CMD-SHELL",
-          "pg_isready --username assistants-ds-user --dbname assistants-ds && pg_isready --username assistants-cs-user --dbname assistants-cs && pg_isready --username assistants-firefly-user --dbname assistants-firefly",
+          "pg_isready --username assistants-ds-user --dbname assistants-ds && pg_isready --username assistants-cs-user --dbname assistants-cs && pg_isready --username assistants-firefly-user --dbname assistants-firefly && pg_isready --username assistants-keycloak-user --dbname assistants-keycloak",
         ]
       interval: 2s
       timeout: 5s
@@ -156,15 +168,69 @@ services:
     networks:
       - a12_compose
 
+  keycloak:
+    # The identity provider for everything a human logs in to. This is the A12 Project
+    # Template's own Keycloak set-up: realm A12Realm, public SPA client a12-spa-client, and
+    # the realm roles the server maps to A12 access rights through import/auth/roles.yaml.
+    #
+    # KC_HOSTNAME pins the issuer to the browser-facing URL. Without it Keycloak derives the
+    # issuer from the request host, so a token minted over the internal `keycloak:8080`
+    # address would claim a different issuer than one minted through the browser -- and
+    # exactly one of the two would then fail validation. oauth2-proxy redeems its
+    # authorization code over the internal address, so this is not optional.
+    #
+    # `start-dev` and an unencrypted HTTP listener: this is a development stack on
+    # 127.0.0.1 (D-013). A real deployment needs `start`, a hostname and TLS.
+    image: ${KEYCLOAK_REGISTRY}/keycloak/keycloak:${KEYCLOAK_VERSION}
+    container_name: ${PROJECT_NAME:-assistants}_keycloak
+    restart: unless-stopped
+    env_file:
+      - keycloak/keycloak.env
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${KEYCLOAK_DATABASE_DB}
+      KC_DB_USERNAME: ${KEYCLOAK_DATABASE_USER}
+      KC_DB_PASSWORD: ${KEYCLOAK_DATABASE_PASSWORD}
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "false"
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - 127.0.0.1:8089:8080
+    volumes:
+      # --import-realm reads every *-realm.json and its *-users-N.json siblings from here.
+      # Import is create-only: once the realm exists in Postgres, editing these files changes
+      # nothing until the volume is dropped. `just clean` is the way to reload them.
+      - ./keycloak:/opt/keycloak/data/import:ro
+    command: ["start-dev", "--import-realm"]
+    healthcheck:
+      # KC_HEALTH_ENABLED puts /health/ready on the management port, 9000. The image ships no
+      # curl and no wget, so the probe opens the socket with bash's /dev/tcp instead.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - a12_compose
+
   firefly:
     # Bookkeeping backend. Shares the stack's Postgres, in its own database with its own
     # role -- one database container for the whole stack, not two engines to operate.
-    # Host port 8084 because 8081/8082/8083 are frontend/server/postgres.
+    #
+    # No published port: every browser request arrives through firefly-proxy on 8084, which
+    # is what makes Keycloak the only place a password is ever typed. Firefly III has no OIDC
+    # client of its own -- `remote_user_guard` is the whole of its support for an external
+    # identity provider, and it trusts the header blindly, so reaching Firefly directly would
+    # bypass authentication entirely. Inside the compose network `firefly:8080` is still open;
+    # that is deliberate and is how the Runtime and firefly-bootstrap talk to it.
     image: fireflyiii/core:version-6.6.6
     container_name: ${PROJECT_NAME:-assistants}_firefly
     restart: unless-stopped
-    ports:
-      - 127.0.0.1:8084:8080
+    expose:
+      - "8080"
     environment:
       APP_ENV: production
       APP_DEBUG: "false"
@@ -187,6 +253,14 @@ services:
       STATIC_CRON_TOKEN: ${FIREFLY_CRON_TOKEN} # must be EXACTLY 32 chars
       DEFAULT_LANGUAGE: en_US
       DEFAULT_LOCALE: equal
+
+      # Authentication is somebody else's job. Firefly reads the identity out of a request
+      # header and performs no check of its own -- no password, no MFA -- so the header must
+      # be one only firefly-proxy can set, which is why this service publishes no port.
+      # The name is the $_SERVER key, not the wire name: X-Forwarded-Email arrives in PHP as
+      # HTTP_X_FORWARDED_EMAIL, and the guard looks it up verbatim.
+      AUTHENTICATION_GUARD: remote_user_guard
+      AUTHENTICATION_GUARD_HEADER: HTTP_X_FORWARDED_EMAIL
     volumes:
       # One narrow path -- never mount all of storage/. The books themselves live in
       # Postgres now, so storage/database is no longer a thing to persist.
@@ -203,10 +277,74 @@ services:
     networks:
       - a12_compose
 
+  firefly-proxy:
+    # oauth2-proxy: the only way into Firefly III from outside the compose network, and the
+    # piece that makes Keycloak Firefly's identity provider. It runs the authorization-code
+    # flow against Keycloak, then forwards the request to Firefly with X-Forwarded-Email set
+    # to the address in the ID token -- which is the identity Firefly's remote_user_guard
+    # trusts. Firefly itself has no OIDC support to configure.
+    #
+    # SKIP_OIDC_DISCOVERY, and every endpoint spelled out: the login URL has to be one the
+    # *browser* can open (localhost:8089) while the token and JWKS URLs have to be ones this
+    # container can reach (keycloak:8080). Discovery would return one set of URLs for both.
+    # The issuer stays the public URL because KC_HOSTNAME makes Keycloak claim it either way.
+    image: quay.io/oauth2-proxy/oauth2-proxy:${OAUTH2_PROXY_VERSION}
+    container_name: ${PROJECT_NAME:-assistants}_firefly-proxy
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:8084:4180
+    environment:
+      OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
+      OAUTH2_PROXY_UPSTREAMS: http://firefly:8080
+      OAUTH2_PROXY_PROVIDER: oidc
+      OAUTH2_PROXY_SKIP_OIDC_DISCOVERY: "true"
+      OAUTH2_PROXY_OIDC_ISSUER_URL: ${KEYCLOAK_PUBLIC_URL}/realms/${KEYCLOAK_REALM}
+      OAUTH2_PROXY_LOGIN_URL: ${KEYCLOAK_PUBLIC_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/auth
+      OAUTH2_PROXY_REDEEM_URL: http://keycloak:8080/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token
+      OAUTH2_PROXY_OIDC_JWKS_URL: http://keycloak:8080/realms/${KEYCLOAK_REALM}/protocol/openid-connect/certs
+      OAUTH2_PROXY_CLIENT_ID: firefly-oauth2-proxy
+      OAUTH2_PROXY_CLIENT_SECRET: ${FIREFLY_PROXY_CLIENT_SECRET}
+      OAUTH2_PROXY_REDIRECT_URL: http://localhost:8084/oauth2/callback
+      # REQUIRED, not an enhancement. The realm client sets `pkce.code.challenge.method: S256`,
+      # which makes Keycloak *demand* PKCE and answer an authorization request without it
+      # `invalid_request: Missing parameter: code_challenge_method` — a 403 from the proxy, after
+      # the redirect has already worked, so it only shows up if you follow the callback through.
+      OAUTH2_PROXY_CODE_CHALLENGE_METHOD: S256
+      OAUTH2_PROXY_COOKIE_SECRET: ${FIREFLY_PROXY_COOKIE_SECRET}
+      # http, not https, so the session cookie cannot be Secure. Localhost only (D-013).
+      OAUTH2_PROXY_COOKIE_SECURE: "false"
+      # Any user of this realm may log in; who they are is what matters, not their domain.
+      OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+      # Straight to Keycloak instead of an interstitial "Sign in with..." page.
+      OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+      # Firefly's REST API authenticates on its own `api` guard -- Passport, not the web guard
+      # -- so the Runtime's personal access token is checked whether or not the proxy has a
+      # session. Sending those requests through the OIDC dance would only break every client
+      # that legitimately holds a token, so they pass straight through. Everything a *browser*
+      # reaches is still behind Keycloak, which is the surface that matters.
+      OAUTH2_PROXY_SKIP_AUTH_ROUTES: "^/api/,^/healthcheck$$"
+      # This is the whole point: it is what sets X-Forwarded-User and X-Forwarded-Email on
+      # the request Firefly sees.
+      OAUTH2_PROXY_PASS_USER_HEADERS: "true"
+      # Firefly does its own session handling behind the guard and has no use for the token.
+      OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "false"
+      OAUTH2_PROXY_PASS_BASIC_AUTH: "false"
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      firefly:
+        condition: service_healthy
+    networks:
+      - a12_compose
+
   firefly-bootstrap:
-    # One-shot: registers the first (owner) user and mints a Personal Access
-    # Token into the firefly_token volume, where the Runtime can read it.
-    # Idempotent -- re-running logs in and reuses a still-valid token.
+    # One-shot: mints a Personal Access Token into the firefly_token volume, where the
+    # Runtime can read it. Idempotent -- re-running reuses a still-valid token.
+    #
+    # It reaches Firefly directly, sending the same X-Forwarded-Email header firefly-proxy
+    # sets, because that is now the only way to be authenticated. No password is involved
+    # anywhere: FIREFLY_EMAIL identifies the account, Keycloak holds the credential, and the
+    # two must name the same user or the Runtime would keep books the human never sees.
     #
     # alpine/curl, not python:3.12-alpine + `apk add curl`: the script needs only sh, curl and
     # the busybox text tools, and installing curl at start-up made every `up` require the
@@ -218,7 +356,6 @@ services:
     environment:
       BASE: http://firefly:8080
       FIREFLY_EMAIL: ${FIREFLY_EMAIL}
-      FIREFLY_PASSWORD: ${FIREFLY_PASSWORD}
       TOKEN_FILE: /firefly-token/pat.txt
     entrypoint: ["/bin/sh", "-c"]
     command: ["exec /bootstrap.sh"]
@@ -252,6 +389,16 @@ services:
       THINGSTORE_URL: http://server:8080
       THINGSTORE_USER: runtime
       THINGSTORE_PASSWORD: assistants-runtime-dev
+
+      # The Runtime is headless, so it gets its token from Keycloak with the direct access
+      # grant rather than a browser redirect -- hence its own client, which is the only one
+      # in the realm with that grant enabled. The internal address is right here: the server
+      # validates the `iss` claim against the public URL, and KC_HOSTNAME makes Keycloak use
+      # the public URL in the claim no matter which address the token was requested over.
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM}
+      KEYCLOAK_CLIENT_ID: assistants-runtime-client
+
       FIREFLY_URL: http://firefly:8080
       FIREFLY_TOKEN_FILE: /run/firefly/pat.txt
       UI_BASE_URL: http://localhost:8081
@@ -273,6 +420,8 @@ services:
     depends_on:
       server:
         condition: service_started
+      keycloak:
+        condition: service_healthy
       firefly-bootstrap:
         condition: service_completed_successfully
     healthcheck:

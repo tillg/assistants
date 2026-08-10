@@ -30,33 +30,25 @@
  * LEGALLY INVALID. SEE THE RESPECTIVE LICENSE TEXT FOR DETAILS.
  */
 
-import type { PropsWithChildren, ReactNode } from "react";
-import { useSelector } from "react-redux";
+import { put, select, takeLatest, type SagaGenerator } from "typed-redux-saga";
 
-import { AuthenticationState, UaaSelectors, LoginPage, UaaClient } from "@com.mgmtp.a12.uaa/uaa-authentication-client";
-import { ResponsiveImageContainer } from "@com.mgmtp.a12.widgets/widgets-core";
+import { isUaaOidcUser, UaaActions, UaaSelectors } from "@com.mgmtp.a12.uaa/uaa-authentication-client";
 
-export const AuthBarrier = ({ children }: PropsWithChildren): ReactNode => {
-    const authenticatedState = useSelector(UaaSelectors.state);
-    const isAuthenticated = authenticatedState === AuthenticationState.AUTHENTICATED;
+/**
+ * Carries the user's roles across a silent token renewal.
+ *
+ * The renewed token is a fresh OIDC user object, and the A12 authorities that came with the
+ * old one are not part of it -- they came from UAA's `currentUser`, not from Keycloak. Without
+ * this, every module the user may see disappears roughly a minute before the access token
+ * would have expired, which is exactly the sort of failure nobody reproduces on demand.
+ */
+export function* setRolesForUserAfterTokenRefresh(): SagaGenerator<void> {
+    yield* takeLatest(UaaActions.oidc_user_expiring, handle);
 
-    if (!isAuthenticated) {
-        return (
-            <LoginPage
-                logoURL={"/images/A12-Logo.png"}
-                imageURL={"/images/A12Chroma.png"}
-                uaaClient={UaaClient.getLocalClient()}
-                additionalFooterItems={
-                    <ResponsiveImageContainer
-                        alt="A product of mgm"
-                        src="/images/a_product_of.png"
-                        title="A product of mgm"
-                        style={{ paddingLeft: "60px", paddingRight: "60px" }}
-                    />
-                }
-            />
-        );
+    function* handle(): SagaGenerator<void> {
+        const user = yield* select(UaaSelectors.user);
+        if (isUaaOidcUser(user)) {
+            yield* put(UaaActions.modifyingOidcUser(user));
+        }
     }
-
-    return children;
-};
+}

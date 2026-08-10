@@ -41,6 +41,9 @@ export function buildRuntime(config: Config): Runtime {
         baseUrl: config.thingStoreUrl,
         username: config.thingStoreUser,
         password: config.thingStorePassword,
+        keycloakUrl: config.keycloakUrl,
+        keycloakRealm: config.keycloakRealm,
+        keycloakClientId: config.keycloakClientId,
         locale: config.locale,
     });
     const things = new ThingRepository(client);

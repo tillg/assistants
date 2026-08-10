@@ -32,6 +32,14 @@ export interface Config {
     readonly thingStorePassword: string;
     readonly locale: string;
 
+    /**
+     * Keycloak, not the ThingStore, is where the Runtime's credentials are checked — the store
+     * only verifies the token that comes out. See {@link A12Client.login}.
+     */
+    readonly keycloakUrl: string;
+    readonly keycloakRealm: string;
+    readonly keycloakClientId: string;
+
     readonly fireflyUrl: string;
     /** Read from a file so the bootstrap container can hand it over through a shared volume. */
     readonly fireflyTokenFile: string;
@@ -63,6 +71,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         thingStoreUser: optional("THINGSTORE_USER", "runtime"),
         thingStorePassword: optional("THINGSTORE_PASSWORD", "assistants-runtime-dev"),
         locale: optional("LOCALE", "en"),
+
+        keycloakUrl: optional("KEYCLOAK_URL", "http://keycloak:8080"),
+        keycloakRealm: optional("KEYCLOAK_REALM", "A12Realm"),
+        keycloakClientId: optional("KEYCLOAK_CLIENT_ID", "assistants-runtime-client"),
 
         fireflyUrl: optional("FIREFLY_URL", "http://firefly:8080"),
         fireflyTokenFile: optional("FIREFLY_TOKEN_FILE", "/run/firefly/pat.txt"),

@@ -37,16 +37,16 @@
  *
  * Two things about this API are easy to get wrong (the Runtime's own client says the same):
  *
- *   1. Authentication is UAA `LOCAL`: `POST /api/user/local/login` with a JSON body, and the JWT
- *      comes back in the **`access_token` response header**, not the body. Later calls use the
- *      scheme `UAABearer`, not `Bearer`.
+ *   1. Authentication is not the store's job. It runs UAA with `authentication.types=OAUTH2`
+ *      and has no login endpoint at all — Keycloak issues the token, over the direct access
+ *      grant, and the store only verifies it. The scheme is a plain `Bearer`.
  *   2. The RPC body is always a JSON **array** (a batch), even for a single call.
  */
 
 import USERS from "../fixtures/users.json" with { type: "json" };
 import type { TestUsername } from "../types";
 
-import { THINGSTORE_URL } from "./config";
+import { KEYCLOAK_CLIENT_ID, KEYCLOAK_REALM, KEYCLOAK_URL, THINGSTORE_URL } from "./config";
 
 export type A12Document = Record<string, unknown>;
 
@@ -116,19 +116,26 @@ export class ThingStore {
     }
 
     async login(): Promise<void> {
-        const response = await fetch(`${this.baseUrl}/api/user/local/login`, {
+        const url = `${KEYCLOAK_URL.replace(/\/+$/, "")}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token`;
+        const response = await fetch(url, {
             method: "POST",
-            headers: { "Content-Type": "application/json", Accept: "application/json" },
-            body: JSON.stringify({ username: this.username, password: this.password })
+            headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+            body: new URLSearchParams({
+                grant_type: "password",
+                client_id: KEYCLOAK_CLIENT_ID,
+                username: this.username,
+                password: this.password
+            })
         });
         if (!response.ok) {
-            throw new Error(`ThingStore login as ${this.username} failed: HTTP ${response.status}`);
+            const text = await response.text().catch(() => "");
+            throw new Error(`Keycloak login as ${this.username} failed: HTTP ${response.status} ${text.slice(0, 200)}`);
         }
-        const token = response.headers.get("access_token");
-        if (!token) {
-            throw new Error("ThingStore login succeeded but returned no access_token header");
+        const payload = (await response.json()) as { access_token?: string };
+        if (!payload.access_token) {
+            throw new Error(`Keycloak accepted ${this.username} but returned no access_token`);
         }
-        this.token = token;
+        this.token = payload.access_token;
     }
 
     private async rpc<T>(id: string, method: string, params: Record<string, unknown>): Promise<T> {
@@ -147,7 +154,9 @@ export class ThingStore {
                     // "unsupported locale: *". A weighted list like `en-US,en;q=0.9` fails too.
                     "Accept-Language": "en",
                     "Content-Type": "application/json;charset=utf8",
-                    Authorization: `UAABearer ${this.token}`
+                    // `Bearer`: the token is Keycloak's. `UAABearer` is for tokens UAA itself
+                    // minted, which under OAUTH2 it never does.
+                    Authorization: `Bearer ${this.token}`
                 },
                 body: JSON.stringify([{ jsonrpc: "2.0", id, method, params }])
             });

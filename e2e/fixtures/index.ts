@@ -33,7 +33,7 @@
 import { test as base, expect, type Page, type BrowserContext } from "@playwright/test";
 
 import { type SessionStorageData, type TestUsername } from "../types";
-import { getUserSessionData } from "../utils/files";
+import { getUserAuthStorageStatePath, getUserSessionData } from "../utils/files";
 
 type WorkerFixtureOptions = {
     getPageAs: (userName: TestUsername) => Promise<Page>;
@@ -52,7 +52,12 @@ export const test = base.extend<{}, WorkerFixtureOptions>({
                     sessionStorageCache.set(username, sessionData);
                 }
 
-                const context = await browser.newContext({ storageState: undefined });
+                // Both halves are needed. The cookies carry Keycloak's SSO session, without which
+                // the application's redirect to the identity provider ends on a login form; the
+                // sessionStorage carries the OIDC user the client reads the access token from.
+                const context = await browser.newContext({
+                    storageState: getUserAuthStorageStatePath(username)
+                });
                 await context.addInitScript(injectSessionStorage, sessionData);
                 contexts.push(context);
 

@@ -50,6 +50,15 @@ export const de_DE: LocalizationKeyTreeType = {
         de: "Deutsch (DE)"
     },
 
+    keycloak: {
+        processing: {
+            message: "Sie werden angemeldet…"
+        },
+        error: {
+            message: "Die Anmeldung ist fehlgeschlagen. Laden Sie die Seite neu, um es erneut zu versuchen."
+        }
+    },
+
     markdownEditor: {
         mode: {
             visual: "Visuell",

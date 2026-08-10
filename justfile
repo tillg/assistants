@@ -4,7 +4,7 @@
 
 set shell := ["bash", "-uc"]
 
-compose := "docker compose -p assistants -f compose/docker-compose.yml --env-file compose/.env"
+compose := "docker compose -p assistants -f compose/docker-compose.yml --env-file .env"
 
 # Recipes run under bash, which does not source the interactive shell profile — so tools managed
 # by sdkman and nvm are not on PATH the way they are in a terminal. Resolve them explicitly, and
@@ -15,14 +15,39 @@ gradle  := '"$(command -v gradle || echo "$HOME/.sdkman/candidates/gradle/curren
 default:
     @just --list --unsorted
 
+# ---------------------------------------------------------------------------- setup
+
+# Refuses to overwrite an existing .env, and that is not politeness: the database passwords are
+# baked into the Postgres volume when it is first created, so replacing them on a stack that has
+# already run locks the server out of its own data until `just clean` drops the volume.
+#
+# (The blank line below matters: `just --list` shows only the last comment line before a recipe,
+# so the one-line summary has to stand on its own.)
+
+# Write .env from .env.example, generating every machine credential. Run once, per clone.
+setup:
+    @node scripts/setup-env.mjs
+    @just render-secrets
+    @echo ""
+    @echo "  The login passwords in .env are development defaults — see README."
+    @echo "  Next: just dev"
+
+# Keycloak does no variable substitution of its own — it stores `${env.VAR}` as that literal
+# string (D-023) — so the passwords have to be substituted before it ever sees them.
+
+# Render compose/keycloak/*.template into the files Keycloak imports, using .env.
+render-secrets:
+    @node compose/keycloak/render.mjs
+
 # ---------------------------------------------------------------------------- the stack
 
 # Build everything and bring the whole stack up, then load the Assistants. Idempotent.
 dev: build up wait bootstrap
     @echo ""
-    @echo "  Assistants   http://localhost:8081   (admin / A12PT-admintest)"
+    @echo "  Assistants   http://localhost:8081   (human / human, via Keycloak)"
+    @echo "  Bookkeeping  http://localhost:8084   (the same login, through oauth2-proxy)"
+    @echo "  Keycloak     http://localhost:8089   (console: admin / admin)"
     @echo "  ThingStore   http://localhost:8082/actuator/health"
-    @echo "  Bookkeeping  http://localhost:8084"
     @echo ""
     @echo "  Next: just demo-data     — load a demo household"
     @echo "        just logs runtime  — watch the Assistants work"
@@ -38,8 +63,12 @@ build:
     {{gradle}} buildImages
     {{compose}} build runtime
 
+# `render-secrets` first, on every `up` and not only in `setup`: the files Keycloak imports are
+# generated from .env, and .env can be edited afterwards. Rendering here is what keeps the two
+# from drifting apart — silently, since a stale password fails only at login.
+
 # Start the stack in the background (assumes images are built).
-up:
+up: render-secrets
     {{compose}} --profile server-init up -d
 
 # Wait until every service is answering.
@@ -48,6 +77,7 @@ wait:
     @for i in $(seq 1 120); do \
         if curl -fsS http://localhost:8082/actuator/health >/dev/null 2>&1 \
            && curl -fsS http://localhost:8084/healthcheck >/dev/null 2>&1 \
+           && curl -fsS http://localhost:8089/realms/A12Realm >/dev/null 2>&1 \
            && curl -fsS http://localhost:8081 >/dev/null 2>&1; then \
             echo "the stack is up"; exit 0; \
         fi; \
@@ -83,14 +113,20 @@ logs service="":
 
 # ---------------------------------------------------------------------------- data
 
+# Every recipe below runs on the HOST, so it needs the host's spelling of each service. The
+# Runtime's own defaults are the compose network's names (`server:8080`, `keycloak:8080`), which
+# do not resolve out here. Keycloak in particular is easy to forget: the token comes from there
+# now, not from the ThingStore, so a recipe that overrides only THINGSTORE_URL fails at login.
+host_urls := "THINGSTORE_URL=http://localhost:8082 KEYCLOAK_URL=http://localhost:8089"
+
 # Load what the system IS: the two Assistants and the runtime state. Idempotent.
 bootstrap:
-    @cd runtime && THINGSTORE_URL=http://localhost:8082 npm run --silent bootstrap
+    @cd runtime && {{host_urls}} npm run --silent bootstrap
 
 # Load what the household HAS: parties, processes, documents, invoices and the books.
 # Pauses the Runtime while loading so the demo set lands as history, not as a work queue.
 demo-data:
-    @cd runtime && THINGSTORE_URL=http://localhost:8082 FIREFLY_URL=http://localhost:8084 \
+    @cd runtime && {{host_urls}} FIREFLY_URL=http://localhost:8084 \
         FIREFLY_TOKEN="$(just firefly-token)" npm run --silent demo
 
 # Wipe everything and rebuild from scratch, including the books.
@@ -108,11 +144,11 @@ firefly-token:
 
 # Stop the Runtime from doing anything (the global kill switch).
 pause:
-    @cd runtime && THINGSTORE_URL=http://localhost:8082 npx tsx src/bootstrap/cli.ts pause
+    @cd runtime && {{host_urls}} npx tsx src/bootstrap/cli.ts pause
 
 # Let it work again.
 resume:
-    @cd runtime && THINGSTORE_URL=http://localhost:8082 npx tsx src/bootstrap/cli.ts resume
+    @cd runtime && {{host_urls}} npx tsx src/bootstrap/cli.ts resume
 
 # ---------------------------------------------------------------------------- tests
 

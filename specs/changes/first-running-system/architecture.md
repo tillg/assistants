@@ -33,6 +33,11 @@ authenticates against YAML user files — D-003), no second database engine (Fir
 database inside the stack's Postgres — D-004), no message broker, no workflow engine
 (AGENTIC_LOOP.md Q5).
 
+> **Superseded on the authentication half (D-022, 2026-08-10).** There *is* a Keycloak now, plus an
+> oauth2-proxy in front of Firefly, and Firefly no longer publishes a host port. The diagram above
+> is the topology this change delivered; README.md has the current one. Everything else in this
+> document still holds.
+
 ### Why the Runtime is a separate service and not A12 server code
 
 The A12 Data Service is a platform component we configure, not an application we own — its jar
@@ -420,6 +425,14 @@ annotation" mechanism MARKDOWN_FIELDS.md describes, using native A12 features on
 Lexical's `$`-functions break. Verified in the build with `npm ls lexical`.
 
 ## Who the Runtime is
+
+> **Superseded on the protocol (D-022, 2026-08-10).** The store now runs UAA with
+> `authentication.types=OAUTH2` and has no login endpoint at all. The Runtime gets its token from
+> Keycloak's direct access grant
+> (`POST /realms/A12Realm/protocol/openid-connect/token`, `grant_type=password`, client
+> `assistants-runtime-client`) and sends it as a plain `Bearer`. The *identity* below is unchanged
+> and still the point of this section: a dedicated `runtime` user with a dedicated `runtime` role,
+> never `admin`.
 
 The Runtime authenticates against UAA `LOCAL` like any other client:
 

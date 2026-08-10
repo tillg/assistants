@@ -35,7 +35,8 @@ import { expect, type Page, test } from "@playwright/test";
 import { type TestUsername, USERNAMES } from "../../types";
 import USERS from "../../fixtures/users.json" with { type: "json" };
 import { TestID } from "../../types/testIds";
-import { ensureAuthDirExists, writeUserSessionData } from "../../utils/files";
+import { KEYCLOAK_REALM, KEYCLOAK_URL } from "../../utils/config";
+import { ensureAuthDirExists, getUserAuthStorageStatePath, writeUserSessionData } from "../../utils/files";
 
 test("Auth setup", async ({ browser }) => {
     await ensureAuthDirExists();
@@ -44,7 +45,14 @@ test("Auth setup", async ({ browser }) => {
         const context = await browser.newContext();
         const page = await context.newPage();
         const user = USERS[username];
+        // The application has no login form of its own: opening it bounces the browser to
+        // Keycloak, and only the redirect back carries a token. Keycloak's own form happens to
+        // use the same `#username` / `#password` ids the UAA one did, so the three lines below
+        // are unchanged -- but they now run against a different origin, and `fill` is what
+        // waits for the redirect to land.
         await page.goto("/");
+        const keycloakPrefix = `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/`;
+        await page.waitForURL((url) => url.href.startsWith(keycloakPrefix), { timeout: 30_000 });
         await page.fill("#username", user.username);
         await page.fill("#password", user.password);
         await page.press("#password", "Enter");
@@ -58,6 +66,11 @@ test("Auth setup", async ({ browser }) => {
 
         const sessionData = await extractSessionData(page);
         await writeUserSessionData(username, sessionData);
+        // Cookies as well as sessionStorage, and Keycloak's SSO cookie is the important one --
+        // see getUserAuthStorageStatePath. Written after the assertion above, so a context is
+        // only ever seeded from a session that demonstrably reached the application frame.
+        await context.storageState({ path: getUserAuthStorageStatePath(username) });
+        await context.close();
     }
 
     await Promise.all(USERNAMES.map((username) => setupAuthForUser(username)));

@@ -38,14 +38,29 @@ export const BASE_URL = process.env.BASE_URL || "http://localhost:8081";
 /** The ThingStore — the A12 Data Service. JSON-RPC lives under `/api/v2/rpc`. */
 export const THINGSTORE_URL = process.env.THINGSTORE_URL || "http://localhost:8082";
 
-/** Bookkeeping — Firefly III. REST lives under `/api/v1`. */
+/**
+ * Bookkeeping — Firefly III. REST lives under `/api/v1`.
+ *
+ * This is oauth2-proxy's port, not Firefly's: Firefly publishes none. `/api/` and
+ * `/healthcheck` are the routes the proxy passes straight through, because Firefly checks its
+ * personal access token on a guard of its own. Anything else here would land on Keycloak.
+ */
 export const FIREFLY_URL = process.env.FIREFLY_URL || "http://localhost:8084";
+
+/**
+ * Keycloak — the identity provider. Every login in this tier goes through it: the browser ones
+ * as a redirect to its login form, the API ones as a direct access grant against
+ * {@link KEYCLOAK_CLIENT_ID}, which is the only realm client permitting that grant.
+ */
+export const KEYCLOAK_URL = process.env.KEYCLOAK_URL || "http://localhost:8089";
+export const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM || "A12Realm";
+export const KEYCLOAK_CLIENT_ID = process.env.KEYCLOAK_CLIENT_ID || "assistants-runtime-client";
 
 /** The repository root, so the flow tests can drive `docker compose` the way `just` does. */
 export const REPO_ROOT = path.resolve(process.cwd(), "..");
 
 /** The compose invocation the justfile uses, minus the `docker` binary itself. */
-export const COMPOSE_ARGS = ["compose", "-f", "compose/docker-compose.yml", "--env-file", "compose/.env"];
+export const COMPOSE_ARGS = ["compose", "-f", "compose/docker-compose.yml", "--env-file", ".env"];
 
 /**
  * Everything these tests create carries this prefix, so a clean-up pass can tell its own

@@ -1,0 +1,65 @@
+{
+  "realm": "A12Realm",
+  "users": [
+    {
+      "username": "human",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "human@localhost",
+      "firstName": "human",
+      "lastName": "",
+      "credentials": [{ "type": "password", "value": "${HUMAN_PASSWORD}" }],
+      "realmRoles": ["user", "admin"],
+      "requiredActions": [],
+      "groups": []
+    },
+    {
+      "username": "runtime",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "runtime@localhost",
+      "firstName": "runtime",
+      "lastName": "",
+      "credentials": [{ "type": "password", "value": "${RUNTIME_PASSWORD}" }],
+      "realmRoles": ["runtime"],
+      "requiredActions": [],
+      "groups": []
+    },
+    {
+      "username": "admin",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "admin@localhost",
+      "firstName": "admin",
+      "lastName": "",
+      "credentials": [{ "type": "password", "value": "${ADMIN_PASSWORD}" }],
+      "realmRoles": ["admin"],
+      "requiredActions": [],
+      "groups": []
+    },
+    {
+      "username": "user1",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "user1@localhost",
+      "firstName": "user1",
+      "lastName": "",
+      "credentials": [{ "type": "password", "value": "${USER1_PASSWORD}" }],
+      "realmRoles": ["user"],
+      "requiredActions": [],
+      "groups": []
+    },
+    {
+      "username": "user2",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "user2@localhost",
+      "firstName": "user2",
+      "lastName": "",
+      "credentials": [{ "type": "password", "value": "${USER2_PASSWORD}" }],
+      "realmRoles": ["user"],
+      "requiredActions": [],
+      "groups": []
+    }
+  ]
+}

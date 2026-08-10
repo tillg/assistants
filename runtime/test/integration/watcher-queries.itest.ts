@@ -31,6 +31,9 @@ import { TRIGGER_ELIGIBLE_MODELS } from "../../src/domain/types.js";
 import { RUNTIME_STATE_KEY } from "../../src/watcher/watcher.js";
 import {
     describeRpc,
+    KEYCLOAK_CLIENT_ID,
+    KEYCLOAK_REALM,
+    KEYCLOAK_URL,
     LONG_AGO,
     newClient,
     newThings,
@@ -299,6 +302,9 @@ describe.skipIf(!THING_STORE_UP)("watcher queries against the live ThingStore", 
                 baseUrl: THING_STORE_URL,
                 username: THING_STORE_USER,
                 password: THING_STORE_PASSWORD,
+                keycloakUrl: KEYCLOAK_URL,
+                keycloakRealm: KEYCLOAK_REALM,
+                keycloakClientId: KEYCLOAK_CLIENT_ID,
                 locale: "en",
                 fetchImpl: (input, init) => {
                     const headers = new Headers(init?.headers);

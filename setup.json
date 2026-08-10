@@ -52,8 +52,8 @@
     "alternative": "assistants-ds-user"
   },
   "dsDatabasePassword": {
-    "current": "assistants-ds-pw",
-    "alternative": "assistants-ds-pw"
+    "current": "generated-see-dotenv",
+    "alternative": "generated-see-dotenv"
   },
   "csDatabaseName": {
     "current": "assistants-cs",
@@ -64,12 +64,12 @@
     "alternative": "assistants-cs-user"
   },
   "csDatabasePassword": {
-    "current": "assistants-cs-pw",
-    "alternative": "assistants-cs-pw"
+    "current": "generated-see-dotenv",
+    "alternative": "generated-see-dotenv"
   },
   "postgresDatabasePassword": {
-    "current": "assistants-postgres-pw",
-    "alternative": "assistants-postgres-pw"
+    "current": "generated-see-dotenv",
+    "alternative": "generated-see-dotenv"
   },
   "keycloakDatabaseName": {
     "current": "assistants-keycloak",
@@ -80,8 +80,8 @@
     "alternative": "assistants-keycloak-user"
   },
   "keycloakDatabasePassword": {
-    "current": "assistants-keycloak-pw",
-    "alternative": "assistants-keycloak-pw"
+    "current": "generated-see-dotenv",
+    "alternative": "generated-see-dotenv"
   },
   "nginxServerBaseUrlVarName": {
     "current": "NGINX_ASSISTANTS_SERVER_BASE_URL",

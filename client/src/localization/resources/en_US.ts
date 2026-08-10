@@ -50,6 +50,15 @@ export const en_US: LocalizationKeyTreeType = {
         de: "German (DE)"
     },
 
+    keycloak: {
+        processing: {
+            message: "Signing you in…"
+        },
+        error: {
+            message: "Signing in failed. Reload the page to try again."
+        }
+    },
+
     markdownEditor: {
         mode: {
             visual: "Visual",

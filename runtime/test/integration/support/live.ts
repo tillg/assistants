@@ -23,6 +23,15 @@ export const THING_STORE_PASSWORD =
     process.env["ITEST_THINGSTORE_PASSWORD"] ?? "assistants-runtime-dev";
 
 /**
+ * The identity provider, as seen from the host: `localhost:8089`, not the `keycloak:8080` the
+ * containers use. The `iss` claim is the same either way -- KC_HOSTNAME pins it -- so a token
+ * minted here is one the ThingStore accepts.
+ */
+export const KEYCLOAK_URL = process.env["ITEST_KEYCLOAK_URL"] ?? "http://localhost:8089";
+export const KEYCLOAK_REALM = process.env["ITEST_KEYCLOAK_REALM"] ?? "A12Realm";
+export const KEYCLOAK_CLIENT_ID = process.env["ITEST_KEYCLOAK_CLIENT_ID"] ?? "assistants-runtime-client";
+
+/**
  * The janitor: a second identity, used *only* to delete.
  *
  * `import/auth/roles.yaml` grants the `runtime` role DOCUMENT_CREATE and DOCUMENT_UPDATE but
@@ -83,6 +92,9 @@ export function newClient(): A12Client {
         baseUrl: THING_STORE_URL,
         username: THING_STORE_USER,
         password: THING_STORE_PASSWORD,
+        keycloakUrl: KEYCLOAK_URL,
+        keycloakRealm: KEYCLOAK_REALM,
+        keycloakClientId: KEYCLOAK_CLIENT_ID,
         locale: "en",
     });
 }
@@ -93,6 +105,9 @@ export function newJanitor(): A12Client {
         baseUrl: THING_STORE_URL,
         username: JANITOR_USER,
         password: JANITOR_PASSWORD,
+        keycloakUrl: KEYCLOAK_URL,
+        keycloakRealm: KEYCLOAK_REALM,
+        keycloakClientId: KEYCLOAK_CLIENT_ID,
         locale: "en",
     });
 }

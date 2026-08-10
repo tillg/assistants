@@ -41,8 +41,21 @@ export async function ensureAuthDirExists(): Promise<void> {
     await fs.mkdir(AUTH_DIR, { recursive: true });
 }
 
+/**
+ * Playwright's own storage state: cookies and localStorage.
+ *
+ * Cookies are the half that used to be unnecessary and now is not. Under Keycloak the
+ * application never authenticates from storage alone — its initial action always asks the
+ * identity provider, and it is Keycloak's SSO cookie that makes the round trip silent. A context
+ * without that cookie lands on the login form no matter what else was restored into it.
+ */
 export function getUserAuthStorageStatePath(username: TestUsername): string {
     return path.join(AUTH_DIR, `${username}.json`);
+}
+
+/** The sessionStorage dump, which Playwright's storage state does not cover. */
+export function getUserSessionStoragePath(username: TestUsername): string {
+    return path.join(AUTH_DIR, `${username}.session.json`);
 }
 
 export async function deleteAuthDir(): Promise<void> {
@@ -50,10 +63,10 @@ export async function deleteAuthDir(): Promise<void> {
 }
 
 export async function writeUserSessionData(username: TestUsername, sessionData: SessionStorageData): Promise<void> {
-    await fs.writeFile(getUserAuthStorageStatePath(username), JSON.stringify(sessionData, null, 2));
+    await fs.writeFile(getUserSessionStoragePath(username), JSON.stringify(sessionData, null, 2));
 }
 
 export async function getUserSessionData(username: TestUsername): Promise<SessionStorageData> {
-    const data = await fs.readFile(path.join(AUTH_DIR, `${username}.json`), "utf-8");
+    const data = await fs.readFile(getUserSessionStoragePath(username), "utf-8");
     return JSON.parse(data);
 }
