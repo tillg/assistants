@@ -232,6 +232,33 @@ export class LoopDriver {
         if (unresolved) {
             const outcome = await this.reconcile(stored, assistant, unresolved);
             if (!outcome) {
+                // The intent gets a result even though nothing could answer it, for two reasons.
+                // `unresolvedIntent` would otherwise find it again on the next wake and escalate
+                // again — one question per scan, which is the noise ADR-0015's cap exists to
+                // prevent, except that answering could never clear it. And a tool call with no
+                // tool result is rejected outright by both OpenAI and Anthropic, so the
+                // Conversation could not reach a real model afterwards either.
+                //
+                // It says **unknown**, not failed: ADR-0012 requires an intent without a result to
+                // be treated as unknown, never as failed, and "Error: …" reads as failed and
+                // invites the retry that could do the work twice. JSON, matching the shape the
+                // ordinary pending result already uses, so a model that has learned one reads the
+                // other.
+                appendEntry(conversation, {
+                    role: "tool",
+                    kind: "tool-result",
+                    toolName: unresolved.toolName ?? "",
+                    toolResult: JSON.stringify({
+                        interrupted: true,
+                        outcome: "unknown",
+                        retry: false,
+                        note:
+                            "This call was interrupted and nothing can say whether it took effect. " +
+                            "Treat it as unknown — it may have completed. Do not call it again: the " +
+                            "User has been asked to check, and their answer will arrive as a message.",
+                    }),
+                    idempotencyKey: unresolved.idempotencyKey ?? "",
+                });
                 await this.escalate(
                     stored,
                     assistant,
