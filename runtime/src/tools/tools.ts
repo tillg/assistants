@@ -14,6 +14,7 @@ import type { ModelSpec } from "../a12/things.js";
 import { FireflyError } from "../connectors/firefly.js";
 import type { FireflyConnector, PostingSplit } from "../connectors/firefly.js";
 import type { ToolContext, ToolDefinition, ToolOutcome } from "./registry.js";
+import { isAnswered } from "../watcher/watcher.js";
 import {
     isTriggerEligible,
     type Assistant,
@@ -451,7 +452,10 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
                 context.idempotencyKey,
             );
             if (!existing) return undefined;
-            return existing.data.answeredAt
+            // `isAnswered`, not `answeredAt` — the same rule the watcher's scan uses. Nothing stamps
+            // the timestamp, so keying on it here meant recovery and the scan held two different
+            // answers to "has the User answered?" for one question.
+            return isAnswered(existing.data)
                 ? { kind: "value", value: { answered: true } }
                 : { kind: "pending", waitingFor: "user", questionId: existing.thingId };
         },
@@ -817,7 +821,8 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
                     context.idempotencyKey,
                 );
                 if (!existing) return undefined;
-                return existing.data.answeredAt
+                // Same rule as the watcher's scan; see `askUser.reconcile` above.
+                return isAnswered(existing.data)
                     ? { kind: "value", value: { done: true } }
                     : { kind: "pending", waitingFor: "tool", questionId: existing.thingId };
             },
