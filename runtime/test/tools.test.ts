@@ -190,6 +190,53 @@ describe("thingstore.update", () => {
     });
 });
 
+describe("the idempotency key creation is keyed on", () => {
+    it("deduplicates a sequential retry under the same key", async () => {
+        const harness = buildHarness([]);
+        const key = "party:dr-meyer";
+        const first = await harness.things.create(SPECS.Party_DM, { name: "Dr Meyer", idempotencyKey: key });
+        const second = await harness.things.create(SPECS.Party_DM, { name: "Dr Meyer", idempotencyKey: key });
+
+        expect(second.thingId).toBe(first.thingId);
+        expect(await harness.things.search(SPECS.Party_DM, undefined, 100)).toHaveLength(1);
+    });
+
+    it("refuses a blank key instead of silently switching deduplication off", async () => {
+        // `if (data.idempotencyKey)` treats "" as "no key", so a caller that computed a blank one got
+        // no deduplication and no warning — on the exact code path that exists to make a retried Turn
+        // safe. Omitting the field is a legitimate "I have no key"; supplying an empty one is a bug in
+        // the caller, and it should say so rather than quietly do the unsafe thing.
+        const harness = buildHarness([]);
+        await expect(
+            harness.things.create(SPECS.Party_DM, { name: "Blank", idempotencyKey: "   " }),
+        ).rejects.toThrow(/idempotency key/i);
+    });
+
+    it("refuses a key longer than the store can search for", async () => {
+        // A key over 100 characters fails inside the *lookup query* rather than being caught — the
+        // least debuggable place for it, because the failure names `exact_match` and not the key.
+        const harness = buildHarness([]);
+        await expect(
+            harness.things.create(SPECS.Party_DM, { name: "Long", idempotencyKey: "k".repeat(150) }),
+        ).rejects.toThrow(/100/);
+    });
+
+    it("converges on one Thing when two callers race under one key", async () => {
+        // Search-then-create with nothing atomic between them, and A12 has no unique index. Latent
+        // today (one Runtime replica, and a lease serialises a Conversation's Turns) but it is the
+        // guarantee ADR-0012 and every `reconcile` lean on, so it should not silently be false.
+        const harness = buildHarness([]);
+        const key = "party:raced";
+        const [a, b] = await Promise.all([
+            harness.things.create(SPECS.Party_DM, { name: "Raced", idempotencyKey: key }),
+            harness.things.create(SPECS.Party_DM, { name: "Raced", idempotencyKey: key }),
+        ]);
+
+        // Both callers end up referring to the same Thing, whichever of them won.
+        expect(b.thingId).toBe(a.thingId);
+    });
+});
+
 describe("bookkeeping.postTransaction", () => {
     it("names the field and the account the model used when Firefly refuses", async () => {
         // `FireflyError.details` carries per-field reasons and nothing ever read them, so what
