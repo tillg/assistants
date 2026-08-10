@@ -79,7 +79,10 @@ export class FakeFirefly {
     }
 }
 
-export function buildHarness(steps: ScriptedStep[]): Harness {
+export function buildHarness(
+    steps: ScriptedStep[],
+    options: { maxBirthsPerHour?: number } = {},
+): Harness {
     const store = new MemoryStore();
     const things = new ThingRepository(store as unknown as A12Client);
     const firefly = new FakeFirefly();
@@ -184,7 +187,12 @@ export function buildHarness(steps: ScriptedStep[]): Harness {
         }),
     );
 
-    const watcher = new Watcher({ things, driver, maxBirthsPerHour: 100, birth: birthConversation });
+    const watcher = new Watcher({
+        things,
+        driver,
+        maxBirthsPerHour: options.maxBirthsPerHour ?? 100,
+        birth: birthConversation,
+    });
 
     return {
         store,

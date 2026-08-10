@@ -1,0 +1,161 @@
+/**
+ * Scan 1 and the watermark.
+ *
+ * `loop.test.ts` covers what happens inside a Turn. Nothing covered the query that decides which
+ * Things become Turns in the first place — which is how four separate ways of losing a Thing for
+ * good got through. The watermark's invariant is the whole of it: **birth is exactly-once by
+ * query**, and the watermark may never pass a Thing that has not been decided.
+ */
+
+import { describe, expect, it } from "vitest";
+import { buildHarness, nowIso, type Harness } from "./support/harness.js";
+import { SPECS } from "../src/a12/things.js";
+import { RUNTIME_STATE_KEY } from "../src/watcher/watcher.js";
+import type { Conversation, RuntimeState, Stored } from "../src/domain/types.js";
+
+/** The watermark the Runtime would have had when the batch landed. */
+async function seedState(harness: Harness, watermark: string): Promise<void> {
+    await harness.things.create(SPECS.RuntimeState_DM, {
+        singletonKey: RUNTIME_STATE_KEY,
+        paused: false,
+        birthsThisHour: 0,
+        birthWindowStartedAt: nowIso(),
+        watermark,
+        idempotencyKey: `runtime-state:${RUNTIME_STATE_KEY}`,
+    });
+}
+
+function state(harness: Harness): Promise<Stored<RuntimeState>> {
+    return harness.watcher.loadState();
+}
+
+async function conversations(harness: Harness): Promise<Stored<Conversation>[]> {
+    return harness.things.search<Conversation>(SPECS.Conversation_DM, undefined, 1000);
+}
+
+async function subjectsBirthed(harness: Harness): Promise<Set<string>> {
+    return new Set((await conversations(harness)).map((row) => row.data.subjectThingId ?? ""));
+}
+
+describe("the materialised scan (scan 1)", () => {
+    it("does not lose Things when more than one page of candidates is waiting", async () => {
+        // The query asks for one page of 100. With 150 waiting, the 50 it did not look at were
+        // still stepped over, because the new watermark was the *maximum* createdAt in an
+        // arbitrary window rather than the end of a contiguous run. README's "birth is
+        // exactly-once by query" quietly became at-most-once — reachable by any bulk import.
+        const t0 = Date.now() - 3_600_000;
+        const harness = buildHarness([], { maxBirthsPerHour: 1000 });
+        await harness.seedAssistant();
+        await seedState(harness, nowIso(new Date(t0)));
+
+        // `createdAt` ascends with the index but the rows are inserted newest-50 first: createdAt
+        // is a field a connector sets from the source (an email's date), not the insert time.
+        const order = [...Array(50).keys()].map((index) => index + 100).concat([...Array(100).keys()]);
+        const ids: string[] = [];
+        for (const index of order) {
+            const thing = await harness.things.create(SPECS.Document_DM, {
+                title: `bulk ${index}`,
+                createdAt: nowIso(new Date(t0 + 1_000 + index * 1_000)),
+                idempotencyKey: `bulk-${index}`,
+            });
+            ids.push(thing.thingId);
+        }
+
+        // Four scans is more than enough for two pages; the point is that it converges at all.
+        for (let pass = 0; pass < 4; pass += 1) await harness.watcher.scan();
+
+        const birthed = await subjectsBirthed(harness);
+        const missing = ids.filter((id) => !birthed.has(id));
+        expect(missing).toHaveLength(0);
+    });
+
+    it("holds the watermark behind a Thing whose creating Conversation is still running", async () => {
+        // The Receptionist creating an Invoice while its own Conversation still runs. The Invoice is
+        // correctly skipped on that pass — and any Thing created a second later used to bury it,
+        // because the `continue` for a running creator happened before the watermark logic could
+        // see that anything had been set aside.
+        const t0 = Date.now() - 3_600_000;
+        const harness = buildHarness([], { maxBirthsPerHour: 1000 });
+        await harness.seedAssistant();
+        const seededWatermark = nowIso(new Date(t0));
+        await seedState(harness, seededWatermark);
+
+        // A Conversation that is still running, and a Document it created.
+        const blocker = await harness.things.create(SPECS.Conversation_DM, {
+            assistantKey: "receptionist",
+            status: "running",
+            leaseUntil: nowIso(new Date(Date.now() + 600_000)),
+            idempotencyKey: "blocker",
+        });
+        const skipped = await harness.things.create(SPECS.Document_DM, {
+            title: "created by a conversation that is still running",
+            createdAt: nowIso(new Date(t0 + 60_000)),
+            createdByConversationId: blocker.thingId,
+            idempotencyKey: "skipped",
+        });
+        const ordinary = await harness.things.create(SPECS.Document_DM, {
+            title: "ordinary, and later",
+            createdAt: nowIso(new Date(t0 + 120_000)),
+            idempotencyKey: "ordinary",
+        });
+
+        await harness.watcher.scan();
+
+        // The later Thing is birthed immediately — freezing the watermark must not stall throughput.
+        let birthed = await subjectsBirthed(harness);
+        expect(birthed.has(ordinary.thingId)).toBe(true);
+        expect(birthed.has(skipped.thingId)).toBe(false);
+        // But the watermark did not step over the one that was set aside.
+        expect((await state(harness)).data.watermark).toBe(seededWatermark);
+
+        // When the blocking Conversation finishes, the skipped Thing is birthed after all.
+        await harness.things.update(SPECS.Conversation_DM, blocker.docRef, {
+            ...blocker.data,
+            status: "done",
+            leaseUntil: "",
+        });
+        await harness.watcher.scan();
+
+        birthed = await subjectsBirthed(harness);
+        expect(birthed.has(skipped.thingId)).toBe(true);
+    });
+
+    it("does not let one Model's progress bury another Model's skipped Thing", async () => {
+        // The four trigger-eligible Models share one watermark, so `newestSeen` was raised by any
+        // later Thing in the same pass — including a Thing of a different Model.
+        const t0 = Date.now() - 3_600_000;
+        const harness = buildHarness([], { maxBirthsPerHour: 1000 });
+        await harness.seedAssistant({
+            triggers: [
+                { kind: "thing-materialised", modelFilter: "Document_DM" },
+                { kind: "thing-materialised", modelFilter: "Invoice_DM" },
+            ],
+        });
+        const seededWatermark = nowIso(new Date(t0));
+        await seedState(harness, seededWatermark);
+
+        const blocker = await harness.things.create(SPECS.Conversation_DM, {
+            assistantKey: "receptionist",
+            status: "running",
+            leaseUntil: nowIso(new Date(Date.now() + 600_000)),
+            idempotencyKey: "blocker",
+        });
+        const blockedInvoice = await harness.things.create(SPECS.Invoice_DM, {
+            invoiceNumber: "BLOCKED-1",
+            createdAt: nowIso(new Date(t0 + 60_000)),
+            createdByConversationId: blocker.thingId,
+            idempotencyKey: "blocked-invoice",
+        });
+        await harness.things.create(SPECS.Document_DM, {
+            title: "a different Model, later",
+            createdAt: nowIso(new Date(t0 + 120_000)),
+            idempotencyKey: "later-document",
+        });
+
+        await harness.watcher.scan();
+
+        expect((await subjectsBirthed(harness)).has(blockedInvoice.thingId)).toBe(false);
+        // The Document's progress must not carry the watermark past the Invoice that was skipped.
+        expect((await state(harness)).data.watermark! < nowIso(new Date(t0 + 60_000))).toBe(true);
+    });
+});

@@ -67,17 +67,53 @@ export class MemoryStore {
             (row) => row.documentModelName === spec.targetDocumentModel,
         );
         const matching = all.filter((row) => matches(row.document, spec.constraint));
+        // `sort` and a real `pageNumber`, because the live store has both — measured, not assumed.
+        // A fake that ignored them agreed with the watermark bug: it made "the first page" and
+        // "the oldest hundred" look like the same thing, which they are not.
+        const sorted = sortRows(matching, spec.sort);
         const pageSize = spec.paging?.pageSize ?? 100;
+        const pageNumber = spec.paging?.pageNumber ?? 0;
         return {
             fullSize: matching.length,
-            entries: matching.slice(0, pageSize).map((row) => ({
-                type: "ROOT",
-                docRef: row.docRef,
-                documentModelName: row.documentModelName,
-                document: structuredClone(row.document),
-            })),
+            entries: sorted
+                .slice(pageNumber * pageSize, (pageNumber + 1) * pageSize)
+                .map((row) => ({
+                    type: "ROOT",
+                    docRef: row.docRef,
+                    documentModelName: row.documentModelName,
+                    document: structuredClone(row.document),
+                })),
         };
     }
+}
+
+/**
+ * Apply `QuerySpec.sort`. Note `direction` and `nullHandling` — the server's own field names, not
+ * the obvious ones, and getting them wrong is rejected at query time rather than ignored.
+ *
+ * Unsorted stays insertion order, which is what the real store does *not* promise. That is
+ * deliberate: a caller that needs an order has to ask for one.
+ */
+function sortRows(rows: Row[], sort: QuerySpec["sort"]): Row[] {
+    if (!sort || sort.length === 0) return rows;
+    return [...rows].sort((left, right) => {
+        for (const term of sort) {
+            const a = valueAt(left.document, term.field);
+            const b = valueAt(right.document, term.field);
+            const aMissing = a === undefined || a === null || a === "";
+            const bMissing = b === undefined || b === null || b === "";
+            if (aMissing || bMissing) {
+                if (aMissing && bMissing) continue;
+                return (aMissing ? 1 : -1) * (term.nullHandling === "NULLS_FIRST" ? -1 : 1);
+            }
+            let compared = term.ignoreCase
+                ? String(a).toLowerCase().localeCompare(String(b).toLowerCase())
+                : String(a).localeCompare(String(b));
+            if (term.direction === "DESC") compared = -compared;
+            if (compared !== 0) return compared;
+        }
+        return 0;
+    });
 }
 
 /** Resolve an A12 query path (`/Conversation/Status`) against a document. */
