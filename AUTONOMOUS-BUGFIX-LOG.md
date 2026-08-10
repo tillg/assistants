@@ -65,6 +65,26 @@ cd runtime && npm run test:integration   51/51                                  
 cd client && npm test             288/288                                        exit 0
 ```
 
+## Where it ended
+
+```
+node import/validate-models.mjs            26 models checked — 0 error(s), 0 warning(s)
+node import/validate-models.selftest.mjs   10 validator checks exercised — 0 not enforced
+just check                                 clean (now including e2e lint + format, and the docs checker)
+cd runtime && npm test                     77 passed   (was 44)
+cd runtime && npm run test:integration     64 passed   (was 51)
+cd client  && npm test                    288 passed
+cd e2e     && npm test                     30 passed   (was 21 collected, 2 fixme, 1 silently skipping)
+```
+
+Every tier green, and **nothing skipped or `fixme`d** — which was not true at the start in three
+separate places: the two forms BUG-15 broke, and the Invoices guard that had been skipping since the
+day it was written.
+
+The `0 warnings` and the "0 not enforced" lines are the two that took real work: the first needed a
+regression `495310a` left behind to be undone, and the second needed the validator to be tested
+rather than trusted.
+
 ---
 
 ## Re-verification: the result
@@ -223,3 +243,72 @@ somebody who edits a prompt in the UI needs to know it will not survive the next
 | 41 | live | fifteen ADRs, and a check against the directory | `b537443` test, `1b64e4c` fix |
 | 42 | live | ten lint errors and two format failures fixed; `e2e` wired into `just check` | `7c05bd3` test, `33a8ea1` fix |
 | 43 | live | `header.id` compared to the filename; `header.labels` must be bilingual | `095f52e` test, `2b9be3a` fix |
+| 03 | live | the `thing:` tag is asked whether this exact posting is already booked, comparing content and never the tag alone | `18b2b83` test, `57d1130` fix |
+| 04 | live | `listBudgets(period)` joins `/budgets` with `/budget-limits`; `spent` is a number and never null | `66dca38` test, `b187bf2` fix |
+| 16 | live | posts sharing a key are chained, so the second one's probe runs after the first | `18b2b83` test, `57d1130` fix |
+| 17 | live | a currency that differs from the account's is refused, and `currencyCode` is exposed to the model at last | `d481fce` test, `6cc8c9a` fix |
+| 18 | live | `resolveCategoryId`, mirroring `resolveAccountId` | `8f60b17` test, `5214885` fix |
+| 19 | live | a 422 naming a duplicate is checked against the store before retrying without the flag | `18b2b83` test, `57d1130` fix |
+| 23 | live | `ASSISTANT_WRITE` in `roles.yaml` + a policy on the three write scopes; bootstrap runs as the User. **Read half deliberately not fixed.** | `ea10b01` |
+| 32 | live | all candidates collected; an ambiguous name is refused, naming each match | `d481fce` test, `6cc8c9a` fix |
+| 33 | partly | internal account types filtered out of the chart, as a deny-list | `8f60b17` test, `5214885` fix |
+| 34 | live | documented in CONVENTIONS.md; not fixable — vendor behaviour | `88e9db7` |
+| 36 | live | documented; A12 offers no form save hook that could stamp it | `88e9db7` |
+| 37 | obsolete | recorded as not reproducible | `d783b95` |
+
+## Found by doing the work, not in BUGS.md
+
+Four defects this run turned up that no entry covers. Each is fixed.
+
+1. **`495310a` deleted nine `fieldConfiguration` entries from `Conversation_FM`** while hunting
+   BUG-15. That was not the cause, and it cost the transcript its three most useful columns
+   (`ToolName`, `ToolArgs`, `ToolResult` — which is what the validator's three standing warnings
+   were) and made every transcript field editable by the User. Restored: `2368568`. The validator is
+   now at **0 errors and 0 warnings**, which matters beyond tidiness — with three standing warnings,
+   "0 warnings" could not signal that a *new* unexposed field had appeared.
+
+2. **`just restart server` strands the Runtime**, not only the frontend. The Runtime holds a
+   keep-alive pool to the server's old container IP; after a recreate, every scan fails with a bare
+   `TypeError: fetch failed`. Measured 51 consecutive failures while a *fresh* process in the same
+   container reached the store perfectly well — so it is the pool, and it does not recover on its
+   own. The recipe already compensated for the frontend for a sibling reason. Fixed: `341f182`.
+
+3. **Both e2e flow specs asserted `AnsweredAt` was set** — BUG-01's bug written down as an
+   expectation. They only passed because the page object filled the field in for the User. Inverted,
+   so those two specs are now the guard for the file's critical finding: `3dd1e72`.
+
+4. **The forms-open guard skipped the Invoices module on every run since it was written**, because it
+   named the cell value `EUR` and `Invoice_OM` has no currency column. A structural guard coupled to
+   demo fixtures, failing silently — which is worse than failing loudly. It now opens the first row,
+   whatever it is: `78a296b`.
+
+Two of those four (2 and 4) are the same shape as the findings in `BUGS.md` itself: a real defect
+whose only symptom was silence.
+
+## Still open, deliberately
+
+- **BUG-23's read half.** `thingstore.search` has no read restriction, so an Assistant granted it can
+  read every other Assistant's system prompt, every Conversation transcript and the `RuntimeState`.
+  Closing it needs a policy on the `Query` scope. Recorded in BUGS.md.
+- **BUG-20's four deferred Operations** — `reverseTransaction`, `markCleared`, `importStatement`,
+  `exportBooks`. `reverseTransaction` is the one worth building next, and `listTransactions` existing
+  now makes it possible.
+- **BUG-43's two further defects**: the `Multilingual` object label shape (28 occurrences) is still
+  invisible to the bilingual check, and the warning names the file but not the field.
+- **Multi-currency** is refused rather than recorded. Doing it properly needs `foreign_amount` +
+  `foreign_currency_code` and the currency enabled in Firefly, which the bootstrap does not do.
+- **The non-atomic RuntimeState re-read** (BUG-07's deeper half) cannot be closed without
+  compare-and-swap, which A12 does not offer.
+
+## Two defects in this run's own work, found by reviewing it
+
+Recorded because they are the kind of thing a reviewer should expect to find, and because both were
+the *same mistake the original bugs were made of*.
+
+- the BUG-22 duplicate check ran **after** a successful write and was allowed to throw, so a failed
+  *check* would have reported a created Thing as an error. Made non-fatal.
+- the BUG-33 account filter was an **allow-list**, which is exactly BUG-02: an allow-list that did
+  not know Firefly's plural silently hid the payables account. Mine would have hidden a `cash`
+  account, or any type nobody anticipated. Inverted to a deny-list of the three internal types.
+
+Both in `86bd489`.
