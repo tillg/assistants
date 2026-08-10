@@ -355,7 +355,9 @@ Every Model also carries `idempotencyKey`, `createdByConversationId`, `createdAt
 The first is what makes creation retry-safe — the ThingStore assigns the identifier, so
 `thingstore.create` is defined as *search-then-create*. The last two are ours rather than A12's
 `__meta` because `__meta.createdAt` has second granularity with inclusive range bounds, which
-double-counts the watermark boundary.
+double-counts the watermark boundary. Note that `updatedAt` therefore records the last **Runtime**
+write: a UI save moves only `__meta.modifiedAt`, because the four machine fields are on no form and
+A12's form engine offers no save hook that could reach one.
 
 ## Adding a Thing
 

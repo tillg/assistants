@@ -141,6 +141,15 @@ Every `_DM` root group ends with these, in this order:
 because `__meta.createdAt` has second granularity with inclusive range bounds, which
 double-counts the watermark boundary.
 
+`updatedAt` records **the last Runtime write, not the last write.** It is stamped by
+`ThingRepository.update`, and a UI save cannot stamp it: the four machine fields are deliberately
+absent from every form (below), and A12's form engine offers no save hook that could reach one — the
+only supported saga options are an attachment loader and a document-descriptor selector. So after a
+User answers an Open Question in the browser, `__meta.modifiedAt` moves and `UpdatedAt` does not. For
+"when did anyone last touch this Thing", read `__meta.modifiedAt`; its second granularity is only a
+problem for the watermark, which keys on `createdAt`. Nothing filters on `updatedAt` today, and
+anything that starts to has to decide which of those two questions it is asking.
+
 None of the four appears on any form except where a human genuinely benefits (`createdAt` in a
 Conversation header). They are on the allow-list of intentionally unexposed fields in the model
 validation test.
@@ -165,6 +174,27 @@ EnumerationType, NumberType, StringType, TimeType, CustomFieldType`.
 | Human-only choice | `EnumerationType` `{values: [{value, label[]}]}` — only where the Runtime never filters |
 
 Repeating group: `"Group": {"repeatability": 50, "elements": [...]}`. `1` = single.
+
+### Which characters a string field accepts
+
+No charset is configured anywhere in this repo, and with none configured the kernel's character check
+degenerates to "reject any UTF-16 surrogate" — which is exactly every non-BMP codepoint. In practice:
+
+* **Accepted**, on every plain `StringType`: umlauts, ß, €, curly quotes, en dashes, non-breaking
+  spaces, Cyrillic, Chinese, tabs, backslashes, colons, quotes. All verified as round-tripping.
+* **Refused**: emoji and anything else outside the Basic Multilingual Plane, with
+  `ErrorCode: ZeichenNichtImZeichensatz`.
+* **Exempt**: any field carrying `noValueValidation: true` — which is every markdown field, and also
+  `Assistant.SystemPrompt`, `OpenQuestion.Prompt`/`Text`, `Conversation.Result`/`LastError` and every
+  `Entries` text field. Seventeen fields across nine models.
+
+The consequence to design around: an invoice's `ExtractedText` may contain an emoji and a `Title`
+derived from it may not, so an Assistant copying text from one field into another can be refused for a
+reason that is nothing to do with what it was trying to do. It does at least now *learn* that reason —
+`A12RpcError` carries the store's own explanation rather than a generic sentence (BUG-14).
+
+Do not reach for the kernel's `deactivateLegalCharCheck` annotation to widen this: it is declared
+internal-use-only by the vendor and would change validation for every field in the model.
 
 ## Annotations
 
