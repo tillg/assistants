@@ -4,7 +4,7 @@
   "description": "Assistants \u2014 a personal system of LLM-driven assistants, on A12",
   "repository": {
     "type": "git",
-    "url": "https://github.com/tillg/assistents.git"
+    "url": "https://github.com/tillg/assistants.git"
   },
   "keywords": [
     "a12",
