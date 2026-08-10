@@ -142,6 +142,16 @@ export class Watcher {
             return 0;
         }
 
+        // A Thing the User created in the web application carries no `createdAt`: the four machine
+        // fields are on no form and A12's form engine has no save hook that could stamp one. The
+        // scan's `date_range` cannot match an absent value, so such a Thing would never be seen —
+        // the User's own way of starting work, doing nothing at all.
+        //
+        // `createdAt` is the Runtime's field, so the Runtime fills it in. Stamping rather than
+        // special-casing the query keeps one code path for birth and one meaning for the watermark;
+        // the Thing is picked up by the very next scan through the ordinary route.
+        await this.stampMissingCreatedAt();
+
         for (const model of TRIGGER_ELIGIBLE_MODELS) {
             const spec = (SPECS as Record<string, ModelSpec>)[model]!;
             // `createdAt` is ours, not `__meta.createdAt`, because the latter is second-granular
@@ -267,6 +277,58 @@ export class Watcher {
             await this.savePreservingHumanFields(state);
         }
         return births;
+    }
+
+    /**
+     * Give a Thing with no `createdAt` one, so the materialised scan can see it.
+     *
+     * Only the User's own writes land here — everything the Runtime creates goes through
+     * `ThingRepository.create`, which stamps it. The stamp is "when the Runtime first noticed",
+     * which is the closest honest thing available: `__meta.createdAt` is what A12 recorded, but it
+     * is second-granular with inclusive range bounds, which is the reason this project keeps its own
+     * field in the first place.
+     *
+     * Deliberately not the same thing as birthing it here: this only fills the field in, and the
+     * next scan births it through exactly the same path as everything else.
+     */
+    private async stampMissingCreatedAt(): Promise<void> {
+        for (const model of TRIGGER_ELIGIBLE_MODELS) {
+            const spec = (SPECS as Record<string, ModelSpec>)[model]!;
+            let orphans: Stored<Record<string, unknown>>[];
+            try {
+                orphans = await this.deps.things.search<Record<string, unknown>>(
+                    spec,
+                    unset(fieldPath(spec, "createdAt")),
+                    PAGE_SIZE,
+                );
+            } catch (error) {
+                log.error("could not look for Things with no createdAt", {
+                    model,
+                    error: describeError(error),
+                });
+                continue;
+            }
+            for (const thing of orphans) {
+                try {
+                    await this.deps.things.update(spec, thing.docRef, {
+                        ...thing.data,
+                        createdAt: nowIso(),
+                    });
+                    log.info("stamped createdAt on a Thing that had none", {
+                        model,
+                        thingId: thing.thingId,
+                    });
+                } catch (error) {
+                    // Left for the next pass rather than retried here: a failure that repeats is
+                    // visible in the log, and a Thing without the field is simply not yet seen.
+                    log.warn("could not stamp createdAt", {
+                        model,
+                        thingId: thing.thingId,
+                        error: describeError(error),
+                    });
+                }
+            }
+        }
     }
 
     // ---------------------------------------------------------------- scan 2: answered
