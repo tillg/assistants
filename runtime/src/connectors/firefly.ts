@@ -19,6 +19,25 @@ import { log } from "../log.js";
 /** No outbound call may hang the scan loop. */
 const REQUEST_TIMEOUT_MS = 20_000;
 
+/**
+ * The account types a transaction can actually be posted to or from.
+ *
+ * Note the plural in `liabilities`: Firefly's *write* API takes `liability` and its *read* API
+ * answers `liabilities` (the mismatch behind BUG-02), so both spellings are accepted here. Getting
+ * that wrong would silently drop the payables account from the chart and from `resolveAccountId`,
+ * which is a worse version of the bug it comes from — hence the assertion beside this filter's test.
+ */
+function isBookable(type: string): boolean {
+    const normalised = type.toLowerCase();
+    return (
+        normalised === "asset" ||
+        normalised === "expense" ||
+        normalised === "revenue" ||
+        normalised.startsWith("liabilit") ||
+        normalised === "debt"
+    );
+}
+
 export interface FireflyAccount {
     id: string;
     name: string;
@@ -53,6 +72,7 @@ export class FireflyError extends Error {
 
 export class FireflyConnector {
     private accountCache: FireflyAccount[] | undefined;
+    private categoryCache: Array<{ id: string; name: string }> | undefined;
     private token: string;
 
     constructor(
@@ -116,13 +136,21 @@ export class FireflyConnector {
         const { data } = await this.call<{
             data: Array<{ id: string; attributes: Record<string, unknown> }>;
         }>("GET", "/accounts?limit=200");
-        this.accountCache = (data.data ?? []).map((row) => ({
-            id: row.id,
-            name: String(row.attributes["name"] ?? ""),
-            type: String(row.attributes["type"] ?? ""),
-            currentBalance: row.attributes["current_balance"] as string | undefined,
-            currencyCode: row.attributes["currency_code"] as string | undefined,
-        }));
+        this.accountCache = (data.data ?? [])
+            .map((row) => ({
+                id: row.id,
+                name: String(row.attributes["name"] ?? ""),
+                type: String(row.attributes["type"] ?? ""),
+                currentBalance: row.attributes["current_balance"] as string | undefined,
+                currencyCode: row.attributes["currency_code"] as string | undefined,
+            }))
+            // Firefly's own bookkeeping accounts are not part of a chart of accounts anyone books
+            // to. `initial-balance` and `reconciliation` refuse every posting with a 422 quoting an
+            // internal id and an empty name — unactionable — so offering them to a model that is
+            // told to "always look here before booking" is offering it a trap.
+            //
+            // `resolveAccountId` and `getBalance` read this same cache, so they inherit the filter.
+            .filter((account) => isBookable(account.type));
         return this.accountCache;
     }
 
@@ -146,6 +174,48 @@ export class FireflyConnector {
             `No account named "${name}". Existing accounts: ${refreshed
                 .map((account) => account.name)
                 .join(", ")}`,
+            404,
+        );
+    }
+
+    /**
+     * The categories that exist. Cached like the chart of accounts, and for the same reason.
+     */
+    async listCategories(refresh = false): Promise<Array<{ id: string; name: string }>> {
+        if (this.categoryCache && !refresh) return this.categoryCache;
+        const { data } = await this.call<{
+            data?: Array<{ id: string; attributes: Record<string, unknown> }>;
+        }>("GET", "/categories?limit=200");
+        this.categoryCache = (data.data ?? []).map((row) => ({
+            id: row.id,
+            name: String(row.attributes["name"] ?? ""),
+        }));
+        return this.categoryCache;
+    }
+
+    /**
+     * Resolve a category name to an id, or fail loudly.
+     *
+     * Exactly the same argument as `resolveAccountId`, and it was missing for the same field on the
+     * same request: handed a `category_name` it does not know, Firefly **creates** the category. So a
+     * typo did not fail — it quietly grew the taxonomy. `category_id` is honoured and a bogus one is
+     * rejected, which is what makes resolving possible at all.
+     */
+    async resolveCategoryId(name: string): Promise<string> {
+        const wanted = name.trim().toLowerCase();
+        const found = (await this.listCategories()).find(
+            (category) => category.name.toLowerCase() === wanted,
+        );
+        if (found) return found.id;
+
+        const refreshed = await this.listCategories(true);
+        const retry = refreshed.find((category) => category.name.toLowerCase() === wanted);
+        if (retry) return retry.id;
+
+        throw new FireflyError(
+            `No category named "${name}". Existing categories: ${
+                refreshed.map((category) => category.name).join(", ") || "(none yet)"
+            }. Leave the category out, or ask the User to create it.`,
             404,
         );
     }
@@ -254,7 +324,12 @@ export class FireflyConnector {
                 source_id: sourceId,
                 destination_id: destinationId,
                 ...(split.budgetName ? { budget_name: split.budgetName } : {}),
-                ...(split.categoryName ? { category_name: split.categoryName } : {}),
+                // The *id*, never the name: handed a name it does not know, Firefly creates the
+                // category — the one thing this Connector exists to prevent, and it was doing it on
+                // the same request where it carefully resolves both account names.
+                ...(split.categoryName
+                    ? { category_id: await this.resolveCategoryId(split.categoryName) }
+                    : {}),
                 ...(split.notes ? { notes: split.notes } : {}),
                 external_id: input.externalId,
                 ...(input.thingId

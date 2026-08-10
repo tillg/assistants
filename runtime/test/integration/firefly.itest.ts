@@ -224,7 +224,10 @@ describe.skipIf(!FIREFLY_UP)("Firefly connector against the live Firefly III", (
         // this.
         const before = await listCategoryNames();
         const externalId = `${ITEST}bad-category:${Date.now()}`;
-        const bogus = `${ITEST}Medcal`;
+        // Unique per run. A fixed name would be *created* by the first (red) run and then found by
+        // the fix, so the test would pass for the wrong reason ever after — which is exactly what
+        // happened while writing it.
+        const bogus = `${ITEST}Medcal-${Date.now()}`;
 
         await expect(
             firefly.postTransaction({
