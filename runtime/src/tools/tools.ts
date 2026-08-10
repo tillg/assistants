@@ -153,6 +153,26 @@ function mergeRows(group: string, existing: unknown, supplied: unknown): unknown
     return out;
 }
 
+/** One Firefly transaction group, reduced to the fields an Accountant reasons about. */
+function projectTransactionGroup(group: Record<string, unknown>): Array<Record<string, unknown>> {
+    const attributes = (group["attributes"] ?? {}) as Record<string, unknown>;
+    const splits = (attributes["transactions"] ?? []) as Array<Record<string, unknown>>;
+    return splits.map((split) => ({
+        transactionId: group["id"],
+        date: String(split["date"] ?? "").slice(0, 10),
+        description: split["description"],
+        amount: split["amount"],
+        currency: split["currency_code"],
+        from: split["source_name"],
+        to: split["destination_name"],
+        category: split["category_name"] ?? undefined,
+        budget: split["budget_name"] ?? undefined,
+        // The two links back to our own world: the idempotency key, and the Invoice's ThingID.
+        bookedUnderKey: split["external_id"] ?? undefined,
+        tags: split["tags"] ?? undefined,
+    }));
+}
+
 /** `chase` also wakes the caller after five minutes to check; `wait` and `detach` do not. */
 function chaseWakeAt(awaitMode: string): string | undefined {
     return awaitMode === "chase" ? nowIso(new Date(Date.now() + 5 * 60_000)) : undefined;
@@ -656,6 +676,35 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
         },
     };
 
+    const listTransactions: ToolDefinition = {
+        name: "bookkeeping.listTransactions",
+        description:
+            "The register: transactions in a date range, optionally for one account. Use this to " +
+            "check what has already been booked before booking something again.",
+        mutating: false,
+        parameters: {
+            type: "object",
+            properties: {
+                start: str("First day to include, yyyy-mm-dd."),
+                end: str("Last day to include, yyyy-mm-dd. Must be after start."),
+                account: str("Optional: restrict to one account, by its exact name."),
+                limit: num("Maximum transactions (default 25)."),
+            },
+            required: ["start", "end"],
+        },
+        async execute(args): Promise<ToolOutcome> {
+            const groups = await firefly.listTransactions({
+                start: String(args["start"] ?? ""),
+                end: String(args["end"] ?? ""),
+                accountName: args["account"] ? String(args["account"]) : undefined,
+                limit: Number(args["limit"] ?? 25) || 25,
+            });
+            // Projected rather than passed through: a Firefly group carries several dozen fields per
+            // split, and a register the model cannot read in one glance is a register it will not use.
+            return { kind: "value", value: groups.flatMap(projectTransactionGroup) };
+        },
+    };
+
     const getBalance: ToolDefinition = {
         name: "bookkeeping.getBalance",
         description: "The current balance of one account.",
@@ -868,6 +917,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
         assistantCall,
         listAccounts,
         postTransaction,
+        listTransactions,
         getBalance,
         listOpenItems,
         getBudgetReport,

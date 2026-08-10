@@ -84,20 +84,30 @@ Everything above becomes useful through a handful of queries:
 
 These are the ops the **Accountant** assistant needs, in the style of the README's external-system ops:
 
+These are the ops the **Accountant** assistant needs. The **Operation** column is the name an
+Assistant declares in its `tools[]`; a row marked **deferred** is one this table asks for and the
+Runtime does not yet register, with the reason given. That distinction matters: this table was read
+as a specification while five of its ten rows had no Operation behind them at all, so an Assistant
+could be granted a tool that did not exist, and `bookkeeping.listTransactions` — which existed on the
+connector — was unreachable, leaving the Accountant unable to check its own past bookings.
+`runtime/test/tools.test.ts` reads this table and fails if a non-deferred row has no Operation.
+
 | Operation | Description |
 |---|---|
 | `createAccount(name)` | Add an account to the chart (may be implicit on first posting) |
 | `postTransaction(date, postings[], meta)` | Book a balanced transaction; reject unbalanced ones. `meta` includes payee, tags, and thing references (invoice thingID etc.) |
-| `reverseTransaction(txnID)` | Correct a mistake by counter-booking |
 | `getBalance(account, date?)` | Balance of an account (subtree) at a date |
-| `listTransactions(filter)` | Register query: by account, date range, tag, payee, thingID |
+| `listTransactions(filter)` | Register query: by account and date range. (Tag, payee and thingID filters are not exposed yet; the `thing:` tag is returned on every row, so the Assistant can filter on it itself.) |
 | `listOpenItems(account)` | Unpaid invoices / unclaimed reimbursements = non-zero sub-balances on payable/receivable accounts |
-| `markCleared(postingID)` | Reconciliation against bank statements |
-| `importStatement(lines[])` | Take bank statement lines (from the **Bank** external system) and propose/book matching transactions |
 | `getBudgetReport(period)` | Actual vs. budget per account |
-| `exportBooks(format)` | Full data out — we must never be locked in |
+| `reverseTransaction(txnID)` | Correct a mistake by counter-booking. **Deferred**: a mutating Operation needs an idempotency key and a `reconcile` before it may exist at all (ADR-0012), and "which transaction" is a question the Accountant cannot yet answer, since it had no register query. Now that `listTransactions` exists this is the next one to build. |
+| `markCleared(postingID)` | Reconciliation against bank statements. **Deferred**: nothing produces statement lines — Bank is a Manual Connector — so there is nothing to reconcile against. |
+| `importStatement(lines[])` | Take bank statement lines (from the **Bank** external system) and propose/book matching transactions. **Deferred**: same reason, and it needs the Bank connector to be real first. |
+| `exportBooks(format)` | Full data out — we must never be locked in. **Deferred as an Operation, and satisfied outside one**: Firefly's own UI exports, and the books live in the stack's Postgres. No Assistant needs it, so putting it in an LLM's hands buys nothing. |
 
-Nice to have, not required: multi-currency, invoice document generation (that's rather a Receptionist/template job), recurring transactions.
+Nice to have, not required: multi-currency (see BUG-17 — a foreign-currency amount is currently
+refused rather than mis-booked), invoice document generation (that's rather a Receptionist/template
+job), recurring transactions.
 
 ### What the Accountant does vs. what BookKeeping does
 

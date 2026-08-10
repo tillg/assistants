@@ -203,6 +203,10 @@ but do not send anything or move money yourself.`,
         "bookkeeping.getBalance",
         "bookkeeping.listOpenItems",
         "bookkeeping.getBudgetReport",
+        // The register. Granted because without it the Accountant cannot see its own past
+        // bookings — so it cannot notice it has already booked an invoice, and cannot answer
+        // "have we paid this?" from anything but a balance.
+        "bookkeeping.listTransactions",
         "bookkeeping.postTransaction",
         // Note: bookkeeping.createAccount is deliberately NOT granted. The chart of accounts is a
         // structural decision the User should make (ADR-0010's granularity argument).
