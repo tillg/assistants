@@ -10,6 +10,83 @@ reviewed afterwards.
 
 ---
 
+## If you are picking this up, start here
+
+**Do not trust this file.** It is one agent's account of its own work. The five minutes below are
+worth more than reading the rest.
+
+```bash
+just demo-reset          # the demo books carry probe leftovers from this run — see Traps
+just test                # models, runtime, integration, client, e2e
+just check
+git log --oneline 6dbf021..HEAD      # 71 commits; each fix commit says what it traded away
+```
+
+Everything was green at handoff. If it is not, that is the first thing to know.
+
+### Then, in this order
+
+1. **Review the two changes with the widest blast radius.** Most of the 43 fixes are local. Two are
+   not, and both are mine:
+   - `runtime/src/watcher/watcher.ts` → `scanMaterialised` (commit `6d695df`). The watermark rule
+     changed from "may pass a decided Thing" to "may pass a contiguous run of decided Things", with a
+     per-Model frontier and a ceiling. It is the most intricate thing in this run and the easiest to
+     get subtly wrong. Read the invariant in the comment, then decide whether you believe it.
+   - `import/auth/roles.yaml` + `childAuthorizationDefinition.json` (commit `ea10b01`). A SpEL rule
+     against three different resource shapes. It fails **closed** for Assistants and open for
+     everything else by design; satisfy yourself that is what it does.
+
+2. **Run `just test-live` against a real LLM.** This is the one thing this run could not do, and it
+   is the biggest remaining unknown. `ScriptedProvider` returns fixed arguments, so it cannot pass a
+   `thingId` that is created during the run — which means **BUG-03's double-booking guard is
+   exercised only by an integration test that hands it the tag directly**, never by the loop. The
+   Accountant is now instructed to pass the Invoice's ThingID (`5c50834`); whether a real model
+   actually does is unverified. Check the `thing:` tags in Firefly afterwards.
+
+3. **Add the frozen-frontier warning.** A Thing whose creating Conversation never finishes now pins
+   its Model's watermark indefinitely — correct (nothing is lost) but invisible. One `log.warn` when a
+   frontier stays frozen across consecutive scans turns a silent stall into an operational signal.
+   This was recommended during the run and not done.
+
+4. **Then the open work**, in the order I would take it:
+   - `reverseTransaction` — a bookkeeping system that cannot reverse a mistake has a real hole, and
+     now that `listTransactions` exists the "which transaction" problem is solved. Needs an
+     idempotency key and a `reconcile` (ADR-0012), so treat it as a small feature, not a fix.
+   - **BUG-23's read half** — `thingstore.search` has no read restriction, so an Assistant can read
+     every other Assistant's system prompt and every transcript. Needs a policy on the `Query` scope,
+     which is the same mechanism `ea10b01` proved works for writes.
+   - **BUG-43's remainder** — the `Multilingual` label shape (28 occurrences) is still invisible to the
+     bilingual check, and the warning names the file but not the field.
+   - Multi-currency, if wanted: `foreign_amount` + `foreign_currency_code`, and the currency has to be
+     enabled in Firefly, which the bootstrap does not do.
+
+5. **Keep hunting one specific pattern.** Three of the seven new defects this run found were the same
+   thing: **a test supplying an input the real writer never supplies** — the e2e page object stamping
+   `answeredAt`, the e2e helper stamping `CreatedAt`, `FakeFirefly` typing an account `liability`
+   instead of `liabilities`. That pattern hid a critical bug each time. A worthwhile next pass: go
+   through every fake and test helper and ask, field by field, *who sets this in production?* I did not
+   finish that audit.
+
+### Traps that will cost you an hour each
+
+- **It is Rancher Desktop, not Docker Desktop.** Quitting "Docker Desktop" silently does nothing.
+- **Its port forwarding dies.** All published ports accept TCP and then close, on every project at
+  once. The fix is restarting Rancher Desktop; containers are fine and restarting them does not help.
+- **`just restart server` now also restarts the Runtime** (`341f182`) — because the Runtime holds a
+  keep-alive pool to the old container IP and every scan fails with a bare `TypeError: fetch failed`,
+  with nothing saying why. If you restart the server by hand, restart the Runtime too.
+- **`just bootstrap` runs as `human`, not `runtime`** (since `ea10b01`), and it now *overwrites* the
+  seeded Assistants — a prompt edited in the web application does not survive it.
+- **`pageSize` above 100 is refused by the store**, not clamped. So is an `exact_match` value over 100
+  characters — which is *shorter* than the 200-character fields it searches.
+- **A red integration test can leak a Firefly transaction**, because `postedIds.push` happens after the
+  call the assertion fails on. `e2e/tests/base/0-clean.setup.ts` also cleans `Party_DM` and
+  `Document_DM` but not `Invoice_DM`. Hence `just demo-reset` above.
+- **The Playwright MCP's allowed root is the pre-rename path** (`git/assistents`), which no longer
+  exists, so screenshots have to go to its temp dir and be copied.
+
+---
+
 ## The first thing found, which changes the shape of the task
 
 `BUGS.md` says, in its own header, *"Nothing here is fixed. This file is the report, not the
