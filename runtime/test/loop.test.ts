@@ -576,6 +576,44 @@ describe("guards", () => {
         expect(questions[0]!.data.prompt).toMatch(/no Assistant with that key exists/i);
     });
 
+    it("refuses to call a disabled Assistant instead of stranding two Conversations", async () => {
+        // Nothing checked that the callee was enabled, so the child was born — and then nothing
+        // could ever advance either one. Scan 2 filters `waitingFor` in {user, tool} and skips the
+        // parent; scan 5 needs the child done or failed; scan 6 skips Conversations whose Assistant
+        // is not enabled. Five scans, zero continuations, zero Open Questions, heartbeat green.
+        // Exactly what ADR-0015 forbids: "a failed state must never be somewhere a Conversation
+        // falls".
+        const harness = buildHarness([
+            {
+                assistant: "receptionist",
+                turn: 0,
+                toolCalls: [{ name: "assistant__call__accountant", arguments: { prompt: "check this" } }],
+            },
+        ]);
+        const receptionist = await harness.seedAssistant({
+            key: "receptionist",
+            tools: [{ operation: "assistant.call:accountant" }],
+        });
+        await harness.seedAssistant({ key: "accountant", enabled: false, triggers: [] });
+        const docRef = await harness.birth({ assistant: receptionist });
+
+        await harness.driver.advance(docRef);
+
+        const parent = await harness.conversation(docRef);
+        // Not suspended on an Assistant that will never run.
+        expect(parent.data.status).toBe("running");
+        expect(parent.data.waitingFor).toBeFalsy();
+
+        const children = (
+            await harness.things.search<Conversation>(SPECS.Conversation_DM, undefined, 100)
+        ).filter((candidate) => candidate.data.assistantKey === "accountant");
+        expect(children).toHaveLength(0);
+
+        // And the model is told why, as a tool error it can act on.
+        const result = (parent.data.entries ?? []).find((entry) => entry.kind === "tool-result");
+        expect(result?.toolResult).toMatch(/disabled/i);
+    });
+
     it("stops continuing a disabled Assistant", async () => {
         const harness = buildHarness([{ text: "should not run", finishReason: "answered" }]);
         const assistant = await harness.seedAssistant({ enabled: false });
