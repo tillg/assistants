@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { buildHarness, nowIso, type Harness } from "./support/harness.js";
 import { SPECS } from "../src/a12/things.js";
+import { buildMessages } from "../src/loop/advance.js";
 import type { Conversation } from "../src/domain/types.js";
 
 describe("one turn", () => {
@@ -353,6 +354,60 @@ describe("recovery", () => {
         expect(after.data.status).toBe("waiting");
         expect(after.data.waitingFor).toBe("tool");
         expect(after.data.currentQuestionId).toBe(questionId);
+    });
+
+    it("records an unknown result for an intent nothing can reconcile, and escalates only once", async () => {
+        // The crash one step earlier: the intent was written and the question never created, so
+        // `reconcile` can find nothing at all. Escalating is right — but the escalation wrote no
+        // result for the intent, so `unresolvedIntent` found it again on every wake and escalated
+        // again. Answering was structurally incapable of helping; the fourth escalation killed the
+        // Conversation without it ever having taken a Turn.
+        //
+        // The same omission leaves an assistant tool call with no tool result in the transcript,
+        // which OpenAI and Anthropic both reject outright — so the Conversation could not reach a
+        // real model either.
+        const harness = buildHarness([
+            { turn: 0, toolCalls: [{ name: "ui__askUser", arguments: { kind: "confirm", prompt: "Pay?" } }] },
+            { turn: 1, text: "Understood, I will not repeat it.", finishReason: "answered" },
+        ]);
+        const assistant = await harness.seedAssistant({ tools: [{ operation: "ui.askUser" }] });
+        const docRef = await harness.birth({ assistant });
+        await harness.driver.advance(docRef);
+
+        const raised = (await harness.questions())[0]!;
+        await harness.things.delete(raised.docRef);
+        await crashAfterIntent(harness, docRef);
+
+        await harness.watcher.scan();
+        const escalated = await harness.conversation(docRef);
+        expect(escalated.data.status).toBe("waiting");
+        expect(escalated.data.escalationCount).toBe(1);
+
+        // Every tool call in the transcript has a result — the invariant both real providers need.
+        const messages = buildMessages(assistant.data, escalated.data);
+        const callIds = messages.flatMap((message) => (message.toolCalls ?? []).map((call) => call.id));
+        const resultIds = messages
+            .filter((message) => message.role === "tool")
+            .map((message) => message.toolCallId);
+        expect(callIds.length).toBeGreaterThan(0);
+        expect(resultIds).toEqual(callIds);
+
+        // And it says unknown — not failed, and not "try again".
+        const result = (escalated.data.entries ?? []).find((entry) => entry.kind === "tool-result")!;
+        expect(result.toolResult).toMatch(/"outcome":"unknown"/);
+        expect(result.toolResult).toMatch(/"retry":false/);
+
+        // Answering now moves it: one escalation, then a real Turn.
+        const open = (await harness.questions()).filter((question) => !question.data.answeredAt);
+        for (const question of open) {
+            await harness.answer(question.thingId, { text: "It did not happen, carry on." });
+        }
+        await harness.watcher.scan();
+
+        const resumed = await harness.conversation(docRef);
+        expect(resumed.data.escalationCount).toBe(1);
+        expect(resumed.data.turnCount).toBe(2);
+        expect(resumed.data.status).toBe("done");
     });
 });
 
