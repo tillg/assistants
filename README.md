@@ -30,8 +30,8 @@ Spelling throughout the project is British English.
 
 **Companion documents**: [CONTEXT.md](CONTEXT.md) (the glossary) ·
 [DECISIONS.md](DECISIONS.md) (decisions taken while building, with their alternatives and
-reversal costs) · [BUGS.md](BUGS.md) (43 reproduced defects from the 2026-08-09 hunt, none of them
-fixed — read it before trusting the "Status and limitations" section below) ·
+reversal costs) · [BUGS.md](BUGS.md) (43 reproduced defects from the 2026-08-09 hunt; each entry
+records whether it still stands) ·
 [docs/adr/](docs/adr/) (fifteen architecture decisions) ·
 [ACCOUNTING.md](ACCOUNTING.md) (what Bookkeeping must provide, and why Firefly III) ·
 [AGENTIC_LOOP.md](AGENTIC_LOOP.md) (the loop's open questions, and a survey of how three existing
@@ -242,9 +242,10 @@ a compose-level environment variable rather than a constructor argument, on purp
 
 | Recipe | What it does | When you want it |
 |---|---|---|
-| `just test` | `test-models` + `test-runtime` + `test-client` + `test-e2e` | Before claiming anything is done |
+| `just test` | `test-models` + `test-runtime` + `test-integration` + `test-client` + `test-e2e`, in that order | Before claiming anything is done. The last three need the stack up |
 | `just test-models` | `import/validate-models.mjs` in both directions, then the Gradle model conversion | After touching any model under `import/models/` |
 | `just test-runtime` | The loop driver's branching under vitest: one Turn, tool gating, suspension, continuation, lease recovery, the runaway guards, Assistant-to-Assistant calls | After touching `runtime/src/` |
+| `just test-integration` | The A12 client, the Thing repository, the watcher's queries and the Firefly connector against the **live** stack, one file at a time. Skipped rather than failed when the stack is down | After touching `runtime/src/a12/`, the watcher's queries or the Firefly connector — the tier that catches what the unit fakes cannot see. Requires the stack to be up |
 | `just test-client` | The markdown editor's unit tests and the client's own | After touching `client/src/` |
 | `just test-e2e` | Playwright against the running stack with the scripted model | Before a commit that touches the UI. Requires the stack to be up |
 | `just test-live` | The same end-to-end specs against a live LLM. Skipped without `LLM_API_KEY` | Rarely, and deliberately — it costs money and is non-deterministic |
@@ -363,7 +364,8 @@ because the A12 query API is narrower than it looks, and breaking one produces a
 silently returns nothing.
 
 1. Create `import/models/<thing>/<Thing>_DM.json`. Lower-case singular folder; the model id matches
-   the filename; `{"name": "roles", "value": "user"}` on the header; every label in both `en` and `de`.
+   the filename; `{"name": "roles", "value": "user,runtime"}` on the header; every label in both `en`
+   and `de`.
 2. Add the fields from the type cookbook. A12 has no integer, money or reference type: a reference
    to another Thing is an indexed `StringType` named `<what>ThingId`
    ([ADR-0002](docs/adr/0002-thingid-identifies-only.md)), money is a `NumberType` with
@@ -447,12 +449,13 @@ This is one running vertical slice, not a finished system. What is honestly miss
 - **The transcript renders as a data grid.** A Conversation's entries are a read-only inline repeat
   in the ordinary A12 form. It is readable, but it is a table, not a transcript view.
   `just logs runtime` is the better debugging surface.
-- **The end-to-end suite is still the vendored template's.** `e2e/tests/base/` covers login,
-  localisation and the favicon; there are no Playwright specs yet for the slice itself — answering
-  an Open Question, editing a prompt in the markdown editor, confirming the transaction in Firefly.
-  Two consequences follow: `just test-e2e` and `just test-live` invoke `npm test` in `e2e/`, which
-  that package does not define, so both recipes fail as written; and `just test` fails with them.
-  `just test-models`, `just test-runtime` and `just test-client` all work.
+- **The end-to-end suite covers the slice, and writes to whatever stack it is pointed at.**
+  `cd e2e && npx playwright test --list` is the authority on what it runs. Today: login as all four
+  users, every module opened from the menu, Party CRUD, the Receptionist's prompt round-tripped
+  through the markdown editor, localisation, the favicon, a row opened in each of the eight modules,
+  the whole invoice slice (an arriving Document → an Open Question → an answer → the booking checked
+  in Firefly) and surviving a restart of the Runtime and the store. Because it creates and deletes
+  Things, point it at a development stack only.
 - **Parties have no proper Authority.** CONTEXT.md assigns people to an address book. There is no
   address book External System, so the ThingStore holds them provisionally — a small, recorded
   violation of ADR-0006's spirit, to be reversed the day a connector exists.
@@ -487,7 +490,7 @@ This is one running vertical slice, not a finished system. What is honestly miss
 ├── scripts/setup-env.mjs     writes .env and generates the machine credentials
 ├── e2e/                      Playwright
 ├── specs/changes/            proposal, domain, architecture and plan, per change
-├── docs/                     adr/ — ten architecture decision records; logo/ — design explorations
+├── docs/                     adr/ — fifteen architecture decision records; logo/ — design explorations
 ├── assets/                   the logo and its derived files
 ├── buildSrc/, quality/       Gradle build logic and the Checkstyle configuration
 └── licenses/                 licence texts for the third-party notices

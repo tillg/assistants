@@ -42,15 +42,17 @@ nothing checks the value. `0.2.1` is the package's own version, used for traceab
     "modelVersion": "29.4.0",
     "locales": [{ "code": "en" }, { "code": "de" }],
     "labels": [{ "locale": "en", "text": "Invoice" }, { "locale": "de", "text": "Rechnung" }],
-    "annotations": [{ "name": "roles", "value": "user" }],
+    "annotations": [{ "name": "roles", "value": "user,runtime" }],
     "modelReferences": []
   },
   "content": { ... }
 }
 ```
 
-`{"name": "roles", "value": "user"}` is **mandatory on every model header**. The role must exist
-in `import/auth/roles.yaml` or the model is rejected with `COMMON_ROLE_NOT_IN_ROLES_MODEL`.
+`{"name": "roles", "value": "user,runtime"}` is **mandatory on every model header**. Both roles
+must exist in `import/auth/roles.yaml` or the model is rejected with
+`COMMON_ROLE_NOT_IN_ROLES_MODEL`; omitting `runtime` is rejected by `just test-models`, because the
+Runtime could not read the model.
 
 Every model is bilingual: every `label` carries both `en` and `de`.
 
@@ -227,8 +229,9 @@ Where the User should not delete rows (`Conversation`, `OpenQuestion`, `RuntimeS
 Runtime-owned), give it `{"actions": []}` rather than removing it. Add a confirmed `delete`
 action, and a `subHeaderBox` with an Add button, only where the User genuinely creates and
 removes the Thing.
-Runtime, not the User, owns the lifecycle (`Conversation`, `RuntimeState`, `OpenQuestion`).
-Those three omit **both**: they carry `"leftSlot": []` and no `rowActionGroup` at all. The
+Where the Runtime rather than the User owns the lifecycle (`Conversation`, `OpenQuestion`,
+`RuntimeState`), the overview still carries `rowActionGroup: {"actions": []}` — the key is
+mandatory — and suppresses creation with an empty `"leftSlot": []` inside `subHeaderBox`. The
 `user` role holds `DOCUMENT_DELETE` and there are no ownership policies, so a delete action on
 these is a delete: removing the RuntimeState silently disengages the global pause and resets
 the watermark, and removing an OpenQuestion strands its Conversation forever.

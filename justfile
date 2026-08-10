@@ -52,11 +52,11 @@ dev: build up wait bootstrap
     @echo "  Next: just demo-data     — load a demo household"
     @echo "        just logs runtime  — watch the Assistants work"
 
-# Build the models, the server jars, the client bundle and all images.
-#
 # `npm ci` in runtime/ is not redundant with the Dockerfile: the image installs its own copy, but
 # `just bootstrap`, `demo-data`, `pause`, `resume` and the test tiers all run from the HOST, and
 # on a fresh clone there is no node_modules for them to run from.
+
+# Build the models, the server jars, the client bundle and all images.
 build:
     @cd runtime && npm ci --no-audit --no-fund
     {{gradle}} convertModels
@@ -89,11 +89,11 @@ wait:
 down:
     {{compose}} --profile server-init down
 
-# Restart one service, or all of them.
-#
 # Restarting `server` on its own is a trap: nginx in the frontend resolves its upstreams once at
 # startup, so the server's new container IP leaves every /api call answering 502 and the login
 # form never renders. Restarting the server therefore takes the frontend with it.
+
+# Restart one service, or all of them.
 restart service="":
     #!/usr/bin/env bash
     set -uo pipefail
@@ -123,21 +123,24 @@ host_urls := "THINGSTORE_URL=http://localhost:8082 KEYCLOAK_URL=http://localhost
 bootstrap:
     @cd runtime && {{host_urls}} npm run --silent bootstrap
 
-# Load what the household HAS: parties, processes, documents, invoices and the books.
 # Pauses the Runtime while loading so the demo set lands as history, not as a work queue.
+
+# Load what the household HAS: parties, processes, documents, invoices and the books.
 demo-data:
     @cd runtime && {{host_urls}} FIREFLY_URL=http://localhost:8084 \
         FIREFLY_TOKEN="$(just firefly-token)" npm run --silent demo
 
-# Wipe everything and rebuild from scratch, including the books.
 # `build` is not optional here: `clean` deletes build/wcf-output/data/models, which `up`
 # bind-mounts -- Docker would recreate it empty and the server would import zero models.
 # Firefly has no bulk delete and its data lives in a named volume, so a full teardown is the
 # only reset that is symmetric across both Authorities (ADR-0006, as an operational consequence).
+
+# Wipe everything and rebuild from scratch. TAKES THE BOOKS WITH IT.
 demo-reset: clean build up wait bootstrap demo-data
 
 # Read it through the Runtime, which already has the token volume mounted -- no volume name to
 # guess and no second, differently-prefixed spelling of it to keep in sync.
+
 # Print the Firefly personal access token the bootstrap container minted.
 firefly-token:
     @{{compose}} exec -T runtime cat /run/firefly/pat.txt
@@ -152,8 +155,9 @@ resume:
 
 # ---------------------------------------------------------------------------- tests
 
-# Everything: models, runtime units, the live-stack integration tier, the client, and
-# end-to-end through the real UI.
+# In the order that fails fastest. The last three tiers need the stack up.
+
+# Every tier: models, runtime units, live-stack integration, the client, end-to-end.
 test: test-models test-runtime test-integration test-client test-e2e
 
 # The self-test runs the validator against deliberately broken copies of the models. A check that
@@ -170,8 +174,10 @@ test-models:
 test-runtime:
     @cd runtime && npm test
 
-# Against the LIVE stack: the A12 client, the watcher's queries, the Firefly connector. Skipped
-# rather than failed when the stack is down. The tier that catches what the unit fakes cannot.
+# Skipped rather than failed when the stack is down. The tier that catches what the unit fakes
+# cannot see.
+
+# Against the LIVE stack: the A12 client, the watcher's queries, the Firefly connector.
 test-integration:
     @cd runtime && npm run --silent test:integration
 
@@ -207,8 +213,9 @@ clean:
 clean-all: clean
     rm -rf runtime/node_modules client/node_modules e2e/node_modules
 
-# Install every workspace's dependencies. `just build` covers runtime/ and client/; e2e/ is only
-# needed to run the end-to-end tier.
+# `just build` already covers runtime/ and client/; e2e/ is only needed for the end-to-end tier.
+
+# Install every workspace's dependencies (runtime, client, e2e).
 install:
     @cd runtime && npm install
     @cd client && npm install
