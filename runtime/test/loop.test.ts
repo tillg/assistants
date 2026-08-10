@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { buildHarness, nowIso } from "./support/harness.js";
+import { buildHarness, nowIso, type Harness } from "./support/harness.js";
 import { SPECS } from "../src/a12/things.js";
 import type { Conversation } from "../src/domain/types.js";
 
@@ -190,6 +190,23 @@ describe("suspension and continuation (ADR-0004, ADR-0005)", () => {
     });
 });
 
+/**
+ * The crash the intent log exists for: the intent was written, the Operation may or may not have
+ * run, and the process died before any result — or any suspension — reached the store. Truncating
+ * the transcript at the intent and expiring the lease is exactly that state.
+ */
+async function crashAfterIntent(harness: Harness, docRef: string): Promise<void> {
+    const crashed = await harness.conversation(docRef);
+    await harness.things.update(SPECS.Conversation_DM, docRef, {
+        ...crashed.data,
+        entries: (crashed.data.entries ?? []).filter((entry) => entry.kind !== "tool-result"),
+        status: "running",
+        waitingFor: "",
+        currentQuestionId: "",
+        leaseUntil: nowIso(new Date(Date.now() - 60_000)),
+    });
+}
+
 describe("recovery", () => {
     it("reconciles an interrupted booking instead of re-running it", async () => {
         const harness = buildHarness([
@@ -276,6 +293,66 @@ describe("recovery", () => {
         const results = (recovered.data.entries ?? []).filter((entry) => entry.kind === "tool-result");
         expect(results).toHaveLength(1);
         expect(results[0]!.toolResult).toMatch(/may or may not have applied/i);
+    });
+
+    it("returns to waiting on the same question when reconciliation says the suspension still holds", async () => {
+        // The crash that matters here: the Open Question was created and the process died before
+        // `status="waiting"` reached the store. `ui.askUser.reconcile` answers `pending` — the
+        // suspension still holds — and that answer was being read as "settled", so a fresh Turn
+        // ran without the answer and the Conversation reached `done` with the User's question
+        // still open and `currentQuestionId` cleared, matching no scan ever again.
+        const harness = buildHarness([
+            {
+                turn: 0,
+                toolCalls: [{ name: "ui__askUser", arguments: { kind: "confirm", prompt: "Pay 184.30?" } }],
+            },
+            { turn: 1, text: "No answer came, so I assumed yes.", finishReason: "answered" },
+        ]);
+        const assistant = await harness.seedAssistant({ tools: [{ operation: "ui.askUser" }] });
+        const docRef = await harness.birth({ assistant });
+        await harness.driver.advance(docRef);
+        const questionId = (await harness.conversation(docRef)).data.currentQuestionId!;
+
+        await crashAfterIntent(harness, docRef);
+        await harness.watcher.scan();
+
+        const after = await harness.conversation(docRef);
+        expect(after.data.status).toBe("waiting");
+        expect(after.data.waitingFor).toBe("user");
+        expect(after.data.currentQuestionId).toBe(questionId);
+        expect(after.data.result).toBeFalsy();
+
+        // And answering it afterwards still finishes, through the ordinary path.
+        await harness.answer(questionId, { confirmed: true, text: "yes please" });
+        await harness.watcher.scan();
+        expect((await harness.conversation(docRef)).data.status).toBe("done");
+    });
+
+    it("returns to waiting for a Manual Connector too, on `tool` rather than `user`", async () => {
+        // Every Manual Connector returns the identical pending shape, so a crash during a payment
+        // request resumed the Assistant as if it had been told nothing, with the request still on
+        // the User's list.
+        const harness = buildHarness([
+            {
+                turn: 0,
+                toolCalls: [
+                    { name: "bank__sendMoney", arguments: { iban: "DE00", amount: "10.00", reference: "r" } },
+                ],
+            },
+            { turn: 1, text: "Recorded.", finishReason: "answered" },
+        ]);
+        const assistant = await harness.seedAssistant({ tools: [{ operation: "bank.sendMoney" }] });
+        const docRef = await harness.birth({ assistant });
+        await harness.driver.advance(docRef);
+        const questionId = (await harness.conversation(docRef)).data.currentQuestionId!;
+
+        await crashAfterIntent(harness, docRef);
+        await harness.watcher.scan();
+
+        const after = await harness.conversation(docRef);
+        expect(after.data.status).toBe("waiting");
+        expect(after.data.waitingFor).toBe("tool");
+        expect(after.data.currentQuestionId).toBe(questionId);
     });
 });
 
