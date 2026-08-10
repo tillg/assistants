@@ -18,6 +18,7 @@ import {
     SPECS,
     ThingRepository,
     and,
+    byCreatedAt,
     eq,
     nowIso,
     not,
@@ -278,6 +279,56 @@ describe.skipIf(!THING_STORE_UP)("watcher queries against the live ThingStore", 
                 created.docRef,
             );
         }
+    });
+
+    describe("the order the materialised scan depends on", () => {
+        it("returns the oldest first when the scan's own query asks it to", async () => {
+            // The watermark rule is "the watermark may only pass a contiguous run of decided
+            // Things", and *contiguous* is meaningless unless the page really arrives oldest-first.
+            // The unit suite proves the frontier arithmetic against a fake that was taught to sort;
+            // this proves the live store sorts — in the exact combination the scan uses, `sort`
+            // together with the `date_range` constraint, which is the part a fake cannot vouch for.
+            const spec = SPECS.Invoice_DM;
+            const run = unique("scan-order");
+            const base = Date.parse(`${LONG_AGO}Z`);
+            const stamps = [0, 1, 2, 3, 4].map((minutes) =>
+                nowIso(new Date(base + minutes * 60_000)),
+            );
+
+            // Created newest-first on purpose: if the store were echoing insertion order back, this
+            // test would still pass with the assertion reversed, and it would prove nothing.
+            for (const createdAt of [...stamps].reverse()) {
+                trash.add(
+                    (
+                        await things.create(spec, {
+                            invoiceNumber: `${run}:${createdAt}`,
+                            issuerName: run,
+                            issueDate: "2020-01-01",
+                            amountGross: 1,
+                            createdAt,
+                            idempotencyKey: `${run}:${createdAt}`,
+                        })
+                    ).docRef,
+                );
+            }
+
+            const result = await client.query({
+                targetDocumentModel: spec.model,
+                constraint: {
+                    operator: "date_range",
+                    field: fieldPath(spec, "createdAt"),
+                    from: stamps[0],
+                    to: nowIso(new Date(base + 60 * 60_000)),
+                },
+                sort: byCreatedAt(spec, "ASC"),
+                paging: { pageNumber: 0, pageSize: 100 },
+            });
+
+            const mine = result.entries
+                .map((entry) => String((entry.document["Invoice"] as Record<string, unknown>)["CreatedAt"] ?? ""))
+                .filter((createdAt) => stamps.includes(createdAt));
+            expect(mine).toEqual(stamps);
+        });
     });
 
     describe("the assertion has teeth", () => {
