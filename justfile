@@ -156,9 +156,14 @@ resume:
 # end-to-end through the real UI.
 test: test-models test-runtime test-integration test-client test-e2e
 
-# Both directions of form-model validation, including the ADR-0008 hint.
+# The self-test runs the validator against deliberately broken copies of the models. A check that
+# has never been seen to fail is a check you are trusting rather than one you have tested — four of
+# the rules CONVENTIONS.md calls load-bearing turned out never to have been enforced at all.
+
+# Both directions of form-model validation, the ADR-0008 hint, and the validator's own self-test.
 test-models:
     node import/validate-models.mjs
+    node import/validate-models.selftest.mjs
     {{gradle}} convertModels
 
 # The loop driver's branching: suspension, continuation, recovery, tool gating.

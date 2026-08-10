@@ -14,7 +14,15 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
 
-const ROOT = new URL("./models/", import.meta.url).pathname;
+/**
+ * `MODELS_DIR` exists so the validator can be pointed at a mutated copy of the models — which is
+ * how `validate-models.selftest.mjs` proves each check actually bites. A check nobody has ever seen
+ * fail is a check you are trusting, not one you have tested; four of the rules CONVENTIONS.md calls
+ * load-bearing turned out never to have been enforced at all.
+ */
+const ROOT = process.env["MODELS_DIR"]
+    ? `${process.env["MODELS_DIR"].replace(/\/*$/, "")}/`
+    : new URL("./models/", import.meta.url).pathname;
 
 /** Machine-owned fields that are deliberately absent from every form. */
 const INTENTIONALLY_UNEXPOSED = new Set([
