@@ -70,6 +70,34 @@ describe("the materialised scan (scan 1)", () => {
         expect(missing).toHaveLength(0);
     });
 
+    it("picks up a Thing the User created in the web application, which has no createdAt", async () => {
+        // The four machine fields are deliberately on no form, and A12's form engine offers no save
+        // hook that could stamp one (see BUG-36), so a Thing created by a human in the UI carries no
+        // `createdAt` at all — only `__meta.createdAt`. The materialised scan constrains on *our*
+        // `createdAt` with a `date_range`, and a `date_range` cannot match an absent value, so such a
+        // Thing is invisible to the watcher for ever.
+        //
+        // Which means the User cannot start work by creating a Document. That is the product's
+        // central premise — "a Document arrives and an Assistant notices" — failing on the one path a
+        // human actually uses. Every test and the demo loader go through `ThingRepository.create`,
+        // which stamps the field, so nothing caught it.
+        const t0 = Date.now() - 3_600_000;
+        const harness = buildHarness([], { maxBirthsPerHour: 1000 });
+        await harness.seedAssistant();
+        await seedState(harness, nowIso(new Date(t0)));
+
+        // Exactly what the form writes: the business fields, and none of the machine fields.
+        const docRef = await harness.store.addDocument("Document_DM", {
+            Document: { Title: "scanned by hand, in the browser", Source: "post" },
+        });
+        const thingId = docRef.slice(docRef.indexOf("/") + 1);
+
+        await harness.watcher.scan();
+        await harness.watcher.scan();
+
+        expect((await subjectsBirthed(harness)).has(thingId)).toBe(true);
+    });
+
     it("holds the watermark behind a Thing whose creating Conversation is still running", async () => {
         // The Receptionist creating an Invoice while its own Conversation still runs. The Invoice is
         // correctly skipped on that pass — and any Thing created a second later used to bury it,
