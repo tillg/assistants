@@ -43,7 +43,15 @@ export class FakeFirefly {
         if (!found) throw new Error(`No account named "${name}"`);
         return found.id;
     }
+    /** Make the next post fail the way the real Firefly does — with its `details.errors` intact. */
+    failNextPost: Error | undefined;
+
     async postTransaction(input: { externalId: string; splits: Array<{ amount: string; sourceAccount: string; destinationAccount: string }> }) {
+        if (this.failNextPost) {
+            const failure = this.failNextPost;
+            this.failNextPost = undefined;
+            throw failure;
+        }
         const already = this.posted.find((entry) => entry.externalId === input.externalId);
         if (already) return { id: "existing", alreadyExisted: true };
         for (const split of input.splits) {
