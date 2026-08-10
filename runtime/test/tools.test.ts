@@ -40,6 +40,107 @@ async function call(
     });
 }
 
+describe("thingstore.update", () => {
+    /** The Process a Receptionist would have built up over several Turns. */
+    async function processWithThreeSteps(harness: Harness): Promise<string> {
+        const created = await harness.things.create(SPECS.Process_DM, {
+            title: "Dr Meyer, July",
+            status: "open",
+            steps: [
+                { seq: 1, title: "Received", state: "done", note: "came in by post" },
+                { seq: 2, title: "Checked", state: "done", note: "amount matches the quote" },
+                { seq: 3, title: "Booked", state: "doing" },
+            ],
+            related: [{ thingId: "abc", model: "Invoice_DM", note: "the invoice" }],
+            idempotencyKey: "process-with-steps",
+        });
+        return created.thingId;
+    }
+
+    async function stepsOf(harness: Harness, thingId: string) {
+        const read = await harness.things.get<Record<string, unknown>>(
+            SPECS.Process_DM,
+            `Process_DM/${thingId}`,
+        );
+        return read.data as { steps?: Array<{ seq?: number; state?: string }>; related?: unknown[] };
+    }
+
+    it("adds a step without discarding the ones already there", async () => {
+        // README calls the Process "the routing slip — a title, a status and an append-only list of
+        // steps", and the tool promises "supply only the fields you are changing; the others are
+        // preserved". That held for scalars and was false for a repeating group: the supplied array
+        // replaced the whole group, so the obvious move — "add step 4" — destroyed steps 1 to 3 and
+        // reported `updated: true`.
+        const harness = buildHarness([]);
+        const thingId = await processWithThreeSteps(harness);
+
+        const outcome = await call(harness, "thingstore.update", {
+            model: "Process_DM",
+            thingId,
+            fields: { steps: [{ seq: 4, title: "Paid", state: "done" }] },
+        });
+
+        expect(outcome.kind).toBe("value");
+        const after = await stepsOf(harness, thingId);
+        expect((after.steps ?? []).map((step) => step.seq)).toEqual([1, 2, 3, 4]);
+        // And a group the update did not mention is untouched.
+        expect(after.related).toHaveLength(1);
+    });
+
+    it("corrects a step in place rather than appending a second one with the same seq", async () => {
+        const harness = buildHarness([]);
+        const thingId = await processWithThreeSteps(harness);
+
+        await call(harness, "thingstore.update", {
+            model: "Process_DM",
+            thingId,
+            fields: { steps: [{ seq: 3, title: "Booked", state: "done" }] },
+        });
+
+        const after = await stepsOf(harness, thingId);
+        expect((after.steps ?? []).map((step) => step.seq)).toEqual([1, 2, 3]);
+        expect((after.steps ?? []).find((step) => step.seq === 3)?.state).toBe("done");
+    });
+
+    it("does not duplicate rows when the model sends the whole list back", async () => {
+        // The realistic failure of a plain append: a model reads the Process, adds a step, and sends
+        // all four. Merging by `seq` is what makes both that and "just the new one" correct.
+        const harness = buildHarness([]);
+        const thingId = await processWithThreeSteps(harness);
+
+        await call(harness, "thingstore.update", {
+            model: "Process_DM",
+            thingId,
+            fields: {
+                steps: [
+                    { seq: 1, title: "Received", state: "done" },
+                    { seq: 2, title: "Checked", state: "done" },
+                    { seq: 3, title: "Booked", state: "done" },
+                    { seq: 4, title: "Paid", state: "done" },
+                ],
+            },
+        });
+
+        const after = await stepsOf(harness, thingId);
+        expect((after.steps ?? []).map((step) => step.seq)).toEqual([1, 2, 3, 4]);
+    });
+
+    it("leaves the group alone when the update supplies an empty array", async () => {
+        // `steps: []` silently wiped the group. An empty array is not an instruction to forget.
+        const harness = buildHarness([]);
+        const thingId = await processWithThreeSteps(harness);
+
+        await call(harness, "thingstore.update", {
+            model: "Process_DM",
+            thingId,
+            fields: { steps: [] },
+        });
+
+        const after = await stepsOf(harness, thingId);
+        expect((after.steps ?? []).map((step) => step.seq)).toEqual([1, 2, 3]);
+    });
+});
+
 describe("bookkeeping.postTransaction", () => {
     it("names the field and the account the model used when Firefly refuses", async () => {
         // `FireflyError.details` carries per-field reasons and nothing ever read them, so what
