@@ -9,7 +9,7 @@
  */
 
 import { log } from "../log.js";
-import { ThingRepository, SPECS, nowIso, path as fieldPath, eq } from "../a12/things.js";
+import { ThingRepository, SPECS, byCreatedAt, nowIso, path as fieldPath, eq } from "../a12/things.js";
 import type { ModelSpec } from "../a12/things.js";
 import type { FireflyConnector, PostingSplit } from "../connectors/firefly.js";
 import type { ToolContext, ToolDefinition, ToolOutcome } from "./registry.js";
@@ -52,6 +52,9 @@ const num = (description: string) => ({ type: "number", description });
  * can be an illegal search term.
  */
 const EXACT_MATCH_MAX_LENGTH = 100;
+
+/** The store refuses a `pageSize` above this, so it is a hard ceiling and not a preference. */
+const PAGE_SIZE_MAX = 100;
 
 /** `chase` also wakes the caller after five minutes to check; `wait` and `detach` do not. */
 function chaseWakeAt(awaitMode: string): string | undefined {
@@ -207,7 +210,17 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             const model = String(args["model"] ?? "");
             const spec = specFor(model);
             const field = args["field"] ? String(args["field"]) : undefined;
-            const limit = Math.min(Number(args["limit"] ?? 25) || 25, 100);
+            const limit = Number(args["limit"] ?? 25) || 25;
+            if (limit > PAGE_SIZE_MAX) {
+                // Clamping silently was the bug: a model that asked for everything, got a hundred
+                // rows and was told nothing has no way to know it did not see everything.
+                return {
+                    kind: "error",
+                    message:
+                        `${limit} is more than one page. The most this returns is ${PAGE_SIZE_MAX} — ` +
+                        `ask for ${PAGE_SIZE_MAX} or fewer, or narrow it with a field filter.`,
+                };
+            }
             if (field !== undefined && !spec.fields[field]) {
                 // The only search that genuinely cannot work is one naming a field the Model does
                 // not have — that is an RPC error the model cannot recover from. An earlier
@@ -247,7 +260,16 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
                 };
             }
             const constraint = field !== undefined ? eq(fieldPath(spec, field), value) : undefined;
-            const found = await things.search<Record<string, unknown>>(spec, constraint, limit);
+            // Newest first, which is what the description has always claimed. Without a sort the
+            // store returns an arbitrary window, so "the most recent ones" was not merely
+            // unordered — it was untrue, and a model searching for one Thing among more than
+            // `limit` matches concluded it did not exist.
+            const found = await things.search<Record<string, unknown>>(
+                spec,
+                constraint,
+                limit,
+                byCreatedAt(spec, "DESC"),
+            );
             return {
                 kind: "value",
                 value: found.map((thing) => ({ thingId: thing.thingId, model, fields: thing.data })),
