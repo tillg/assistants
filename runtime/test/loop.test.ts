@@ -409,6 +409,50 @@ describe("recovery", () => {
         expect(resumed.data.turnCount).toBe(2);
         expect(resumed.data.status).toBe("done");
     });
+
+    it("reconciles an interrupted assistant.call from the child it already created", async () => {
+        // `assistant.call` is the one mutating Operation with no `reconcile`, so an interrupted
+        // call could not be answered even though the answer is sitting in the store: the child
+        // Conversation was born under the caller's own idempotency key. Without it the recovery
+        // path escalates — once per wake — for a call that demonstrably happened.
+        const harness = buildHarness([
+            {
+                assistant: "receptionist",
+                turn: 0,
+                toolCalls: [{ name: "assistant__call__accountant", arguments: { prompt: "book it" } }],
+            },
+            { assistant: "accountant", text: "booked", finishReason: "answered" },
+            { assistant: "receptionist", turn: 1, text: "Thanks.", finishReason: "answered" },
+        ]);
+        const receptionist = await harness.seedAssistant({
+            key: "receptionist",
+            tools: [{ operation: "assistant.call:accountant" }],
+        });
+        await harness.seedAssistant({ key: "accountant", name: "Accountant", triggers: [] });
+        const docRef = await harness.birth({ assistant: receptionist });
+        await harness.driver.advance(docRef);
+
+        const children = async () =>
+            (await harness.things.search<Conversation>(SPECS.Conversation_DM, undefined, 100)).filter(
+                (candidate) => candidate.data.assistantKey === "accountant",
+            );
+        expect(await children()).toHaveLength(1);
+
+        await crashAfterIntent(harness, docRef);
+        await harness.watcher.scan();
+
+        // No escalation and no second child: it is waiting for the Assistant it already called.
+        const after = await harness.conversation(docRef);
+        expect(after.data.status).toBe("waiting");
+        expect(after.data.waitingFor).toBe("assistant");
+        expect(after.data.escalationCount ?? 0).toBe(0);
+        expect(await children()).toHaveLength(1);
+
+        // And the ordinary child-completion delivery still resumes it.
+        await harness.driver.advance((await children())[0]!.docRef);
+        await harness.watcher.scan();
+        expect((await harness.conversation(docRef)).data.status).toBe("done");
+    });
 });
 
 describe("manual connectors", () => {
