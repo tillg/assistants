@@ -231,7 +231,7 @@ a compose-level environment variable rather than a constructor argument, on purp
 
 | Recipe | What it does | When you want it |
 |---|---|---|
-| `just bootstrap` | Loads what the system **is**: the Receptionist, the Accountant and the `RuntimeState` singleton. Idempotent | Called by `dev`. Re-run after editing the seeded Assistant definitions |
+| `just bootstrap` | Loads what the system **is**: the Receptionist, the Accountant and the `RuntimeState` singleton. Idempotent, and it *reconciles* — the Assistant seeds are re-applied on every run, so a prompt edited in the web application is overwritten. The `RuntimeState` is left alone, because it is live state | Called by `dev`. Re-run after editing the seeded Assistant definitions |
 | `just demo-data` | Loads what the household **has**: parties, processes, documents, invoices, and the Firefly books. Pauses the Runtime while loading | A realistic system to look at, without spending anything |
 | `just demo-reset` | `clean` → `build` → `up` → `wait` → `bootstrap` → `demo-data`. Takes the books with it | When the demo state has drifted. Firefly has no bulk delete and its data lives in a named volume, so a full teardown is the only reset symmetric across both Authorities |
 | `just firefly-token` | Prints the Firefly personal access token from the shared volume | Talking to the Firefly API by hand |

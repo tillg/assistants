@@ -14,18 +14,29 @@ import { eq, nowIso, path as fieldPath, SPECS, ThingRepository } from "../a12/th
 import { ASSISTANT_SEEDS } from "./assistants.js";
 import { RUNTIME_STATE_KEY } from "../watcher/watcher.js";
 
-export async function bootstrap(things: ThingRepository): Promise<{ created: string[]; kept: string[] }> {
+/**
+ * Seed or re-seed the system's own definition.
+ *
+ * The two halves are deliberately asymmetric. An **Assistant seed is a definition**: re-running
+ * bootstrap applies an edited one, because that is what README says it does and the only alternative
+ * was `just clean`, which destroys the books. The **RuntimeState is live state**: re-running must not
+ * touch it, or a `just pause` would be disengaged and the watermark reset — re-queueing every Thing
+ * in the store as new work.
+ *
+ * The consequence of the first half is worth knowing: an Assistant's prompt edited in the web
+ * application is overwritten by the next `just bootstrap`, and therefore by the next `just dev`. The
+ * seed is the source of truth; that is what makes it reproducible.
+ */
+export async function bootstrap(
+    things: ThingRepository,
+): Promise<{ created: string[]; updated: string[]; kept: string[] }> {
     const created: string[] = [];
+    const updated: string[] = [];
     const kept: string[] = [];
 
     for (const seed of ASSISTANT_SEEDS) {
         const key = `assistant:${seed.key}`;
-        const existing = await things.findByIdempotencyKey(SPECS.Assistant_DM, key);
-        if (existing) {
-            kept.push(seed.key);
-            continue;
-        }
-        await things.create<Record<string, unknown>>(SPECS.Assistant_DM, {
+        const fields = {
             key: seed.key,
             name: seed.name,
             description: seed.description,
@@ -37,7 +48,19 @@ export async function bootstrap(things: ThingRepository): Promise<{ created: str
             triggers: seed.triggers,
             tools: seed.tools.map((operation) => ({ operation })),
             idempotencyKey: key,
-        });
+        };
+        const existing = await things.findByIdempotencyKey<Record<string, unknown>>(
+            SPECS.Assistant_DM,
+            key,
+        );
+        if (existing) {
+            // `ThingRepository.update` merges onto the raw stored document, so anything the seed does
+            // not describe survives.
+            await things.update(SPECS.Assistant_DM, existing.docRef, fields);
+            updated.push(seed.key);
+            continue;
+        }
+        await things.create<Record<string, unknown>>(SPECS.Assistant_DM, fields);
         created.push(seed.key);
     }
 
@@ -58,7 +81,7 @@ export async function bootstrap(things: ThingRepository): Promise<{ created: str
         created.push("runtime-state");
     }
 
-    return { created, kept };
+    return { created, updated, kept };
 }
 
 /** Set or clear the global kill switch. Used by `just pause` / `just resume` and the demo loader. */

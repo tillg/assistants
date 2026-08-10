@@ -42,7 +42,11 @@ async function main(): Promise<void> {
     }
 
     const result = await bootstrap(things);
-    log.info("bootstrap complete", { created: result.created, alreadyPresent: result.kept });
+    log.info("bootstrap complete", {
+        created: result.created,
+        updated: result.updated,
+        alreadyPresent: result.kept,
+    });
 }
 
 main().catch((error: unknown) => {
