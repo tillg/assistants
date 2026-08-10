@@ -161,6 +161,58 @@ describe("the materialised scan (scan 1)", () => {
     });
 });
 
+describe("result delivery (scan 5)", () => {
+    it("does not rewrite the transcript of a caller that has already finished", async () => {
+        // `awaitMode: "detach"` still sets `parentConversationId`, so the child matches scan 5 and
+        // its result was appended — as a `role:"user"`, `kind:"answer"` entry — into a Conversation
+        // that finished two Turns earlier, and written back. The comment at the re-run guard says
+        // "a result arriving for a Conversation that has already moved on is a log line, never a
+        // resurrection"; it declined to re-run the parent but not to rewrite it.
+        const harness = buildHarness([
+            {
+                assistant: "receptionist",
+                turn: 0,
+                toolCalls: [
+                    {
+                        name: "assistant__call__accountant",
+                        arguments: { prompt: "have a look when you can", awaitMode: "detach" },
+                    },
+                ],
+            },
+            { assistant: "receptionist", turn: 1, text: "Handed it off, nothing more from me.", finishReason: "answered" },
+            { assistant: "accountant", text: "booked", finishReason: "answered" },
+        ]);
+        const receptionist = await harness.seedAssistant({
+            key: "receptionist",
+            tools: [{ operation: "assistant.call:accountant" }],
+        });
+        await harness.seedAssistant({ key: "accountant", triggers: [] });
+        const docRef = await harness.birth({ assistant: receptionist });
+
+        // The detached call returns a value, so the caller keeps going and finishes.
+        await harness.driver.advance(docRef);
+        await harness.driver.advance(docRef);
+        const finished = await harness.conversation(docRef);
+        expect(finished.data.status).toBe("done");
+        const entriesWhenDone = (finished.data.entries ?? []).length;
+
+        const child = (await conversations(harness)).find(
+            (row) => row.data.assistantKey === "accountant",
+        )!;
+        await harness.driver.advance(child.docRef);
+
+        await harness.watcher.scan();
+        await harness.watcher.scan();
+
+        const after = await harness.conversation(docRef);
+        expect((after.data.entries ?? []).length).toBe(entriesWhenDone);
+        expect(after.data.status).toBe("done");
+        // Settled, so scan 5 does not retry it every two seconds for ever.
+        const settledChild = await harness.conversation(child.docRef);
+        expect(settledChild.data.resultDeliveredAt).toBeTruthy();
+    });
+});
+
 describe("the RuntimeState the scan writes back", () => {
     it("does not undo a pause issued while the scan was in flight", async () => {
         // The global kill switch. `scan()` reads the state at the top of a pass that takes seconds
