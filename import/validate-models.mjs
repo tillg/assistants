@@ -93,6 +93,26 @@ const FORM_CONTENT_KEYS = [
     "defaults",
 ];
 
+/**
+ * Fields without which a Thing is not a Thing of that Model.
+ *
+ * `requirednessConfig` is the only requiredness carrier a Model has, and it binds *both* writers —
+ * the User through the form and the Runtime through `thingstore.create`. A tool-layer check would
+ * leave the UI hole open, which is why this lives in the Model.
+ *
+ * Invoice is the entry that matters: it declared none at all, so `thingstore.create` with `{}` was
+ * accepted, and an Invoice with no number, no issuer, no date and no amount appeared in the overview
+ * and in every search result indistinguishable from a real one. It is also the one Model that feeds
+ * a money decision. These four are exactly `Invoice_OM`'s identifying columns — the four without
+ * which the overview row is blank.
+ */
+const MANDATORY_FIELDS = {
+    Party_DM: ["f_name"],
+    Process_DM: ["f_title"],
+    Document_DM: ["f_title"],
+    Invoice_DM: ["f_invoiceNumber", "f_issuerName", "f_issueDate", "f_amountGross"],
+};
+
 const errors = [];
 const warnings = [];
 
@@ -230,6 +250,26 @@ for (const [dm, required] of Object.entries(WATCHER_FIELDS)) {
         const field = fields.get(fieldId);
         if (!field) errors.push(`${dm}: the watcher filters on ${fieldId}, which does not exist`);
         else if (!field.indexed) errors.push(`${dm}.${fieldId}: the watcher filters on it, so it must carry the "indexed" annotation`);
+    }
+}
+
+for (const [dm, required] of Object.entries(MANDATORY_FIELDS)) {
+    const fields = dmFields.get(dm);
+    if (!fields) {
+        errors.push(`${dm}: missing entirely, but fields of it are required`);
+        continue;
+    }
+    for (const fieldId of required) {
+        const field = fields.get(fieldId);
+        if (!field) {
+            errors.push(`${dm}: ${fieldId} is required but does not exist`);
+        } else if (!field.required) {
+            errors.push(
+                `${dm}.${fieldId} (${field.name}) must carry "requirednessConfig" — without it the ` +
+                    `Model accepts a Thing with this field empty, from the form and from ` +
+                    `thingstore.create alike`,
+            );
+        }
     }
 }
 
