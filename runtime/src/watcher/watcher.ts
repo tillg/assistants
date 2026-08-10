@@ -460,6 +460,32 @@ export class Watcher {
                     `Conversation_DM/${parentId}`,
                 );
 
+                // A caller that has already finished is told in the log, not in its transcript.
+                // Appending would rewrite a Conversation that is done — and as `role:"user"`,
+                // `kind:"answer"`, which is what `buildMessages` turns into a user message, so it
+                // corrupts the record for any later reader including a real provider. The result is
+                // not lost: it lives on the child, which the UI shows.
+                //
+                // Scoped to *terminal* callers deliberately. A parent that is `running`, or waiting
+                // on something else, may still legitimately be owed the answer — a `wait` caller
+                // whose lease expired and which escalated, for one — and declining there would lose
+                // the result for good once `resultDeliveredAt` is stamped.
+                if (parent.data.status === "done" || parent.data.status === "failed") {
+                    log.info("a child finished for a caller that had already moved on", {
+                        child: child.thingId,
+                        parentId,
+                        childStatus: child.data.status,
+                    });
+                    child.data.resultDeliveredAt = nowIso();
+                    await this.deps.things.update(
+                        SPECS.Conversation_DM,
+                        child.docRef,
+                        child.data as Record<string, unknown>,
+                    );
+                    delivered += 1;
+                    continue;
+                }
+
                 const failed = child.data.status === "failed";
                 appendEntry(parent.data, {
                     role: "user",
