@@ -308,6 +308,34 @@ defects, both of which only a live system could show.
 That second one is the most useful thing this phase found: a fix that passes its own test and does
 nothing in production, because the test supplied the input the system never does.
 
+7. **The User could not start any work at all.** A Document created in the web application stores no
+   `createdAt` — the four machine fields are on no form and A12's form engine has no save hook that
+   could set one — and the materialised scan constrains on that field with a `date_range`, which
+   cannot match an absent value. So a Thing a human creates is invisible to the trigger watcher **for
+   ever**. The product's central premise, "a Document arrives and an Assistant notices", failing on
+   the one path a human actually uses.
+
+   Found by creating a Document by hand in the browser and watching the Runtime log nothing for
+   minutes. Verified against the live store: `CreatedAt`, `UpdatedAt`, `IdempotencyKey` and
+   `CreatedByConversationId` all `undefined`, only `__meta.createdAt` set.
+
+   This is BUG-36's mechanism with a far worse consequence than BUG-36 claims for itself. BUG-36 rates
+   itself **low** because "nothing currently filters on it" — true of `updatedAt`, and false of
+   `createdAt`, which the scan filters on and which is absent for exactly the same reason. The report
+   found the mechanism and mis-scoped the blast radius.
+
+   Fixed in `cc938e3`: the materialised scan stamps `createdAt` on any trigger-eligible Thing that has
+   none, and the next scan births it through the ordinary path. `createdAt` is the Runtime's own field,
+   so this is its owner filling it in, not a special case — and it keeps one code path for birth and
+   one meaning for the watermark.
+
+   **Why nothing caught it:** every creation path in the repository stamps the field —
+   `ThingRepository.create`, the demo loader, and `createArrivingDocument`, the e2e helper whose entire
+   job is to simulate "something arrives". The helper no longer does (`464825f`), so the flagship
+   end-to-end spec is now the guard. That is the same defect BUGS.md notes about BUG-01 — "the test
+   knows something the User is not told" — in a second place, and both were the same mistake: a test
+   supplying an input the system never supplies.
+
 ### Verified by hand in a browser
 
 - The **Conversation** and **Runtime** forms open and render completely — transcript, `finishReason`,
@@ -321,6 +349,22 @@ nothing in production, because the test supplied the input the system never does
 - A full CRUD cycle: create (refused, then saved), read, search, edit, delete-with-confirmation.
 - **BUG-01 at volume**: 30 Open Questions answered with **no** `AnsweredAt`, and all 31 waiting
   Conversations resumed within 40 seconds.
+- **BUG-01's own repro, by hand, end to end.** A Document created in the browser, the Accountant's
+  question opened in the form, `Confirmed = yes`, an answer typed, **`Answered at` left untouched**,
+  Save. The report says "the save lands, and nothing else happens, indefinitely". Observed:
+
+  ```
+  13:33:47 stamped createdAt on a Thing that had none   (the new finding, above)
+  13:33:47 conversation born  receptionist
+  13:33:50 conversation born  accountant
+  13:33:54 open question raised  kind=confirm
+  13:35:46 scan did work {"births":0,"continuations":1}   <- the answer, with no timestamp
+  13:35:48 conversation finished  accountant   turns=4
+  13:35:51 conversation finished  receptionist turns=3
+  ```
+
+  and afterwards `Confirmed=true`, `AnsweredAt=undefined` — the field is still empty, which is the
+  whole point. About two seconds, not never.
 - **The watermark at volume**: 30 of 30 Documents got a Conversation. Nothing lost.
 
 ### Smaller things noticed, not fixed
