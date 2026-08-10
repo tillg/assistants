@@ -195,10 +195,15 @@ test-live:
 
 # ---------------------------------------------------------------------------- housekeeping
 
+# `e2e` was the only package with its own eslint config that this recipe skipped, and it had been
+# failing its own gates for two commits. Its config imports the client's, so these are the project's
+# own rules, not a vendor default it never opted into. Needs `just install` once for e2e/node_modules.
+
 # Typecheck and lint everything that has an opinion.
 check:
     @cd runtime && npm run typecheck
     @cd client && npx tsc --noEmit && npm run lint
+    @cd e2e && npm run typecheck && npm run lint && npm run format
     node import/validate-models.mjs
     node scripts/check-docs.mjs
 
