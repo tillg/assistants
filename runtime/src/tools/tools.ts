@@ -174,6 +174,19 @@ function projectTransactionGroup(group: Record<string, unknown>): Array<Record<s
     }));
 }
 
+/**
+ * The current calendar month, as Firefly wants it.
+ *
+ * Firefly rejects `start === end` ("The start must be a date before end"), so a period always spans
+ * the whole month rather than a single day.
+ */
+function currentMonth(): { start: string; end: string } {
+    const now = new Date();
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0));
+    return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+}
+
 /** `chase` also wakes the caller after five minutes to check; `wait` and `detach` do not. */
 function chaseWakeAt(awaitMode: string): string | undefined {
     return awaitMode === "chase" ? nowIso(new Date(Date.now() + 5 * 60_000)) : undefined;
@@ -737,11 +750,26 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
 
     const getBudgetReport: ToolDefinition = {
         name: "bookkeeping.getBudgetReport",
-        description: "Budgets and what has been spent against them.",
+        description:
+            "Each budget's target and what has been spent against it, for a period. Defaults to the " +
+            "current calendar month. A budget with no target set for the period reports no limit, " +
+            "which is not the same as a target of zero.",
         mutating: false,
-        parameters: { type: "object", properties: {} },
-        async execute(): Promise<ToolOutcome> {
-            return { kind: "value", value: await firefly.listBudgets() };
+        parameters: {
+            type: "object",
+            properties: {
+                start: str("First day of the period, yyyy-mm-dd. Defaults to the 1st of this month."),
+                end: str("Last day of the period, yyyy-mm-dd. Defaults to the end of this month."),
+            },
+        },
+        async execute(args): Promise<ToolOutcome> {
+            // A period is required by Firefly, not optional: without one it reports `spent: null` for
+            // every budget, which reads as "nothing spent". ACCOUNTING.md always specified
+            // `getBudgetReport(period)`; the parameter simply was not there.
+            const month = currentMonth();
+            const start = args["start"] ? String(args["start"]) : month.start;
+            const end = args["end"] ? String(args["end"]) : month.end;
+            return { kind: "value", value: await firefly.listBudgets({ start, end }) };
         },
     };
 

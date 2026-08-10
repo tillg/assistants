@@ -372,6 +372,12 @@ export const DEMO_ACCOUNTS = [
     { name: "Income:Reimbursements", type: "revenue" },
 ] as const;
 
+/**
+ * The window the demo budget limits span, used when looking budgets up by name — `listBudgets` needs
+ * a period, and the loader only wants each budget's identity.
+ */
+export const DEMO_BUDGET_WINDOW = { start: "2026-01-01", end: "2027-12-31" };
+
 export const DEMO_BUDGETS = [
     { name: "Health", amount: "300.00", start: "2026-08-01", end: "2026-08-31" },
     { name: "Renovation", amount: "48000.00", start: "2026-01-01", end: "2027-12-31" },

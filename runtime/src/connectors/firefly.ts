@@ -419,15 +419,67 @@ export class FireflyConnector {
         });
     }
 
-    async listBudgets(): Promise<Array<{ id: string; name: string; spent?: unknown }>> {
-        const { data } = await this.call<{
-            data?: Array<{ id: string; attributes: Record<string, unknown> }>;
-        }>("GET", "/budgets");
-        return (data.data ?? []).map((row) => ({
-            id: row.id,
-            name: String(row.attributes["name"] ?? ""),
-            spent: row.attributes["spent"],
-        }));
+    /**
+     * Budgets, with the target and the spend, for a period.
+     *
+     * Two calls, because Firefly puts the two numbers in two places and neither is available
+     * unasked:
+     *
+     *   - `GET /budgets` **without** a period answers `spent: null` for every budget. With one, it
+     *     answers an array of per-currency sums, and they are **negative**.
+     *   - the target is not on the budget at all: it lives on its limits. `GET /budget-limits` returns
+     *     every limit across every budget in one call, joinable on `budget_id` — which is why this is
+     *     two requests and not 1 + N.
+     *
+     * `spent` comes back as a positive number and `limit` as a number or `undefined`. A budget with no
+     * limit in the window gets `undefined`, not `0`: "no target set" and "a target of nothing" are
+     * different answers, and a model told `0` would read an unlimited budget as a spent-out one.
+     */
+    async listBudgets(period: {
+        start: string;
+        end: string;
+    }): Promise<Array<{ id: string; name: string; spent: number; limit?: number; currency?: string }>> {
+        const query = `start=${period.start}&end=${period.end}`;
+        const [budgets, limits] = await Promise.all([
+            this.call<{ data?: Array<{ id: string; attributes: Record<string, unknown> }> }>(
+                "GET",
+                `/budgets?${query}`,
+            ),
+            this.call<{ data?: Array<{ id: string; attributes: Record<string, unknown> }> }>(
+                "GET",
+                `/budget-limits?${query}`,
+            ),
+        ]);
+
+        const limitByBudget = new Map<string, { amount: number; currency?: string }>();
+        for (const row of limits.data.data ?? []) {
+            const budgetId = String(row.attributes["budget_id"] ?? "");
+            const amount = Number(row.attributes["amount"] ?? NaN);
+            if (!budgetId || !Number.isFinite(amount)) continue;
+            // Several limits can overlap a window; the household's own reading of "the target" is
+            // what is set for this period, so take the largest rather than an arbitrary one.
+            const existing = limitByBudget.get(budgetId);
+            if (!existing || amount > existing.amount) {
+                limitByBudget.set(budgetId, {
+                    amount,
+                    currency: row.attributes["currency_code"] as string | undefined,
+                });
+            }
+        }
+
+        return (budgets.data.data ?? []).map((row) => {
+            const spentRows = (row.attributes["spent"] ?? []) as Array<Record<string, unknown>>;
+            const spent = Array.isArray(spentRows)
+                ? spentRows.reduce((total, entry) => total + Math.abs(Number(entry["sum"] ?? 0)), 0)
+                : 0;
+            const limit = limitByBudget.get(row.id);
+            return {
+                id: row.id,
+                name: String(row.attributes["name"] ?? ""),
+                spent: Number(spent.toFixed(2)),
+                ...(limit ? { limit: limit.amount, currency: limit.currency } : {}),
+            };
+        });
     }
 
     async isReachable(): Promise<boolean> {

@@ -26,6 +26,7 @@ import { isPaused, setPaused } from "../bootstrap/bootstrap.js";
 import { sleep } from "../loop/advance.js";
 import {
     DEMO_ACCOUNTS,
+    DEMO_BUDGET_WINDOW,
     DEMO_BUDGETS,
     DEMO_DOCUMENTS,
     DEMO_INVOICES,
@@ -175,17 +176,21 @@ export async function loadDemo(
                 report.accounts += 1;
             }
 
-            const budgets = await firefly.listBudgets().catch(() => []);
+            // The loader only needs each budget's *identity*, not its numbers, and `listBudgets` now
+            // requires a period — so ask over the window the demo limits themselves cover.
+            const budgets = await firefly
+                .listBudgets({ start: DEMO_BUDGET_WINDOW.start, end: DEMO_BUDGET_WINDOW.end })
+                .catch(() => [] as Array<{ id: string; name: string }>);
             for (const budget of DEMO_BUDGETS) {
-                let found = budgets.find((candidate) => candidate.name === budget.name);
-                if (!found) {
+                let budgetId = budgets.find((candidate) => candidate.name === budget.name)?.id;
+                if (!budgetId) {
                     const created = await firefly.createBudget(budget.name);
-                    found = { id: created.id, name: budget.name };
+                    budgetId = created.id;
                     report.budgets += 1;
                 }
                 await firefly
                     .setBudgetLimit({
-                        budgetId: found.id,
+                        budgetId,
                         start: budget.start,
                         end: budget.end,
                         amount: budget.amount,

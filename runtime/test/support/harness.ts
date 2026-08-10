@@ -73,8 +73,12 @@ export class FakeFirefly {
     async listOpenItems() {
         return [];
     }
-    async listBudgets() {
-        return [];
+    async listBudgets(period: { start: string; end: string }) {
+        // A period is required, and `spent` is a number that is never null: Firefly answers `[]` for
+        // an unspent budget, and the connector normalises that to 0 so "nothing spent" cannot be
+        // mistaken for "unknown".
+        void period;
+        return [{ id: "1", name: "Health", spent: 0, limit: 300, currency: "EUR" }];
     }
     async createBudget() {
         return { id: "b1" };
