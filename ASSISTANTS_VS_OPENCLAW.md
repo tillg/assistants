@@ -47,8 +47,8 @@ packaging and reach — not ideas we are missing.
 
 ## The layer cake, side by side
 
-The article draws OpenClaw as a three-storey building: the chat model in the basement, the Pi
-agent toolkit on the first floor, the gateway on the second, channels above the roof. Tool
+The article draws OpenClaw as a three-storey building: the chat model on the ground floor, the Pi
+agent toolkit on the first, the gateway on the second, channels above the roof. Tool
 execution happens **in the gateway**, not in the loop (article figure 2), because the gateway is
 where the security policy lives.
 
@@ -190,10 +190,12 @@ whether the key landed rather than repeating the work. The contract that makes i
 *every Operation is either read-only or idempotent under a caller-supplied key, and no Operation
 may be both mutating and unkeyed.*
 
-Selma has no idempotency of any kind. Neither does Pi, Opencode or the Claude Agent SDK. For a
-coding agent that is defensible — re-running `read` is free. For an agent with a `bank.sendMoney`
-skill and full system access *(article)*, it is the difference between a bug and a payment made
-twice, and the article's architecture has nowhere to put the answer.
+Selma has no idempotency of any kind — no key, no reconciliation, no distinction between a call
+that was made and a call that was only intended. Nor did the survey of Pi, Opencode and the Claude
+Agent SDK turn up anything of the shape. For a coding agent that is defensible: re-running `read`
+is free. For an agent with money-moving skills and full system access *(article)*, it is the
+difference between a crash and a payment made twice, and the architecture as the article describes
+it has nowhere to put the answer.
 
 This is the single largest thing we have that they do not, and it is not an implementation detail
 — it is a contract on every Operation that gets added.
@@ -299,10 +301,10 @@ tracer is a no-op and nothing breaks.
 
 **The strongest case for it.** We have no token accounting at all — neither provider reads
 `usage`, despite [CONTEXT.md](CONTEXT.md) calling the Turn "the unit in which cost is counted".
-Our correlation between log lines is a manual convention. And our own documents admit, in four
-places, that `just logs runtime` is a better debugging surface than the transcript, because *"a
-Conversation's transcript renders as a data grid, not a transcript view"*. Phoenix would fix the
-developer experience tomorrow.
+Our correlation between log lines is a manual convention. And five separate documents in this
+repository concede the same sentence — *"a Conversation's transcript renders as a data grid, not a
+transcript view"* — with `just logs runtime` named as the better debugging surface. Phoenix would
+fix the developer experience tomorrow.
 
 **Why the position still holds.** Three reasons, in order of weight.
 
@@ -397,8 +399,8 @@ Ranked, with a verdict, what it costs and what it would need.
 | 5 | Active hours on a Schedule | **Adopt** with (1) | Trivial | Same ADR |
 | 6 | Compaction as a **Turn-boundary step recorded as an Entry** — never a background task | **Adapt, later** | Medium | The `maxTurns`-reached path already exists to hang it on |
 | 7 | Progressive disclosure of Skills — inject an index, let the model fetch the body | **Adapt, later** | Medium; needs a `skill.read` Operation | Only worth it past ~10 Skills on one Assistant. The most any of ours has is 3 |
-| 8 | Order the system prompt stable-first, volatile-last, with an explicit boundary | **Adopt** | Nearly free | A comment and a reordering in `buildMessages` |
-| 9 | A capability-fallback ladder — step down when the provider refuses a feature, rather than failing | **Adapt** | Small | Fits the existing transient-retry tier |
+| 8 | Keep the system prompt stable-first, volatile-last, and say so | **Adopt** | Free | We already are — prompt then Skills then entries. The learning is to *keep* it: the first time something time-varying goes in, it goes last, or every Turn's prefix differs |
+| 9 | A capability-fallback ladder — step down when the provider refuses a *feature*, rather than failing the Turn | **Adapt, if needed** | Small | Nothing today: we send no reasoning parameters. Worth remembering the day we do |
 | 10 | A transcript **view** in the UserInterface | **Revisit** | This is the D-005 trade, taken deliberately | Its own change |
 | 11 | Markdown skills discovered from a folder | **Reject** | — | Skills are fields on an Assistant Thing (ADR-0009). A folder is a second authoring path |
 | 12 | A shared/community skill library | **Reject** | — | ADR-0009 forbids it, for a reason that gets stronger when money is involved |
@@ -436,8 +438,9 @@ be over-engineering in a personal chat agent.
 2. **Every tool call is potentially suspending.** A human-paced Operation is expressible. That one
    generalisation is what turns a coding-agent loop into ours, and nothing in either system can
    express it.
-3. **The intent log and keyed idempotency.** Nobody else has this, and it is the difference
-   between a crash and booking €96.50 twice.
+3. **The intent log and keyed idempotency.** Nothing of the shape appears in Selma, nor in the
+   three systems [AGENTIC_LOOP.md](AGENTIC_LOOP.md) surveyed. It is the difference between a crash
+   and booking €96.50 twice.
 4. **One Authority per fact.** No cached foreign facts, therefore no lies to reconcile. Selma's
    memory design is a retrieval index over things it wrote down; ours is a query against whoever
    owns the truth.
@@ -508,7 +511,8 @@ weeks in the middle of a payment and be exactly where it was.
 
 The most valuable thing this comparison produced is not a feature to copy. It is that our own
 Schedule Trigger — the one piece we would build to close the most visible gap — cannot use the
-exactly-once mechanism the rest of the system relies on, and nobody had noticed.
+exactly-once mechanism the rest of the system relies on. Half a dozen documents record that a
+Schedule Trigger is inert. None records that the mechanism for making one safe does not yet exist.
 
 ---
 
