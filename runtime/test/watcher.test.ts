@@ -7,7 +7,7 @@
  * query**, and the watermark may never pass a Thing that has not been decided.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildHarness, nowIso, type Harness } from "./support/harness.js";
 import { SPECS } from "../src/a12/things.js";
 import { RUNTIME_STATE_KEY } from "../src/watcher/watcher.js";
@@ -188,6 +188,57 @@ describe("the materialised scan (scan 1)", () => {
 
         birthed = await subjectsBirthed(harness);
         expect(birthed.has(skipped.thingId)).toBe(true);
+    });
+
+    it("says so when a frontier stays pinned, once rather than on every scan", async () => {
+        // A frozen frontier is correct — nothing is lost — but it is silent, and a Conversation
+        // that never finishes pins its Model's watermark for ever. Nothing behind that point is
+        // birthed again and no line anywhere says why.
+        const t0 = Date.now() - 3_600_000;
+        const harness = buildHarness([], { maxBirthsPerHour: 1000 });
+        await harness.seedAssistant();
+        await seedState(harness, nowIso(new Date(t0)));
+
+        // A lease far enough out that the freeze is the *only* reason nothing moves.
+        const blocker = await harness.things.create(SPECS.Conversation_DM, {
+            assistantKey: "receptionist",
+            status: "running",
+            leaseUntil: nowIso(new Date(Date.now() + 86_400_000)),
+            idempotencyKey: "blocker",
+        });
+        await harness.things.create(SPECS.Document_DM, {
+            title: "created by a Conversation that never finishes",
+            createdAt: nowIso(new Date(t0 + 60_000)),
+            createdByConversationId: blocker.thingId,
+            idempotencyKey: "never-birthed",
+        });
+
+        const pinned = (line: string): boolean => line.includes("pinned");
+        const warnings: string[] = [];
+        const console_ = vi.spyOn(console, "warn").mockImplementation((line: unknown) => {
+            warnings.push(String(line));
+        });
+
+        try {
+            await harness.watcher.scan();
+            // One frozen scan is not news: an ordinary Conversation finishes in seconds, and the
+            // scan runs every two. Warning here would warn on every healthy chain in the system.
+            expect(warnings.filter(pinned)).toHaveLength(0);
+
+            vi.useFakeTimers({ toFake: ["Date"] });
+            vi.setSystemTime(new Date(Date.now() + 6 * 60_000));
+            await harness.watcher.scan();
+            expect(warnings.filter(pinned)).toHaveLength(1);
+            expect(warnings.filter(pinned)[0]).toContain("Document_DM");
+
+            // Still stuck ten minutes later, and the operator has already been told once.
+            vi.setSystemTime(new Date(Date.now() + 10 * 60_000));
+            await harness.watcher.scan();
+            expect(warnings.filter(pinned)).toHaveLength(1);
+        } finally {
+            vi.useRealTimers();
+            console_.mockRestore();
+        }
     });
 
     it("does not let one Model's progress bury another Model's skipped Thing", async () => {
