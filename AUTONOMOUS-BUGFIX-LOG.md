@@ -16,13 +16,46 @@ reviewed afterwards.
 worth more than reading the rest.
 
 ```bash
-just demo-reset          # the demo books carry probe leftovers from this run — see Traps
-just test                # models, runtime, integration, client, e2e
+just test                # models, runtime, integration, client, e2e — exit 0 at handover
 just check
-git log --oneline 6dbf021..HEAD      # 77 commits; each fix commit says what it traded away
+git log --oneline 6dbf021..0d125d5   # the 78 commits of this run
 ```
 
-Everything was green at handoff. If it is not, that is the first thing to know.
+### State at handover (2026-08-11, ~09:10)
+
+```
+test-models        26 models checked — 0 error(s), 0 warning(s)
+                   10 validator checks exercised — 0 not enforced
+test-runtime       81 passed
+test-integration   65 passed          <- must say PASSED, not skipped; see Traps
+test-client       288 passed
+test-e2e           30 passed          <- no fixme, no skips
+just test          exit 0
+```
+
+Working tree clean. **My 78 commits end at `0d125d5` and are pushed.** There are **3 commits on top
+that are not mine and not pushed** (`8a42b6d`, `576ccad`, `c44bef9` — a `specs/system/` rewrite and a
+compose change, from a parallel session on this repo). Do not push those on someone else's behalf, and
+check with them before rebasing anything under them.
+
+One of theirs touches what I tested: `compose/docker-compose.yml` now takes
+`THINGSTORE_PASSWORD: ${RUNTIME_PASSWORD}` from `.env` instead of a literal. Today `.env` happens to
+hold `assistants-runtime-dev`, which is exactly the default hard-coded at
+`runtime/test/integration/support/live.ts:22` — so the integration tier still authenticates. **If
+`RUNTIME_PASSWORD` is ever regenerated, that default has to come from `.env` too or all 65
+integration tests fail at login.** Worth fixing pre-emptively; it is two lines.
+
+### What is verified, and what is not
+
+Verified: all 43 findings re-checked and fixed, each live one with a red test committed before its
+fix; the whole suite green; and the critical paths driven by hand in a browser against the live stack
+(the two forms that could not open, BUG-24's mandatory fields, BUG-34's charset refusal, a full CRUD
+cycle, and BUG-01's own repro end to end — Document created in the UI, question answered in the form
+with `Answered at` left empty, Conversation resumed in about two seconds).
+
+**Not verified:** anything that needs a real LLM. `ScriptedProvider` returns fixed arguments, so the
+loop has never passed a `thingId` that was created during the run — see item 2 below. That is the
+largest remaining unknown and it is why item 2 is item 2.
 
 ### Then, in this order
 
@@ -79,9 +112,32 @@ Everything was green at handoff. If it is not, that is the first thing to know.
 
 ### Traps that will cost you an hour each
 
-- **It is Rancher Desktop, not Docker Desktop.** Quitting "Docker Desktop" silently does nothing.
-- **Its port forwarding dies.** All published ports accept TCP and then close, on every project at
-  once. The fix is restarting Rancher Desktop; containers are fine and restarting them does not help.
+- **Rancher Desktop's port forwarding dies, repeatedly.** It happened twice in two days, and the second
+  time it made `just test` fail in a way that looks like a code regression. Diagnose it in ten seconds
+  before you debug anything else:
+
+  ```bash
+  docker ps                              # every container Up and healthy
+  curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://localhost:8082/   # 000
+  nc -z -G 3 127.0.0.1 8082              # SUCCEEDS — accepted, then closed
+  ```
+
+  Containers healthy + ports 000 + TCP accepted = the host bridge, not the stack. Restarting the
+  containers does **not** help. Quit and reopen **Rancher Desktop** (not "Docker Desktop" — that name
+  does not exist here and `osascript -e 'quit app "Docker Desktop"'` fails silently). The stack answers
+  again about two minutes later.
+
+- **A skipped integration tier reads as green.** `support/live.ts` probes reachability at module load
+  and the suites use `describe.skipIf`, so an unreachable stack yields *65 skipped* rather than 65
+  failures — deliberately, so the tier can run on a laptop with nothing up. It means "integration
+  passed" and "integration ran" are different claims, and only the literal line `Tests 65 passed (65)`
+  distinguishes them. When `just test` failed above, the integration tier reported skips and the
+  **e2e** tier was the only thing that failed loudly.
+
+- **Two `ERROR a tool call threw` lines appear in a passing run**, naming
+  `ZeichenNichtImZeichensatz` and `No document Party_DM/x`. Those are BUG-14's and BUG-21's tests
+  deliberately making a tool fail, and the `log.error` beside them *is* the fix working — the operator
+  gets the stack, the model gets the reason. Do not go hunting them.
 - **`just restart server` now also restarts the Runtime** (`341f182`) — because the Runtime holds a
   keep-alive pool to the old container IP and every scan fails with a bare `TypeError: fetch failed`,
   with nothing saying why. If you restart the server by hand, restart the Runtime too.
@@ -91,7 +147,14 @@ Everything was green at handoff. If it is not, that is the first thing to know.
   characters — which is *shorter* than the 200-character fields it searches.
 - **A red integration test can leak a Firefly transaction**, because `postedIds.push` happens after the
   call the assertion fails on. `e2e/tests/base/0-clean.setup.ts` also cleans `Party_DM` and
-  `Document_DM` but not `Invoice_DM`. Hence `just demo-reset` above.
+  `Document_DM` but not `Invoice_DM`, so the Invoices overview fills up with `2026-118`. `just
+  demo-reset` clears both; it is safe and takes a few minutes.
+
+- **A `test.skip` on "no rows" can hide a guard that never runs.** `7-forms-open.spec.ts` skips a module
+  whose overview is empty, so its result depends on store history — it reported 30 passed on one run and
+  29 passed / 1 skipped on the next, from data alone. That is the honest behaviour and I left it, but a
+  skip there means that module's form was not actually opened. Run `just demo-reset` first if you want
+  all eight to run.
 - **The Playwright MCP's allowed root is the pre-rename path** (`git/assistents`), which no longer
   exists, so screenshots have to go to its temp dir and be copied.
 
