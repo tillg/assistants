@@ -839,3 +839,17 @@ a Postgres volume built on them, going back to committed fixed values needs `jus
 plaintext, so GitGuardian may flag it. That would be a true positive about credentials this README
 publishes on purpose. If the mail is unwelcome, a `.gitguardian.yaml` scoping `.env.example` out is
 the right answer — say so and I will add one.
+
+**Follow-up, 2026-08-10.** It did flag it, and the user asked for the file, so `.gitguardian.yaml`
+now scopes out `.env.example` and `e2e/fixtures/users.json` and nothing else. One caveat worth
+recording: that file is read by ggshield, in a pre-commit hook or in CI. GitGuardian's GitHub
+integration — which is what sends the mail — does not read it, so those two occurrences still have
+to be resolved once in the dashboard.
+
+The same mail turned up a genuine violation of the invariant above: `compose/docker-compose.yml`
+passed the Runtime's ThingStore password as a literal, `assistants-runtime-dev`, while the realm's
+`runtime` user got `${RUNTIME_PASSWORD}` from `.env`. Changing that variable would therefore have
+re-provisioned Keycloak and left the Runtime sending the old value — an authentication failure at
+the first authenticated call, not at startup. It reads from `.env` now. `runtime/src/config.ts`
+still carries the same string as its default, which is correct: that path is a Runtime started
+outside compose, against a stack whose password nothing has changed.

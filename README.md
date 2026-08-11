@@ -36,8 +36,9 @@ records whether it still stands) ·
 [ACCOUNTING.md](ACCOUNTING.md) (what Bookkeeping must provide, and why Firefly III) ·
 [AGENTIC_LOOP.md](AGENTIC_LOOP.md) (the loop's open questions, and a survey of how three existing
 agent systems answer them) · [MARKDOWN_FIELDS.md](MARKDOWN_FIELDS.md) (what is still undecided
-about markdown fields) · and the change that built this,
-[specs/changes/first-running-system/](specs/changes/first-running-system/).
+about markdown fields) · and [specs/system/](specs/system/) (the system as it stands: its
+[domain](specs/system/domain.md), its [architecture](specs/system/architecture.md) and what it
+[does](specs/system/functional.md)).
 
 ## How it works
 
@@ -283,7 +284,8 @@ README quotes, and they are safe only because of that `127.0.0.1`.
 
 Nothing else holds a credential. The files Keycloak imports would, so they are generated too:
 `compose/keycloak/*.template` is committed and `just render-secrets` renders the real ones from
-`.env` on every `just up`.
+`.env` on every `just up`. `.gitguardian.yaml` scopes the two files that hold the published login
+passwords — `.env.example` and `e2e/fixtures/users.json` — out of secret scanning, and nothing else.
 
 **ThingStore** (`server/`, `import/models/`) — an A12 Data Service holding every Thing and
 exposing A12's JSON-RPC interface. It is the only integration surface in the system: the
@@ -464,8 +466,9 @@ This is one running vertical slice, not a finished system. What is honestly miss
 - **Parties have no proper Authority.** CONTEXT.md assigns people to an address book. There is no
   address book External System, so the ThingStore holds them provisionally — a small, recorded
   violation of ADR-0006's spirit, to be reversed the day a connector exists.
-- **`specs/changes/first-running-system/plan.md` is stale.** Only Phase 1 is ticked; phases 2 to 6
-  are in fact built. Trust the code.
+- **A `schedule` Trigger does nothing.** `Assistant_DM` carries a `cron` field and `TriggerKind`
+  admits `schedule`, but no watcher scan fires one. Only `thing-materialised` and `assistant-call`
+  are live.
 
 ## Repository layout
 
@@ -494,7 +497,9 @@ This is one running vertical slice, not a finished system. What is honestly miss
 │   └── keycloak/             the A12Realm import, as *.template + the renderer
 ├── scripts/setup-env.mjs     writes .env and generates the machine credentials
 ├── e2e/                      Playwright
-├── specs/changes/            proposal, domain, architecture and plan, per change
+├── specs/
+│   ├── system/               the system as it stands: domain, architecture, functional
+│   └── changes/              proposal, domain, architecture and plan, per change in flight
 ├── docs/                     adr/ — fifteen architecture decision records; logo/ — design explorations
 ├── assets/                   the logo and its derived files
 ├── buildSrc/, quality/       Gradle build logic and the Checkstyle configuration

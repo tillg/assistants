@@ -1,0 +1,332 @@
+# Functional — what the system does
+
+The User's view: what can be done, what goes in, what comes out, and where the edges are. The
+concepts behind these features are in [domain.md](domain.md); how they are built is in
+[architecture.md](architecture.md); how to run any of it is in [README.md](../../README.md).
+
+There is exactly one human role in practice — the **User**, the household's supervisor — plus a
+machine identity, the **Runtime**, and the test identities the end-to-end tier uses.
+
+## Features
+
+### Answering Open Questions
+
+The User's actual inbox, and the feature the rest exists to serve.
+
+An **Open Questions** module lists every question no one has answered — a plain overview over one
+Model, filtered `undefined_match(answeredAt)`. That filter is ADR-0004's demand that "awaiting the
+User must be a queryable state", satisfied literally, and it is also `OpenQuestionPending_QeM`.
+
+Opening a row shows the question and an answer control decided by its **kind**:
+
+| Kind | The User does | Filled in |
+|---|---|---|
+| `free-text` | Types an answer | `text` |
+| `confirm` | Says yes or no | `confirmed` |
+| `choice` | Picks one of a declared list | `choice` |
+| `perform` | Does something by hand and reports back | `text` |
+
+`perform` is what a **Manual Connector** raises when it needs the User to *do* something — send an
+email, move money, paste in a document's text — and what a terminal failure raises to report an
+error. It is not a special mechanism; it is the same Open Question with a different prompt.
+
+Saving the form is the whole of the interaction. There is no button that calls the Runtime and
+nothing in the web application that knows the Runtime exists — the Runtime notices the answer on
+its next scan, within about two seconds.
+
+### Browsing and editing Things
+
+Eight navigation modules, one per Model: **Open Questions**, **Documents**, **Invoices**,
+**Processes**, **Parties**, **Assistants**, **Conversations**, **Runtime**. Each is an ordinary
+A12 master-detail: an overview of scalars, and a form for one row.
+
+Four are freely editable by the User — `Party`, `Document`, `Invoice`, `Process`. Creating an
+`Invoice` or a `Document` by hand is a supported way in; so is pasting extracted text into a
+Document's `extractedText`.
+
+### Editing an Assistant
+
+**Assistants are Things you edit in the UI, not code you deploy** (ADR-0003). Changing the
+Receptionist's behaviour is editing a document: its `systemPrompt`, its `skills[]` (each a name
+and a markdown body), its `llmModel`, its `maxTurns`, its `enabled` flag, its `triggers[]` and the
+`tools[]` it may reach.
+
+Prompts and Skill bodies are **markdown fields**, rendered by the lifted Lexical editor — headings,
+lists, tables, code blocks, admonitions, a table of contents. Round-tripping markdown through that
+editor is covered by the end-to-end tier.
+
+Only the User may write an `Assistant`. The Runtime holds no `ASSISTANT_WRITE` right, so an
+Assistant cannot grant itself a Tool; the store refuses it (D-007a).
+
+Note that `just bootstrap` **reconciles**: it re-applies the two seeded Assistant definitions on
+every run, so a prompt edited in the web application is overwritten the next time it runs. To keep
+an edit, change the seed in `runtime/src/bootstrap/assistants.ts`.
+
+### Watching an Assistant work
+
+- The **Conversations** module shows every run: which Assistant, what it is about, its status,
+  what it is waiting for, its turn count, and its `entries[]` — the full transcript, as a
+  read-only inline repeat. It is readable, but it is a data grid, not a transcript view.
+- `just logs runtime` is the better debugging surface.
+- The **Runtime** module shows the singleton: the watermark, the pause flag, the births-per-hour
+  counter, the heartbeat and the last error.
+
+### Stopping it
+
+- `just pause` sets `RuntimeState.paused` and the watcher does nothing at all until `just resume`.
+- Setting an Assistant's `enabled` to `false` stops its births **and** its continuations.
+- A births-per-hour cap bounds a runaway even if nobody is watching.
+
+### The books
+
+Firefly III at `http://localhost:8084`, behind oauth2-proxy, through the same Keycloak login. The
+User works in it directly — it is the Authority, and nothing in this system holds a second copy of
+what it says.
+
+An Invoice's booking is found by searching Firefly for the tag `thing:<thingId>` or the
+`external_id`; there is no field on the Invoice to read.
+
+## User journeys
+
+### An invoice arrives and gets booked
+
+The vertical slice that runs today.
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant UI as UserInterface
+    participant TS as ThingStore
+    participant RT as Runtime
+    participant R as Receptionist
+    participant A as Accountant
+    participant BK as Bookkeeping
+
+    U->>UI: creates a Document (or the demo loader does)
+    UI->>TS: Document saved with extractedText
+    RT->>TS: scan 1 — a Thing past the watermark
+    RT->>R: birth a Conversation
+    R->>R: classify: this is an invoice
+    R->>TS: create the Invoice, link Document and Process
+    R->>A: assistant.call:accountant
+    Note over R: the Receptionist suspends, waitingFor = assistant
+    A->>BK: listAccounts, getBudgetReport
+    A->>TS: ui.askUser (confirm) — "book €96.50 to Expenses:Health?"
+    Note over A,TS: waiting. Nothing runs. Days may pass.<br/>Restarts change nothing.
+    U->>UI: opens Open Questions, confirms
+    UI->>TS: answeredAt + confirmed saved
+    RT->>TS: scan 2 — answered
+    RT->>A: continue the same Conversation
+    A->>BK: postTransaction, keyed and tagged thing:<id>
+    A->>TS: append a step to the Process; finish
+    RT->>R: scan 5 — deliver the result to the parent
+    U->>BK: sees the transaction in the books
+```
+
+What the User actually does in this journey is two things: put a Document in, and answer one
+question. Everything between is unattended.
+
+### Surviving a restart mid-question
+
+The claim ADR-0004 makes, and a test in the end-to-end tier:
+
+1. Let the slice run until an Open Question is pending.
+2. `just restart` — the Runtime and the store both go down and come back.
+3. The Open Question is exactly where it was. Answering it continues the same Conversation.
+
+Nothing was running to lose. The question *is* the state.
+
+### A Manual Connector asks for help
+
+An Assistant calls `email.send`, `bank.sendMoney` or `document.requestText`. None of them talks to
+anything. Each raises an Open Question of kind `perform` — *"send this email and tell me when you
+have"* — and the Conversation suspends exactly as it would on any other question. The User does
+the work by hand, reports back in the answer, and the Conversation continues.
+
+The Assistant cannot tell that a human rather than a machine answered, which is what makes
+automating one later a Connector-only change.
+
+### Something goes wrong
+
+The User never has to check a second place. A terminal failure — retries exhausted, `maxTurns`
+reached, an Authority refusing again and again — does not set `failed`. It raises an Open Question
+carrying the error and waits, so a stuck Conversation appears in the same list as everything else.
+Escalation is capped at three per Conversation, so a persistent outage answered with "try again"
+cannot produce one question per attempt; the fourth time, the Conversation does end.
+
+The failure this does *not* cover is the Runtime being unable to write the question at all. That
+is what the heartbeat is for: the service reports itself unhealthy once its last successful scan
+is stale, and `just ps` shows it.
+
+## Inputs and outputs
+
+### In
+
+| Input | How | Notes |
+|---|---|---|
+| A **Document** | Created in the web application, or by the demo loader | `extractedText` must be supplied — nothing extracts it |
+| An attachment | Uploaded on the Document form | Stored in the A12 Content Store |
+| An **answer** | Saving an Open Question form | The only interaction the whole slice requires |
+| An **Assistant definition** | Editing the Assistant form, or the seed file | Markdown prompts and Skills |
+| **Demo data** | `just demo-data` | Parties, processes, documents, invoices, and matching Firefly books |
+| **LLM configuration** | `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_BASE_URL` | `scripted` by default; costs nothing and needs no key |
+
+### Out
+
+| Output | Where |
+|---|---|
+| **Open Questions** | The web application's inbox |
+| **Things** — Invoices, Parties, Process steps | The ThingStore, visible in the UI |
+| **Transactions** | Firefly III, tagged `thing:<thingId>` with a deep link in `external_url` |
+| **Transcripts** | `Conversation.entries[]`, and `just logs runtime` |
+| **Health** | The Runtime's compose healthcheck, driven by `heartbeatAt` |
+
+Nothing is emailed, nothing is paid, and nothing leaves the machine except calls to the configured
+LLM API.
+
+## States and transitions
+
+### Conversation
+
+```mermaid
+stateDiagram-v2
+    [*] --> running: Trigger — a Thing materialised,<br/>or assistant.call
+    running --> running: a Turn completes,<br/>the model wants more tools
+    running --> waiting: a Tool returns pending
+    waiting --> running: the answer arrives,<br/>wakeAt passes,<br/>or a child result is delivered
+    running --> waiting: terminal failure —<br/>an Open Question carries the error
+    running --> done: finishReason = answered
+    waiting --> failed: the User abandons it,<br/>or a fourth escalation
+    done --> [*]
+    failed --> [*]
+```
+
+`waitingFor` says which: `user`, `tool` or `assistant`. There is deliberately no `llm` value —
+waiting on the LLM happens *inside* a live Turn and is over in seconds; if the process dies there,
+the Conversation is simply un-advanced and the next scan picks it up. **Only waits that outlive a
+Turn are written down.**
+
+`failed` means only "the User abandoned it" — a state a human chose, never one the system fell
+into.
+
+A Conversation being advanced carries `leaseUntil`. That is crash **recovery**, not a lock: a
+lease found expired means the Runtime died mid-Turn, and scan 4 recovers per the intent log —
+asking the Connector whether the key landed, never re-executing blind.
+
+### Document → Invoice
+
+```mermaid
+stateDiagram-v2
+    [*] --> arrived: a Document materialises
+    arrived --> classified: the Receptionist decides what it is
+    classified --> linked: an Invoice is created,<br/>classifiedThingId points at it
+    note right of linked
+        The Document keeps its ThingID for ever.
+        Classification creates and links;
+        it never rewrites the Document.
+    end note
+```
+
+### Open Question
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending: the Runtime writes it<br/>at the moment it suspends
+    pending --> answered: the User saves the form
+    answered --> consumed: the Conversation advances
+    note right of consumed
+        Consumption is recorded on the Conversation,
+        not on the question — the Runtime never
+        writes this document twice.
+        A late edit therefore changes nothing.
+    end note
+```
+
+### Process
+
+A Process is the routing slip: a title, a `kind`, a `status` and an append-only list of `steps[]`,
+each with its own state. It is **passive** — nothing executes it. Assistants append steps to
+record what happened; the Process never drives anything.
+
+## Permissions and visibility
+
+There is one human role in practice, and the interesting boundaries are not between humans but
+between the human and the machine.
+
+| | User (`admin` / `user` roles) | Runtime (`runtime` role) |
+|---|---|---|
+| Read every Thing | ✓ | ✓ |
+| Create / update `Party`, `Document`, `Invoice`, `Process` | ✓ | ✓ |
+| Write `Assistant` | ✓ | ✗ — no `ASSISTANT_WRITE` (D-007a) |
+| Write `Conversation`, `RuntimeState` | form is read-only | ✓ |
+| Write `OpenQuestion` | the answer fields | once, at creation |
+| Delete anything | ✓ | ✗ — no `DOCUMENT_DELETE` (D-007) |
+| Manage models | `admin` only | ✗ |
+
+Read-only forms are an **affordance, not an authorisation boundary**. What protects the
+single-writer invariant is that nothing in the UI navigates to those documents in edit mode, not
+that the server would refuse.
+
+Between Assistants, capability is declared rather than assumed: an Assistant may call only the
+Operations its `tools[]` lists, one row per Operation, and one row per callee for
+`assistant.call:<key>`. The registry filters the schemas offered to the model, so an undeclared
+Operation is **invisible**, not merely refused. Self-calls are rejected. Reading an Assistant tells
+you exactly what it can reach (ADR-0010).
+
+Everything is on `127.0.0.1`. There is no multi-tenancy, no sharing and no per-Thing visibility.
+
+## Edge cases and known limitations
+
+This is one running vertical slice, not a finished system.
+
+**Deliberate omissions**
+
+- **Email and Bank are Manual Connectors.** `email.send`, `email.fetch` and `bank.sendMoney` talk
+  to nothing. This is the point — ADR-0004 requires the system to run end to end with every
+  External System manual — but it means no mail is fetched and no money moves.
+- **Text extraction is not implemented.** `extractedText` is supplied by whoever creates the
+  Document. `document.requestText` is a Manual Connector. OCR and PDF parsing are a later change.
+- **`bookkeeping.createAccount` is granted to no Assistant.** The chart of accounts is a
+  structural decision the User makes.
+- **No compaction, forking or steering** of Conversations. `maxTurns` (default 20) is the only
+  bound on a long one, and reaching it raises an Open Question.
+- **The transcript renders as a data grid**, not a transcript view. A proper viewer would be
+  custom client code, which D-005 exists to avoid.
+- **No cross-document links inside markdown.** The lifted editor has none, and inventing a link
+  syntax is its own change.
+
+**Gaps**
+
+- **A `schedule` Trigger does nothing.** `TriggerKind` admits `schedule` and `Assistant_DM`
+  carries `cron`, but no watcher scan fires one.
+- **Parties have no proper Authority.** The ThingStore holds them provisionally, pending an
+  address book Connector (ADR-0013).
+- **`updatedAt` records the last Runtime write only.** A save from the web application moves only
+  `__meta.modifiedAt`, because the machine fields are on no form and A12's form engine offers no
+  save hook that could reach one.
+
+**Operational limits**
+
+- **Exactly one Runtime replica.** Not a deployment convenience — A12 has no compare-and-swap, so
+  two replicas would both claim an expired lease and silently lose one writer's work.
+- **Latency is one scan interval**, about two seconds.
+- **`just bootstrap` overwrites Assistant edits.** It reconciles by design.
+- **`just clean` and `just demo-reset` take the books with them.** Firefly has no bulk delete and
+  its data lives in a named volume, so a full teardown is the only reset symmetric across two
+  Authorities.
+- **The end-to-end suite writes to whatever stack it is pointed at**, creating and deleting Things.
+  Point it at a development stack only. `cd e2e && npx playwright test --list` is the authority on
+  what it runs.
+
+**Security posture**
+
+- **Authentication is real; its configuration is development-grade.** The mechanism is the one A12
+  intends — Keycloak, OIDC, no password checked anywhere else — and no credential is committed
+  (D-023). But Keycloak runs `start-dev` over plain HTTP, its console is `admin` / `admin`, and the
+  realm's password policy is relaxed far enough to allow `human` / `human`. Every one of those is
+  deliberate for a stack bound to `127.0.0.1`. Do not expose it further without replacing all of
+  them.
+- **Firefly III trusts a header.** `remote_user_guard` performs no validation of
+  `X-Forwarded-Email` whatsoever. Inside the compose network Firefly is wide open, which is what
+  lets the Runtime and `firefly-bootstrap` use it; the entire security argument is that it
+  publishes no host port. Give it one and authentication is gone.

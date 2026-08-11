@@ -388,7 +388,10 @@ services:
     environment:
       THINGSTORE_URL: http://server:8080
       THINGSTORE_USER: runtime
-      THINGSTORE_PASSWORD: assistants-runtime-dev
+      # From .env, not a literal: the same value is rendered into the realm's `runtime` user
+      # (A12Realm-users-0.json.template), so a literal here would keep the old password while
+      # Keycloak got the new one -- a Runtime that fails only at its first authenticated call.
+      THINGSTORE_PASSWORD: ${RUNTIME_PASSWORD}
 
       # The Runtime is headless, so it gets its token from Keycloak with the direct access
       # grant rather than a browser redirect -- hence its own client, which is the only one
