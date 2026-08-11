@@ -174,6 +174,47 @@ describe("thingstore.update", () => {
         expect((after.steps ?? []).map((step) => step.seq)).toEqual([1, 2, 3, 4]);
     });
 
+    it("changes only the fields it was given, even if the Thing moves underneath it", async () => {
+        // The tool's own promise is "supply only the fields you are changing; the others are
+        // preserved". It read the Thing and wrote the whole snapshot back, which preserves the other
+        // fields *as they were when it read* — so anything the User saved in between is reverted.
+        // Redundant as well as harmful: `ThingRepository.update` already merges over the current
+        // document, so sending the supplied fields alone is both safer and closer to the promise.
+        const harness = buildHarness([]);
+        const created = await harness.things.create(SPECS.Party_DM, {
+            name: "Praxis Dr. Meyer",
+            kind: "organisation",
+            city: "Köln",
+            idempotencyKey: "party-moving-underneath",
+        });
+
+        // The User's save lands after the tool has read the Thing and before it writes.
+        const getDocument = harness.store.getDocument.bind(harness.store);
+        let reads = 0;
+        harness.store.getDocument = async (docRef) => {
+            const result = await getDocument(docRef);
+            reads += 1;
+            if (reads === 1 && docRef === created.docRef) {
+                const row = harness.store.rows.get(docRef)!;
+                (row.document["Party"] as Record<string, unknown>)["City"] = "Frechen";
+            }
+            return result;
+        };
+
+        await call(harness, "thingstore.update", {
+            model: "Party_DM",
+            thingId: created.thingId,
+            fields: { name: "Praxis Dr. Meyer & Kollegen" },
+        });
+
+        const after = await harness.things.get<Record<string, unknown>>(
+            SPECS.Party_DM,
+            created.docRef,
+        );
+        expect(after.data["name"]).toBe("Praxis Dr. Meyer & Kollegen");
+        expect(after.data["city"]).toBe("Frechen");
+    });
+
     it("leaves the group alone when the update supplies an empty array", async () => {
         // `steps: []` silently wiped the group. An empty array is not an instruction to forget.
         const harness = buildHarness([]);

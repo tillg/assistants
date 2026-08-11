@@ -322,6 +322,39 @@ describe("the RuntimeState the scan writes back", () => {
         expect((await state(harness)).data.watermark).not.toBe(seededWatermark);
     });
 
+    it("`just pause` does not roll back the watermark on its way past", async () => {
+        // The mirror of BUG-07. That was the scan trampling `paused`; this is `setPaused` — the
+        // function behind `just pause` and `just resume` — trampling everything else, because it
+        // reads the state and writes the whole object back. The operator flips the kill switch and
+        // silently undoes the watcher's progress.
+        const t0 = Date.now() - 3_600_000;
+        const harness = buildHarness([], { maxBirthsPerHour: 1000 });
+        await seedState(harness, nowIso(new Date(t0)));
+        const ahead = nowIso(new Date(t0 + 600_000));
+
+        // The scan writes its new watermark between `setPaused`'s read and its write.
+        const query = harness.store.query.bind(harness.store);
+        let advanced = false;
+        harness.store.query = async (spec) => {
+            const result = await query(spec);
+            if (!advanced && spec.targetDocumentModel === "RuntimeState_DM") {
+                advanced = true;
+                const loaded = await harness.watcher.loadState();
+                await harness.things.update(SPECS.RuntimeState_DM, loaded.docRef, {
+                    ...loaded.data,
+                    watermark: ahead,
+                });
+            }
+            return result;
+        };
+
+        await setPaused(harness.things, true);
+
+        expect(advanced).toBe(true);
+        expect(await isPaused(harness.things)).toBe(true);
+        expect((await state(harness)).data.watermark).toBe(ahead);
+    });
+
     it("does not roll back a watermark another writer has moved forward", async () => {
         // `paused` was the only field carried forward, so anything else a second writer had
         // advanced was trampled by the stale in-memory copy. `just demo-data` moves the watermark
