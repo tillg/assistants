@@ -19,7 +19,7 @@ worth more than reading the rest.
 just demo-reset          # the demo books carry probe leftovers from this run — see Traps
 just test                # models, runtime, integration, client, e2e
 just check
-git log --oneline 6dbf021..HEAD      # 71 commits; each fix commit says what it traded away
+git log --oneline 6dbf021..HEAD      # 77 commits; each fix commit says what it traded away
 ```
 
 Everything was green at handoff. If it is not, that is the first thing to know.
@@ -60,8 +60,18 @@ Everything was green at handoff. If it is not, that is the first thing to know.
    - Multi-currency, if wanted: `foreign_amount` + `foreign_currency_code`, and the currency has to be
      enabled in Firefly, which the bootstrap does not do.
 
-5. **Keep hunting one specific pattern.** Three of the seven new defects this run found were the same
-   thing: **a test supplying an input the real writer never supplies** — the e2e page object stamping
+5. **Two patterns worth hunting further.**
+
+   **(a) A read-modify-write that sends more than it means.** A12 has no compare-and-swap, so every
+   extra field in a payload asserts that field has not changed since you read it. Three places had
+   this — one of them a regression I shipped and `just test` caught — and they are written up below.
+   `advance.ts` still writes the whole Conversation, which is correct *today* because the Runtime owns
+   it exclusively; note that the Conversation form is now openable and its header fields are not
+   `readonly`, so a User editing one would be trampled. Worth deciding deliberately rather than by
+   default.
+
+   **(b) A test supplying an input the real writer never supplies.** Three of the new defects were the
+   same thing — the e2e page object stamping
    `answeredAt`, the e2e helper stamping `CreatedAt`, `FakeFirefly` typing an account `liability`
    instead of `liabilities`. That pattern hid a critical bug each time. A worthwhile next pass: go
    through every fake and test helper and ask, field by field, *who sets this in production?* I did not
