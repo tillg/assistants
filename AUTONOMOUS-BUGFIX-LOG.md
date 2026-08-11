@@ -148,7 +148,7 @@ cd client && npm test             288/288                                       
 node import/validate-models.mjs            26 models checked — 0 error(s), 0 warning(s)
 node import/validate-models.selftest.mjs   10 validator checks exercised — 0 not enforced
 just check                                 clean (now including e2e lint + format, and the docs checker)
-cd runtime && npm test                     78 passed   (was 44)
+cd runtime && npm test                     81 passed   (was 44)
 cd runtime && npm run test:integration     65 passed   (was 51)
 cd client  && npm test                    288 passed
 cd e2e     && npm test                     30 passed   (was 21 collected, 2 fixme, 1 silently skipping)
@@ -468,6 +468,44 @@ nothing in production, because the test supplied the input the system never does
   `foreign_currency_code` and the currency enabled in Firefly, which the bootstrap does not do.
 - **The non-atomic RuntimeState re-read** (BUG-07's deeper half) cannot be closed without
   compare-and-swap, which A12 does not offer.
+
+## A regression I shipped, and what it led to
+
+The `just test` immediately after handoff failed on Party CRUD: a city edited from Köln to Frechen
+came back Köln. **I had caused it**, in `cc938e3` — the commit that fixed "the User cannot start any
+work".
+
+`stampMissingCreatedAt` wrote `{ ...thing.data, createdAt }`, where `thing.data` is the snapshot the
+*search* took. `ThingRepository.update` merges what it is given over the **current** document, so
+that snapshot overwrote whatever the User had saved in between. A lost update — and `Party_DM` is
+trigger-eligible, a Party created in the UI has no `createdAt`, and the scan runs every two seconds,
+so the window is the whole time a human spends typing. Fixed in `1226590` by sending `{ createdAt }`
+and nothing else.
+
+Worth stating plainly: the commit that fixed *"the User cannot start any work"* introduced *"the
+Runtime silently reverts the User's edits"*. Same file, same day.
+
+**The audit that followed is the useful part.** Treating it as a pattern rather than a typo, I read
+every read-modify-write in `runtime/src` and found the same shape twice more, neither of them mine
+(`8f7d00d` red, `9bc9723` fixed):
+
+- `setPaused` — the function behind `just pause` / `just resume` — wrote `{ ...state.data, paused }`,
+  reverting whatever the scan had advanced in between. The exact mirror of BUG-07: that was the scan
+  trampling `paused`; this is the operator flipping the kill switch and silently rolling the watermark
+  back, which re-queues every Thing behind it.
+- `thingstore.update` wrote `{ ...current.data, ...fields }`, so an Assistant correcting one field
+  reverted any edit the User saved in the meantime — and redundantly, since `update` already merges
+  over the current document. Its own description says "supply only the fields you are changing"; it
+  was preserving the others *as they were at the read*, which is a different and worse promise.
+
+So the rule this codebase keeps re-learning, now written down: **a read-modify-write against A12 must
+send the fields it means and nothing else.** There is no compare-and-swap underneath, so every extra
+field in the payload is a field you are asserting has not changed.
+
+One process note: the `thingstore.update` test was initially red for the *wrong* reason — it hooked
+the first read of any document, and the harness reads a Conversation before the tool reads the Party,
+so the competing edit never landed. Corrected, then verified to have teeth by reverting the fix and
+watching it go red again. A red test is not evidence until you know *why* it is red.
 
 ## Two defects in this run's own work, found by reviewing it
 
