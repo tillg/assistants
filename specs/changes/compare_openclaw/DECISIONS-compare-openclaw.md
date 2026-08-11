@@ -28,17 +28,27 @@ name, it is a one-line `git mv`.
 
 ### D2 — What "OpenClaw" is taken to mean
 
-The article describes OpenClaw as Peter Steinberger's locally-running personal agent
-with a gateway, channels, a heartbeat, markdown skills and ~350k lines. Research
-confirmed the identity and the naming history. Where a claim rests only on the
-article and not on a primary source, the document says so in place rather than
-presenting it as fact.
+OpenClaw is [openclaw/openclaw](https://github.com/openclaw/openclaw), MIT, ~90%
+TypeScript. The article's description was checked against the repository and found
+stale in two places — the Pi dependency and the line count (see D9). Every claim
+carries its source: **(article)** where it rests only on the c't piece, **(Selma)**
+where it comes from the reimplementation, unmarked where it comes from OpenClaw's own
+repository and docs.
 
-### D3 — Selma is treated as the readable proxy, OpenClaw as the design
+Two figures were deliberately **not** cited because their sources contradict each
+other by three orders of magnitude: the size of the public skill hub, and with it the
+article's "over a hundred community skills". The document says so rather than picking
+one.
 
-The article's own framing: Selma (~2,500 lines) reimplements OpenClaw's core concepts
-to make them legible. The document compares **concepts** against Assistants and uses
-Selma's code only where it makes a concept concrete.
+### D3 — Selma is treated as the readable proxy, not as evidence
+
+The article's framing is that Selma reimplements OpenClaw's core concepts to make them
+legible, and the document uses it that way: to make a concept concrete, never as
+evidence about OpenClaw's engineering. Selma is a declared toy with no authentication
+and several real bugs, and saying "OpenClaw does X" because Selma does would be unfair
+to both. Where Selma's flaws are cited it is as a cautionary tale about the *shape*,
+explicitly marked, and §3 of the document says outright that Selma's missing auth must
+not be read as OpenClaw's posture.
 
 ### D4 — The OpenTelemetry position is argued, not just asserted
 
@@ -72,21 +82,52 @@ The project fixes its spelling and its words in `CONTEXT.md`. The document uses
 Assistant / Conversation / Thing / Trigger / Turn / Runtime for our side and
 gateway / session / channel / skill for theirs, and never blurs the two.
 
-### D9 — Written on two of three research reports
+### D9 — Written on two of three reports, then rewritten when the third arrived
 
 Three research agents ran in parallel: our own system, the Selma source, and OpenClaw + Pi from
-primary sources. The first two returned. The third was still running after ~35 minutes, so I
-wrote the document rather than block on it, and made the gap explicit instead of papering over
-it: every claim about OpenClaw *itself* is marked *(article)* and the closing section says
-plainly that OpenClaw's source was not read.
+primary sources. The first two returned; the third was still running after ~35 minutes, so I
+wrote a first version on two of three and marked every OpenClaw claim *(article)*.
 
-This is the honest position anyway. Selma is a declared toy, and the article is the only
-first-hand description of OpenClaw we hold. Had the third report arrived it would have upgraded
-*(article)* markers to citations; it would not have changed a single conclusion, because every
-conclusion rests on our side of the comparison or on Selma's source.
+**I predicted in this file that the third report "would not change a single conclusion". That was
+wrong, and the document was rewritten.** What it changed:
 
-⚠ worth a look — if you want the OpenClaw claims verified against its repository, that is a
-follow-up read, not a rewrite.
+- **OpenClaw dropped Pi's agent core on 2026-05-28** — three of four packages gone, only the
+  terminal-UI renderer kept. The article's ground and first floors describe an architecture the
+  project left ten weeks ago. The first version's framing, "Pi is OpenClaw's first floor", was
+  stale; the document now opens by saying so.
+- **The "350,000 lines" figure is not supportable.** Measurement of HEAD puts it an order of
+  magnitude higher. No primary source for the article's number exists.
+- **Their skills are progressively disclosed too** — I had presented that as something to learn
+  from Selma alone.
+- **Their heartbeat is a job of a real scheduler**, with quiet hours, backoff and auto-disable. A
+  sentence claiming our `cron` field was "already a stronger model" was true of Selma and false of
+  OpenClaw; it is gone.
+- **The published security work opened §7**, which is the most valuable section in the document and
+  did not exist in the first version.
+
+The lesson is the one the project already writes down about green tests: a conclusion drawn from
+two of three sources is evidence about those two.
+
+⚠ worth a look — the rewrite is `fbe79c9..HEAD` on `ASSISTANTS_VS_OPENCLAW.md` if you want to see
+what moved.
+
+### D12 — §7 states a defect in our system, and does not fix it
+
+The comparison surfaced something sharper than the Schedule Trigger gap: the Accountant's *"Never
+book without an explicit yes"* is a **system prompt, not a mechanism**.
+`bookkeeping.postTransaction` is granted and callable on any Turn. ADR-0012 stops the same booking
+landing twice; nothing stops a *first* booking that was never approved. The end-to-end tests script
+a model that chooses to ask, so they prove the suspend-and-resume machinery, not the rule.
+
+I wrote it up as the document's headline finding, with a proposed fix that fits the existing grain
+(an Operation declares that it requires an answered Open Question; the check goes where the intent
+is already written; the missing-approval path is `pending`, which the loop already has).
+
+I did **not** implement it, open an ADR, or change a prompt. The change says research and
+documentation only, and this one deserves a decision rather than a quiet patch.
+
+⚠ **This is the item to look at first.** It is a real gap at the one boundary where money moves,
+and it has not been demonstrated against a live model — only read from the seeds and the registry.
 
 ### D10 — The Schedule Trigger finding is stated as a finding, not fixed
 
