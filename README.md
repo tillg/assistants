@@ -35,7 +35,10 @@ records whether it still stands) ·
 [docs/adr/](docs/adr/) (fifteen architecture decisions) ·
 [ACCOUNTING.md](ACCOUNTING.md) (what Bookkeeping must provide, and why Firefly III) ·
 [AGENTIC_LOOP.md](AGENTIC_LOOP.md) (the loop's open questions, and a survey of how three existing
-agent systems answer them) · [MARKDOWN_FIELDS.md](MARKDOWN_FIELDS.md) (what is still undecided
+agent systems answer them) ·
+[ASSISTANTS_VS_OPENCLAW.md](ASSISTANTS_VS_OPENCLAW.md) (the same exercise against OpenClaw: what
+its gateway, channels, heartbeat and skill market would and would not buy us) ·
+[MARKDOWN_FIELDS.md](MARKDOWN_FIELDS.md) (what is still undecided
 about markdown fields) · and [specs/system/](specs/system/) (the system as it stands: its
 [domain](specs/system/domain.md), its [architecture](specs/system/architecture.md) and what it
 [does](specs/system/functional.md)).
