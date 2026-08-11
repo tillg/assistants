@@ -60,6 +60,17 @@ export const RUNTIME_STATE_KEY = "the-one";
 /** The store refuses a `pageSize` above 100, so this is a ceiling and not a preference. */
 const PAGE_SIZE = 100;
 
+/**
+ * How long a Model's frontier may stay pinned at one point before it is worth saying so.
+ *
+ * Freezing is correct and routine: it is how a Thing created mid-Conversation waits for its creator
+ * to finish. The scan runs every two seconds, so warning whenever a frontier is frozen — or on two
+ * consecutive frozen scans — would warn on every healthy chain in the system, and an operator who
+ * is warned about healthy behaviour stops reading the warnings. This is long enough that only a
+ * creator that has genuinely stopped reaches it.
+ */
+const FROZEN_FRONTIER_WARN_AFTER_MS = 5 * 60_000;
+
 export interface ScanReport {
     births: number;
     continuations: number;
@@ -69,6 +80,16 @@ export interface ScanReport {
 
 export class Watcher {
     constructor(private readonly deps: WatcherDeps) {}
+
+    /**
+     * Per Model: the point its frontier froze at, when it first froze there, and whether that has
+     * been reported. In memory only — a restart re-arms the warning, which is the right way round:
+     * a stall that survives a restart is worth hearing about again.
+     */
+    private readonly frozenFrontiers = new Map<
+        string,
+        { at: string; since: number; warned: boolean }
+    >();
 
     /** One pass. Returns what it did, so the caller can log and stamp the heartbeat. */
     async scan(): Promise<ScanReport> {
@@ -186,9 +207,12 @@ export class Watcher {
             /** The newest Thing in this Model with everything at or before it decided. */
             let frontier: string | undefined;
             let frozen = false;
-            const freeze = () => {
+            /** What froze it, kept for the warning: the first one is the one holding the line. */
+            let blockedBy: { docRef: string; reason: string } | undefined;
+            const freeze = (docRef: string, reason: string) => {
                 if (frozen) return;
                 frozen = true;
+                blockedBy = { docRef, reason };
                 if (frontier === undefined) frontier = watermark ?? "";
             };
 
@@ -201,7 +225,7 @@ export class Watcher {
                 // what stops the Runtime feeding on its own output part-way through a chain.
                 const creator = String(thing.data["createdByConversationId"] ?? "");
                 if (creator && (await this.isConversationRunning(creator))) {
-                    freeze();
+                    freeze(thing.docRef, `its creating Conversation ${creator} is still running`);
                     continue;
                 }
 
@@ -242,7 +266,7 @@ export class Watcher {
 
                 // The budget ran out on this Thing: same rule as a running creator.
                 if (!decided) {
-                    freeze();
+                    freeze(thing.docRef, "the birth budget for this hour ran out");
                     continue;
                 }
                 if (createdAt > newestDecided) newestDecided = createdAt;
@@ -254,11 +278,16 @@ export class Watcher {
 
             if (frozen) {
                 ceiling = lowest(ceiling, frontier ?? watermark ?? "");
-            } else if (candidates.length >= PAGE_SIZE && frontier !== undefined) {
-                // A full page means there is more behind it that this pass never saw. Cap the
-                // watermark at the newest row the page did contain; the rest stays in front of it
-                // and is picked up on the next scan.
-                ceiling = lowest(ceiling, frontier);
+                this.noteFrozenFrontier(model, frontier ?? watermark ?? "", blockedBy);
+            } else {
+                // Moving again — so a later stall at a new point is worth reporting afresh.
+                this.frozenFrontiers.delete(model);
+                if (candidates.length >= PAGE_SIZE && frontier !== undefined) {
+                    // A full page means there is more behind it that this pass never saw. Cap the
+                    // watermark at the newest row the page did contain; the rest stays in front of
+                    // it and is picked up on the next scan.
+                    ceiling = lowest(ceiling, frontier);
+                }
             }
         }
 
@@ -277,6 +306,34 @@ export class Watcher {
             await this.savePreservingHumanFields(state);
         }
         return births;
+    }
+
+    /**
+     * Say once when a Model's frontier has been pinned at one point for long enough to be a stall.
+     *
+     * Nothing is lost while it is pinned and nothing here tries to unpin it — the fix is whatever
+     * unblocks the Conversation, and that is a decision for an operator. This only turns a silent
+     * stall into something an operator can see, which is the difference between a system that is
+     * waiting and a system that has stopped.
+     */
+    private noteFrozenFrontier(
+        model: string,
+        at: string,
+        blockedBy: { docRef: string; reason: string } | undefined,
+    ): void {
+        const previous = this.frozenFrontiers.get(model);
+        if (previous?.at !== at) {
+            this.frozenFrontiers.set(model, { at, since: Date.now(), warned: false });
+            return;
+        }
+        const frozenForMs = Date.now() - previous.since;
+        if (previous.warned || frozenForMs < FROZEN_FRONTIER_WARN_AFTER_MS) return;
+        previous.warned = true;
+        log.warn(
+            `the watermark for ${model} has been pinned at one point for ${Math.round(frozenForMs / 60_000)} minutes; ` +
+                `nothing is lost, but nothing behind it will be birthed until it moves`,
+            { model, frontier: at, frozenForMs, blockedBy: blockedBy?.docRef, reason: blockedBy?.reason },
+        );
     }
 
     /**
