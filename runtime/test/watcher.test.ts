@@ -98,6 +98,47 @@ describe("the materialised scan (scan 1)", () => {
         expect((await subjectsBirthed(harness)).has(thingId)).toBe(true);
     });
 
+    it("stamps createdAt without writing back anything else the User has changed", async () => {
+        // The stamp reads the Thing and then writes. Writing the *snapshot* back — rather than only
+        // the field being filled in — reverts every edit the User saved in between, because
+        // `ThingRepository.update` merges what it is given over the current document.
+        //
+        // Reachable in the ordinary way: `Party_DM` is trigger-eligible, a Party created in the web
+        // application has no `createdAt`, and a User who creates one and then corrects it is doing
+        // the most obvious thing there is. The scan interval is two seconds, so the window is the
+        // whole of the time the User spends typing.
+        const t0 = Date.now() - 3_600_000;
+        const harness = buildHarness([], { maxBirthsPerHour: 1000 });
+        await harness.seedAssistant();
+        await seedState(harness, nowIso(new Date(t0)));
+
+        const docRef = await harness.store.addDocument("Party_DM", {
+            Party: { Name: "Praxis Dr. Meyer", Kind: "organisation", City: "Köln" },
+        });
+
+        // The User's save lands between the scan reading the Thing and the scan writing to it.
+        const query = harness.store.query.bind(harness.store);
+        let edited = false;
+        harness.store.query = async (spec) => {
+            const result = await query(spec);
+            if (!edited && spec.targetDocumentModel === "Party_DM") {
+                edited = true;
+                const row = harness.store.rows.get(docRef)!;
+                (row.document["Party"] as Record<string, unknown>)["City"] = "Frechen";
+            }
+            return result;
+        };
+
+        await harness.watcher.scan();
+
+        const after = await harness.store.getDocument(docRef);
+        const party = after.document["Party"] as Record<string, unknown>;
+        expect(edited).toBe(true);
+        expect(party["City"]).toBe("Frechen");
+        // ...and the stamp still did its job.
+        expect(String(party["CreatedAt"] ?? "")).not.toBe("");
+    });
+
     it("holds the watermark behind a Thing whose creating Conversation is still running", async () => {
         // The Receptionist creating an Invoice while its own Conversation still runs. The Invoice is
         // correctly skipped on that pass — and any Thing created a second later used to bury it,
