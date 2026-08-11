@@ -850,6 +850,19 @@ The same mail turned up a genuine violation of the invariant above: `compose/doc
 passed the Runtime's ThingStore password as a literal, `assistants-runtime-dev`, while the realm's
 `runtime` user got `${RUNTIME_PASSWORD}` from `.env`. Changing that variable would therefore have
 re-provisioned Keycloak and left the Runtime sending the old value — an authentication failure at
-the first authenticated call, not at startup. It reads from `.env` now. `runtime/src/config.ts`
-still carries the same string as its default, which is correct: that path is a Runtime started
-outside compose, against a stack whose password nothing has changed.
+the first authenticated call, not at startup. It reads from `.env` now.
+
+**Follow-up, 2026-08-11.** `runtime/src/config.ts` kept the same string as its default, and this
+document recorded that as correct on the grounds that it only served "a Runtime started outside
+compose, against a stack whose password nothing has changed". Both halves were wrong. It served
+`just demo-data`, which runs `demo/cli.ts` on the host through `host_urls` — a variable that passed
+no password — so the literal was the credential that path actually used, not a fallback nobody
+reached. And "a stack whose password nothing has changed" is the assumption the invariant exists to
+survive: change `RUNTIME_PASSWORD` and `just demo-reset` breaks at login, for the same reason the
+compose literal did.
+
+So the third copy is gone. `THINGSTORE_PASSWORD` is `required` in `config.ts`, and `host_urls`
+carries it from `.env` exactly as `just bootstrap` already carried `BOOTSTRAP_PASSWORD`. A host
+recipe that forgets it now fails at startup naming the variable, rather than authenticating with a
+stale copy. `BOOTSTRAP_PASSWORD` keeps its `human` default deliberately: that login is published in
+README and is not generated, so a default for it is not a second source of truth for a secret.

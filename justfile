@@ -117,11 +117,19 @@ logs service="":
 
 # ---------------------------------------------------------------------------- data
 
+# The Runtime's ThingStore password, from the one file that holds it (D-023). `|| true` because
+# this is evaluated for every recipe, including `just setup` on a clone that has no `.env` yet.
+runtime_password := `grep -E '^RUNTIME_PASSWORD=' .env 2>/dev/null | cut -d= -f2- | tr -d "\"'" || true`
+
 # Every recipe below runs on the HOST, so it needs the host's spelling of each service. The
 # Runtime's own defaults are the compose network's names (`server:8080`, `keycloak:8080`), which
 # do not resolve out here. Keycloak in particular is easy to forget: the token comes from there
 # now, not from the ThingStore, so a recipe that overrides only THINGSTORE_URL fails at login.
-host_urls := "THINGSTORE_URL=http://localhost:8082 KEYCLOAK_URL=http://localhost:8089"
+#
+# The password travels the same way and for the same reason as `BOOTSTRAP_PASSWORD` below: compose
+# gives the container `${RUNTIME_PASSWORD}` from `.env`, and `config.ts` has no default to fall back
+# on, so a host recipe that did not pass it would fail at startup rather than quietly using a copy.
+host_urls := "THINGSTORE_URL=http://localhost:8082 KEYCLOAK_URL=http://localhost:8089 THINGSTORE_PASSWORD='" + runtime_password + "'"
 
 # Seeding an Assistant is a User action, not a Runtime one — since D-007a the store refuses the
 # `runtime` identity on `Assistant_DM` — so this authenticates as `human`. The password comes from

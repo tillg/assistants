@@ -77,7 +77,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     return {
         thingStoreUrl: optional("THINGSTORE_URL", "http://server:8080"),
         thingStoreUser: optional("THINGSTORE_USER", "runtime"),
-        thingStorePassword: optional("THINGSTORE_PASSWORD", "assistants-runtime-dev"),
+        // No default, on purpose. `.env` is the only place this value lives (D-023) — the same
+        // variable reaches the container through compose and the host recipes through the
+        // justfile. A literal here would be a third copy, correct only until someone changes the
+        // first one, and then the Runtime would authenticate with the old value and fail at its
+        // first authenticated call instead of at startup.
+        thingStorePassword: required("THINGSTORE_PASSWORD"),
         bootstrapUser: optional("BOOTSTRAP_USER", "human"),
         bootstrapPassword: optional("BOOTSTRAP_PASSWORD", "human"),
         locale: optional("LOCALE", "en"),

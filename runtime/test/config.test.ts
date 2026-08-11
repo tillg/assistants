@@ -32,7 +32,16 @@ describe("configuration", () => {
         // The counter-case, so the rule above is not read as "no defaults anywhere". `human`/`human`
         // is quoted in README as the way to sign in and is deliberately not generated (D-023), so a
         // default for it is honest. The distinction is whether `.env` is the only source of truth.
-        const config = withoutEnv("BOOTSTRAP_PASSWORD", () => loadConfig());
-        expect(config.bootstrapPassword).toBe("human");
+        //
+        // Supplying THINGSTORE_PASSWORD here is the point of the test above, seen from the other
+        // side: every caller of `loadConfig` must now have it, which is why the justfile passes it
+        // to the host recipes.
+        process.env["THINGSTORE_PASSWORD"] = "supplied-by-the-caller";
+        try {
+            const config = withoutEnv("BOOTSTRAP_PASSWORD", () => loadConfig());
+            expect(config.bootstrapPassword).toBe("human");
+        } finally {
+            delete process.env["THINGSTORE_PASSWORD"];
+        }
     });
 });
