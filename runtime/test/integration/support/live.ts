@@ -13,14 +13,52 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { A12Client } from "../../../src/a12/client.js";
 import { FireflyConnector } from "../../../src/connectors/firefly.js";
 import { ThingRepository } from "../../../src/a12/things.js";
 
+/**
+ * One key out of the root `.env`, without loading the rest of it.
+ *
+ * A global load would put all 36 entries into `process.env`, and `readFireflyToken()` below
+ * consults an unprefixed `FIREFLY_TOKEN` — so an unrelated `.env` entry could quietly outrank the
+ * volume the bootstrap actually writes. Absent file, absent key and unreadable file are all
+ * `undefined`: the caller decides what that means.
+ */
+function fromDotEnv(key: string): string | undefined {
+    try {
+        const path = fileURLToPath(new URL("../../../../.env", import.meta.url));
+        const line = readFileSync(path, "utf8")
+            .split("\n")
+            .find((candidate) => candidate.startsWith(`${key}=`));
+        return line
+            ?.slice(key.length + 1)
+            .trim()
+            .replace(/^['"]|['"]$/g, "");
+    } catch {
+        return undefined;
+    }
+}
+
 export const THING_STORE_URL = process.env["ITEST_THINGSTORE_URL"] ?? "http://localhost:8082";
 export const THING_STORE_USER = process.env["ITEST_THINGSTORE_USER"] ?? "runtime";
+
+/**
+ * The Runtime's password, from the one place that defines it.
+ *
+ * `compose/docker-compose.yml` passes `THINGSTORE_PASSWORD: ${RUNTIME_PASSWORD}` from the root
+ * `.env`, so the container authenticates with whatever that file says. A literal here would agree
+ * with the container only until the secret is regenerated — and then every test in this tier would
+ * fail at login with nothing in the output pointing at `.env`. Reading the same variable keeps one
+ * source of truth; the guard below turns the remaining failure mode into a sentence.
+ */
 export const THING_STORE_PASSWORD =
-    process.env["ITEST_THINGSTORE_PASSWORD"] ?? "assistants-runtime-dev";
+    process.env["ITEST_THINGSTORE_PASSWORD"] ??
+    process.env["RUNTIME_PASSWORD"] ??
+    fromDotEnv("RUNTIME_PASSWORD") ??
+    "";
 
 /**
  * The identity provider, as seen from the host: `localhost:8089`, not the `keycloak:8080` the
@@ -86,6 +124,16 @@ export const FIREFLY_TOKEN = readFireflyToken();
 
 // Probed once, at module load, so `describe.skipIf` can see the answer.
 export const THING_STORE_UP = await reachable(`${THING_STORE_URL}/actuator/health`);
+
+// A stack that is down is a skip (rule 1 above). A stack that is *up* with no password to offer it
+// is not: that is a misconfiguration, and saying so once beats every suite failing at login.
+if (THING_STORE_UP && THING_STORE_PASSWORD === "") {
+    throw new Error(
+        "The ThingStore is reachable but no password was found. Set RUNTIME_PASSWORD in the root " +
+            ".env — compose passes that same variable to the Runtime as THINGSTORE_PASSWORD — or " +
+            "set ITEST_THINGSTORE_PASSWORD to override it for this tier alone.",
+    );
+}
 export const FIREFLY_UP = FIREFLY_TOKEN !== "" && (await reachable(`${FIREFLY_URL}/healthcheck`));
 
 export function newClient(): A12Client {
