@@ -310,10 +310,13 @@ export class Watcher {
             }
             for (const thing of orphans) {
                 try {
-                    await this.deps.things.update(spec, thing.docRef, {
-                        ...thing.data,
-                        createdAt: nowIso(),
-                    });
+                    // ONLY the field being filled in. `update` merges what it is given over the
+                    // current document, so passing the snapshot this search took would write every
+                    // field of it back — reverting whatever the User saved between the read and the
+                    // write. The window is two seconds wide and a Party is the most ordinary thing
+                    // for a human to create and then correct, so that is not a theoretical race:
+                    // it reverted a city in the very next `just test`.
+                    await this.deps.things.update(spec, thing.docRef, { createdAt: nowIso() });
                     log.info("stamped createdAt on a Thing that had none", {
                         model,
                         thingId: thing.thingId,
