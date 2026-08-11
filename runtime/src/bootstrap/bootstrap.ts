@@ -93,7 +93,10 @@ export async function setPaused(things: ThingRepository, paused: boolean): Promi
     );
     const state = found[0];
     if (!state) throw new Error("No RuntimeState — run `just bootstrap` first.");
-    await things.update(SPECS.RuntimeState_DM, state.docRef, { ...state.data, paused });
+    // ONLY `paused`. Writing the whole document back would revert whatever the scan advanced between
+    // the read above and this write — the watermark in particular, and rolling that back re-queues
+    // every Thing behind it. The exact mirror of BUG-07, which was the scan trampling this field.
+    await things.update(SPECS.RuntimeState_DM, state.docRef, { paused });
 }
 
 /** Is the Runtime currently paused? Used by the demo loader so it can restore what it found. */

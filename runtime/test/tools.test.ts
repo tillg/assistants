@@ -190,11 +190,12 @@ describe("thingstore.update", () => {
 
         // The User's save lands after the tool has read the Thing and before it writes.
         const getDocument = harness.store.getDocument.bind(harness.store);
-        let reads = 0;
+        let edited = false;
         harness.store.getDocument = async (docRef) => {
             const result = await getDocument(docRef);
-            reads += 1;
-            if (reads === 1 && docRef === created.docRef) {
+            // The tool's own read of *this* Party, not whatever else the harness reads first.
+            if (!edited && docRef === created.docRef) {
+                edited = true;
                 const row = harness.store.rows.get(docRef)!;
                 (row.document["Party"] as Record<string, unknown>)["City"] = "Frechen";
             }
@@ -211,6 +212,7 @@ describe("thingstore.update", () => {
             SPECS.Party_DM,
             created.docRef,
         );
+        expect(edited).toBe(true);
         expect(after.data["name"]).toBe("Praxis Dr. Meyer & Kollegen");
         expect(after.data["city"]).toBe("Frechen");
     });

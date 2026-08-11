@@ -308,9 +308,14 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             const docRef = `${model}/${String(args["thingId"] ?? "")}`;
             const current = await things.get<Record<string, unknown>>(spec, docRef);
             const fields = (args["fields"] ?? {}) as Record<string, unknown>;
-            const merged = { ...current.data, ...fields };
+            // Only what was asked for. `ThingRepository.update` merges over the *current* document,
+            // so sending the whole snapshot read a moment ago would revert anything saved in between
+            // — it preserves the other fields as they were at the read, which is not what "the others
+            // are preserved" means to anyone reading it.
+            const merged: Record<string, unknown> = { ...fields };
             // Repeating groups are merged row by row, not replaced. A plain spread made "add step 4"
             // destroy steps 1 to 3 — on the one list README calls append-only — and reported success.
+            // These need the stored rows, which is the one thing worth re-reading for.
             for (const group of Object.keys(spec.groups ?? {})) {
                 if (!(group in fields)) continue;
                 merged[group] = mergeRows(group, current.data[group], fields[group]);
