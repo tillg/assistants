@@ -2,7 +2,7 @@
 
 Every model in this folder follows these rules. They are not style preferences — most of them
 exist because the A12 query API is narrower than it looks, and the Runtime's watcher queries are
-the system's hot path. See `specs/changes/first-running-system/architecture.md`.
+the system's hot path. See `specs/system/architecture.md`.
 
 ## Files and naming
 

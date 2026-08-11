@@ -40,7 +40,7 @@ Proposal: boringly standard **CommonMark**, plus the Thing-link extension from Q
 
 # Findings — what building it settled (2026-08-09)
 
-The [first running system](specs/changes/first-running-system/proposal.md) put markdown fields to
+The [first running system](specs/system/architecture.md) put markdown fields to
 work. An Assistant's system prompt, an Open Question's prompt and the User's answer to it, a
 Document's extracted text, a Process's summary and the note fields on Invoices and Parties are all
 markdown, edited in the ordinary A12 form. Q2 and Q4 are answered. Q1 and Q3 are not, and the build
