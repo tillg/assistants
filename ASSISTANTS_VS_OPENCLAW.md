@@ -121,7 +121,11 @@ that the constraint lives in the deployment. Nothing checks. A second Runtime st
 against the same store would find expired leases and take them, and the first symptom would be two
 Conversations doing one invoice.
 
-This is a cheap thing to harden and it is on the list below.
+[ADR-0017](docs/adr/0017-the-runtime-claims-ownership-and-stands-down.md) closes that, and is
+careful about what it can honestly claim: without compare-and-swap you cannot build mutual
+exclusion on the store, so what it buys is a second Runtime that refuses to start and says why,
+and a first Runtime that stands down when it finds it has been superseded. ADR-0014's constraint is
+unchanged — this is fast, visible failure rather than a lock.
 
 ---
 
@@ -354,8 +358,12 @@ clock-fired birth needs a different identity — the natural one is `(assistantK
 where `scheduledFor` is the *due instant*, not the moment the scan noticed it, so a re-scan, a
 restart and a replayed watermark all resolve to the same key.
 
-That is a genuine, unrecorded design gap, and half a dozen documents record that a Schedule Trigger
-is inert without any of them recording that the mechanism for making one safe does not yet exist.
+Half a dozen documents recorded that a Schedule Trigger is inert without any of them recording that
+the mechanism for making one safe did not yet exist. That is now settled in
+[ADR-0016](docs/adr/0016-a-schedule-fires-on-its-due-instant.md), which also takes the three policy
+decisions the mechanism forces — catch up once rather than per missed slot, skip while the previous
+firing is unfinished, and resolve the cron to a UTC instant before it becomes an identity, so
+daylight saving cannot make one firing look like two.
 
 Four further things their scheduler has thought about that ours would need:
 
@@ -485,9 +493,9 @@ Ranked, with a verdict, what it costs and what it would need.
 | # | Learning | Verdict | Cost | Needs |
 |---|---|---|---|---|
 | 1 | An Operation may declare that it requires an answered Open Question before it executes — so "nothing is booked without an answer" stops being prose | **Adopt** | Small; `advance()` already writes the intent there | An ADR. The sharpest finding in this document |
-| 2 | A Schedule Trigger needs its own exactly-once identity — `(assistantKey, scheduledFor)`, keyed on the *due instant* | **Adopt** | Small, once designed | An ADR; the watcher's seventh scan |
+| 2 | A Schedule Trigger needs its own exactly-once identity — `(assistantKey, scheduledFor)`, keyed on the *due instant* | **Decided** — [ADR-0016](docs/adr/0016-a-schedule-fires-on-its-due-instant.md) | Small | The watcher's seventh scan, and one indexed field |
 | 3 | A channel is a Connector for the UserInterface, not a gateway | **Adopt** (as the design) | A Connector to build | Nothing new — it is already the shape |
-| 4 | Enforce the single Runtime instead of asserting it — a lock on the state, or a startup check | **Adopt** | Small | ADR-0014 gains a consequence |
+| 4 | Enforce the single Runtime instead of asserting it | **Decided** — [ADR-0017](docs/adr/0017-the-runtime-claims-ownership-and-stands-down.md) | Small | An owner stamped beside the heartbeat |
 | 5 | Auto-disable a Schedule after N consecutive failures | **Adopt** with (2) | Trivial | `Assistant.enabled` already exists; nothing sets it |
 | 6 | Record token usage on the Turn | **Adopt** | Two fields; both providers already receive it | A model change |
 | 7 | A scheduled Conversation that finds nothing must be quiet by construction | **Adopt** with (2) | Free — a convention in the Assistant's prompt | Nothing |

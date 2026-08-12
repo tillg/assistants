@@ -32,7 +32,7 @@ Spelling throughout the project is British English.
 [DECISIONS.md](DECISIONS.md) (decisions taken while building, with their alternatives and
 reversal costs) · [BUGS.md](BUGS.md) (43 reproduced defects from the 2026-08-09 hunt; each entry
 records whether it still stands) ·
-[docs/adr/](docs/adr/) (fifteen architecture decisions) ·
+[docs/adr/](docs/adr/) (seventeen architecture decisions) ·
 [ACCOUNTING.md](ACCOUNTING.md) (what Bookkeeping must provide, and why Firefly III) ·
 [AGENTIC_LOOP.md](AGENTIC_LOOP.md) (the loop's open questions, and a survey of how three existing
 agent systems answer them) ·
@@ -504,7 +504,7 @@ This is one running vertical slice, not a finished system. What is honestly miss
 ├── specs/
 │   ├── system/               the system as it stands: domain, architecture, functional
 │   └── changes/              proposal, domain, architecture and plan, per change in flight
-├── docs/                     adr/ — fifteen architecture decision records; logo/ — design explorations
+├── docs/                     adr/ — seventeen architecture decision records; logo/ — design explorations
 ├── assets/                   the logo and its derived files
 ├── buildSrc/, quality/       Gradle build logic and the Checkstyle configuration
 └── licenses/                 licence texts for the third-party notices

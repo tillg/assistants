@@ -1,0 +1,19 @@
+# The Runtime claims ownership, and stands down when it loses it
+
+[ADR-0014](0014-exactly-one-runtime-replica.md) settles that exactly one Runtime may run, and gives the reason: A12 has no version, no ETag and no compare-and-swap, so `leaseUntil` is crash *recovery* and never mutual exclusion. What it then does with that conclusion is put the constraint in the deployment and stop. Nothing checks. A second Runtime started by hand against the same store — a stray `npm start`, an overlapping deploy, a second clone pointed at the same `.env` — finds expired leases and takes them, and the first symptom is two Conversations doing one invoice.
+
+The constraint was right and the silence was the mistake. **A `RuntimeState` claimed by nobody is not the same as a `RuntimeState` claimed by me**, and the store can hold that difference even though it cannot enforce it.
+
+So `RuntimeState` gains an **owner**: an instance identifier minted per process, stamped beside the heartbeat it already writes. A starting Runtime claims the singleton only if it is unclaimed, already its own, or **stale** — stale being the same freshness the health probe already uses, so a legitimate restart claims it on its first scan and nothing changes. A Runtime that finds a *fresh* claim belonging to someone else does not start: it logs what it found, names the other instance, and exits with a distinct code the compose policy does not restart, because a process that must not run must not crash-loop either.
+
+The half that matters more is the other one. **Ownership is re-checked on every scan, not only at startup.** A Runtime whose scans are throwing leaves its heartbeat deliberately untouched ([ADR-0015](0015-nothing-ends-silently.md)), which is exactly the state in which a second one may legitimately conclude the first is gone and claim the singleton — while the first is still alive and may recover. So the first must find out: a scan that sees the singleton owned by another live instance stops the Runtime rather than continuing to write. Whoever holds the claim is the one that works; everyone else stands down.
+
+**This is detection, not mutual exclusion, and the difference is not a detail.** Reading the owner and writing it are two operations with no compare-and-swap between them, so two Runtimes starting in the same instant can both pass the check. Nothing here makes that safe, and nothing here permits scaling out: ADR-0014's constraint stands unchanged. What changes is that the realistic failure — someone starts a second Runtime minutes or hours after the first — stops being silent corruption and becomes a process that refuses to run and says why.
+
+## Consequences
+
+- `RuntimeState` gains `ownerInstanceId`, written with the heartbeat it already stamps. The instance identifier is per *process*, not per container or per host, so a restart is a new owner claiming a stale singleton rather than the same owner resuming.
+- The Runtime acquires a second reason to stop, and it is not a failure. Standing down is logged at `warn` and exits cleanly; only refusing to *start* is an error exit.
+- `just pause` is unaffected and stays the kill switch. Ownership answers "who may work"; `paused` answers "may anyone work". Conflating them would make a paused system unclaimable.
+- The health probe keeps reading heartbeat freshness and nothing else. A stood-down Runtime is not unhealthy — it is correctly absent, and the owner's heartbeat is what says the system is alive.
+- Because staleness is the same threshold the probe uses, one number now governs both "this Runtime looks dead to the operator" and "this Runtime looks dead to its successor". That is deliberate: two thresholds would eventually disagree, and the window between them is exactly where two Runtimes both believe they are entitled to work.

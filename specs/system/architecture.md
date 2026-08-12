@@ -2,7 +2,7 @@
 
 The domain this realises is in [domain.md](domain.md); the vocabulary is in
 [CONTEXT.md](../../CONTEXT.md). [README.md](../../README.md) is the operator's view — how to run
-it, and what every `just` recipe does — and is not repeated here. The fifteen decisions with
+it, and what every `just` recipe does — and is not repeated here. The seventeen decisions with
 their alternatives and reversal costs are in [docs/adr/](../../docs/adr/), and the running record
 of decisions taken while building is [DECISIONS.md](../../DECISIONS.md).
 
