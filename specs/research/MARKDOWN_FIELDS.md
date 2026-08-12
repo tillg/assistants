@@ -1,6 +1,6 @@
 # Markdown Fields — open research questions
 
-Several Models need long-form prose rather than plain strings — most importantly the Assistant Model, whose prompts are markdown ([ADR-0003](docs/adr/0003-assistants-are-things.md)). A markdown field is a **String field carrying an annotation**; A12 already supports annotations, so this uses native A12 features and requires no change to A12 itself.
+Several Models need long-form prose rather than plain strings — most importantly the Assistant Model, whose prompts are markdown ([ADR-0003](../../docs/adr/0003-assistants-are-things.md)). A markdown field is a **String field carrying an annotation**; A12 already supports annotations, so this uses native A12 features and requires no change to A12 itself.
 
 The mechanism is settled. What follows is not.
 
@@ -40,7 +40,7 @@ Proposal: boringly standard **CommonMark**, plus the Thing-link extension from Q
 
 # Findings — what building it settled (2026-08-09)
 
-The [first running system](specs/system/architecture.md) put markdown fields to
+The [first running system](../system/architecture.md) put markdown fields to
 work. An Assistant's system prompt, an Open Question's prompt and the User's answer to it, a
 Document's extracted text, a Process's summary and the note fields on Invoices and Parties are all
 markdown, edited in the ordinary A12 form. Q2 and Q4 are answered. Q1 and Q3 are not, and the build

@@ -5,7 +5,7 @@
 A comparison of this system against **OpenClaw** ([openclaw/openclaw](https://github.com/openclaw/openclaw),
 MIT, ~90% TypeScript), Peter Steinberger's locally-running personal agent. It was read three ways:
 the c't article *"KI-Agenten verstehen: OpenClaw selbst gebaut"* and its figures, which are in
-[`specs/changes/compare_openclaw/`](specs/changes/compare_openclaw/); **Selma**
+[`specs/changes/compare_openclaw/`](compare_openclaw/); **Selma**
 ([gkvoelkl/python-selma](https://github.com/gkvoelkl/python-selma)), the ~11,000-line Python
 reimplementation written as the article's companion code, read at source; and OpenClaw's own
 repository, package history and security documentation.
@@ -101,7 +101,7 @@ policy and exec approvals, all over one multiplexed WebSocket+HTTP control plane
 tool invocation, context assembly, compaction, skill injection. Pi was only ever the second column.
 
 We have no first column at all, and that is the design: pending work is a query
-([ADR-0011](docs/adr/0011-the-runtime-polls-the-thingstore.md)), so there is nothing to route,
+([ADR-0011](../../docs/adr/0011-the-runtime-polls-the-thingstore.md)), so there is nothing to route,
 nothing to hold a session, and no second place to ask what is outstanding.
 
 ### One process, asserted versus enforced
@@ -114,14 +114,14 @@ hatch, so destructive maintenance cannot race a live owner), a config lock, and 
 bind. Stale owners are detected by reading the holder's command line; a bind conflict retries
 twenty times and then exits with a code chosen so systemd will stop restarting it.
 
-We *assert* it. [ADR-0014](docs/adr/0014-exactly-one-runtime-replica.md) says compose runs exactly
+We *assert* it. [ADR-0014](../../docs/adr/0014-exactly-one-runtime-replica.md) says compose runs exactly
 one replica and is explicit that `leaseUntil` is crash recovery rather than mutual exclusion,
 because A12 has no compare-and-swap. That reasoning is right, and the conclusion drawn from it is
 that the constraint lives in the deployment. Nothing checks. A second Runtime started by hand
 against the same store would find expired leases and take them, and the first symptom would be two
 Conversations doing one invoice.
 
-[ADR-0017](docs/adr/0017-the-runtime-claims-ownership-and-stands-down.md) closes that, and is
+[ADR-0017](../../docs/adr/0017-the-runtime-claims-ownership-and-stands-down.md) closes that, and is
 careful about what it can honestly claim: without compare-and-swap you cannot build mutual
 exclusion on the store, so what it buys is a second Runtime that refuses to start and says why,
 and a first Runtime that stands down when it finds it has been superseded. ADR-0014's constraint is
@@ -140,7 +140,7 @@ mapping fails.
 | Session | **Conversation** | Yes in role, no in shape. Theirs is a JSONL file; ours is a Thing with an append-only `entries[]` |
 | Turn | **Turn** | Yes. Both mean one model response plus its tool calls |
 | Tool | **Tool** / **Operation** | Theirs returns a value or throws. Ours may also answer **pending** — see below |
-| Skill (`SKILL.md`) | **Skill** | Both markdown, both progressively disclosed. Theirs are shared and installable; ours belong to exactly one Assistant ([ADR-0009](docs/adr/0009-skills-belong-to-one-assistant.md)) |
+| Skill (`SKILL.md`) | **Skill** | Both markdown, both progressively disclosed. Theirs are shared and installable; ours belong to exactly one Assistant ([ADR-0009](../../docs/adr/0009-skills-belong-to-one-assistant.md)) |
 | Gateway | *(no equivalent)* | The ThingStore plays the role, but it is a store, not a process |
 | Channel | *(no equivalent)* | We have one and no abstraction. See "a channel is a Connector" below |
 | Heartbeat | **Schedule** Trigger *(inert)* | **False friend.** Ours means something else entirely — see below |
@@ -148,7 +148,7 @@ mapping fails.
 | Memory (`MEMORY.md`, SQLite index) | **Process** + the ThingStore | Different by design: they retrieve remembered text, we query authoritative Things |
 | `origin_class` on a memory chunk | *(no equivalent)* | **The gap this comparison found.** See §7 |
 | Compaction | *(not implemented)* | Same concept, we have not needed it yet |
-| Tool policy / exec approvals | **declared Tools** ([ADR-0010](docs/adr/0010-assistants-declare-their-tools.md)) | Same intent; ours is declaration, theirs is runtime policy |
+| Tool policy / exec approvals | **declared Tools** ([ADR-0010](../../docs/adr/0010-assistants-declare-their-tools.md)) | Same intent; ours is declaration, theirs is runtime policy |
 | — | **Open Question** | No equivalent. Their questions are chat messages |
 | — | **Authority** | No equivalent. They cache foreign facts freely |
 | — | **intent log**, idempotency key | No equivalent in either system |
@@ -168,7 +168,7 @@ that has nothing to do usually costs nothing.
 
 In Assistants a heartbeat is **liveness**: `RuntimeState.heartbeatAt` is stamped at the end of
 every *successful* scan, a scan that throws deliberately leaves it untouched, and the compose
-healthcheck fails once it is stale ([ADR-0015](docs/adr/0015-nothing-ends-silently.md)). It wakes
+healthcheck fails once it is stale ([ADR-0015](../../docs/adr/0015-nothing-ends-silently.md)). It wakes
 nothing. It exists because the escalation path shares fate with the failures it reports, so
 silence has to be *recorded* silence.
 
@@ -185,7 +185,7 @@ Skill body into every system prompt on every Turn.
 
 The divergence is ownership. OpenClaw's skills are a **market**: discovered from precedence-ordered
 roots up to six levels deep, installable at runtime from a hub or a git ref, gated by declared
-binary/env/config/OS requirements. [ADR-0009](docs/adr/0009-skills-belong-to-one-assistant.md)
+binary/env/config/OS requirements. [ADR-0009](../../docs/adr/0009-skills-belong-to-one-assistant.md)
 forbids sharing a Skill between two Assistants at all, on the grounds that "a shared Skill is a
 shared dependency with no owner".
 
@@ -231,14 +231,14 @@ message re-enters the loop over the stored session. But that is suspension **by 
 loop ending**, not a modelled state. Nothing records that a question is outstanding; there is no
 query for "everything waiting on me". Their inbox is the chat; ours is
 `undefined_match(answeredAt)` over one Model, which is
-[ADR-0004](docs/adr/0004-assistants-suspend-and-resume.md)'s demand satisfied literally.
+[ADR-0004](../../docs/adr/0004-assistants-suspend-and-resume.md)'s demand satisfied literally.
 
 And they cannot suspend *inside* a tool call at all. That is not a gap in their implementation. It
 is a gap in what their loop can mean.
 
 ### 2. Nobody else has an intent log
 
-[ADR-0012](docs/adr/0012-a-conversation-is-an-intent-log.md) writes the tool call and its
+[ADR-0012](../../docs/adr/0012-a-conversation-is-an-intent-log.md) writes the tool call and its
 idempotency key **before** the Operation runs, so recovery after a crash asks the Connector whether
 the key landed rather than repeating the work. The contract that makes it work is hard: *every
 Operation is either read-only or idempotent under a caller-supplied key, and no Operation may be
@@ -263,7 +263,7 @@ time; ours is a declaration that changes what exists. `ToolRegistry.grantedTo(as
 Assistant's declared `tools[]`, and `schemasFor()` derives the offered schemas from that same call —
 one source, so the advertised set and the executable set cannot drift. An undeclared Operation is
 not refused, it is **invisible**. `bookkeeping.createAccount` exists and is granted to nobody, which
-is exactly the granularity [ADR-0010](docs/adr/0010-assistants-declare-their-tools.md) argued for.
+is exactly the granularity [ADR-0010](../../docs/adr/0010-assistants-declare-their-tools.md) argued for.
 
 And the second layer sits outside the process being defended: the `runtime` Keycloak role holds no
 `DOCUMENT_DELETE`, no `MODEL_MANAGE` and no `ASSISTANT_WRITE`, so an Assistant cannot grant itself a
@@ -281,7 +281,7 @@ durable writer of the curated file. Selma's smaller version of the same design h
 
 It is a good design for its purpose and the wrong shape for ours, because retrieval returns *what
 was written down* and we need *what is true*.
-[ADR-0006](docs/adr/0006-one-authority-per-fact.md) forbids caching a foreign fact: an Invoice has
+[ADR-0006](../../docs/adr/0006-one-authority-per-fact.md) forbids caching a foreign fact: an Invoice has
 no `paid` field and no `bookkeepingRef`, because the User may re-split a transaction in Firefly at
 any moment, at which point our copy is a lie. "Is this paid?" is a search against the Authority,
 every time.
@@ -309,7 +309,7 @@ with prompt, response and token counts, exported to Arize Phoenix — local, SQL
 command, a browser UI. Opt-in: with no exporter registered the tracer is a no-op. **(Selma)**
 
 **The strongest case for it.** We have no token accounting at all — neither provider reads `usage`,
-despite [CONTEXT.md](CONTEXT.md) calling the Turn "the unit in which cost is counted". Our
+despite [CONTEXT.md](../../CONTEXT.md) calling the Turn "the unit in which cost is counted". Our
 correlation between log lines is a manual convention. And five separate documents in this
 repository concede the same sentence — *"a Conversation's transcript renders as a data grid, not a
 transcript view"* — with `just logs runtime` named as the better debugging surface.
@@ -320,7 +320,7 @@ transcript view"* — with `just logs runtime` named as the better debugging sur
    the household's work.** The User is the supervisor of every Assistant's activity — that is in
    the definition of the word. An observability stack they never open is not supervision.
 2. **It would be a second event history beside the ThingStore.** That is exactly the
-   [ADR-0006](docs/adr/0006-one-authority-per-fact.md) objection that killed Temporal in
+   [ADR-0006](../../docs/adr/0006-one-authority-per-fact.md) objection that killed Temporal in
    [AGENTIC_LOOP.md](AGENTIC_LOOP.md) Q5, and it does not get weaker because the second store is
    read-only. Our transcript is not a projection of the run — it *is* the run, and the loop reads it
    back on every Turn.
@@ -337,7 +337,7 @@ for a *reader*. So:
 > badly — and that is a UserInterface change, not an instrumentation one.
 
 The reason we do not have one is recorded and is a good reason: a transcript viewer is custom client
-code, which [D-005](DECISIONS.md) exists to avoid. That trade should be revisited on its own merits,
+code, which [D-005](../../DECISIONS.md) exists to avoid. That trade should be revisited on its own merits,
 not smuggled in as observability.
 
 One thing is worth taking regardless, and it is small: **record the token usage on the Turn.** Both
@@ -360,7 +360,7 @@ restart and a replayed watermark all resolve to the same key.
 
 Half a dozen documents recorded that a Schedule Trigger is inert without any of them recording that
 the mechanism for making one safe did not yet exist. That is now settled in
-[ADR-0016](docs/adr/0016-a-schedule-fires-on-its-due-instant.md), which also takes the three policy
+[ADR-0016](../../docs/adr/0016-a-schedule-fires-on-its-due-instant.md), which also takes the three policy
 decisions the mechanism forces — catch up once rather than per missed slot, skip while the previous
 firing is unfinished, and resolve the cron to a UTC instant before it becomes an identity, so
 daylight saving cannot make one firing look like two.
@@ -371,7 +371,7 @@ Four further things their scheduler has thought about that ours would need:
   `HEARTBEAT_OK` convention drops a reply whose remainder is under 300 characters. Ours would
   produce a Conversation per firing. The answer is probably that a scheduled Conversation finding
   nothing ends `done` with no Open Question and no Process step — quiet by construction, which
-  [ADR-0015](docs/adr/0015-nothing-ends-silently.md) already permits because nothing *failed*.
+  [ADR-0015](../../docs/adr/0015-nothing-ends-silently.md) already permits because nothing *failed*.
 - **Active hours**, with the edge case they hit: equal start and end must mean *never*, not
   *always*.
 - **Auto-disable after N consecutive failures.** Our escalation cap is per-Conversation. A Schedule
@@ -467,7 +467,7 @@ So "add Telegram" in our shape is:
   Telegram it is a message you can answer from a train.
 
 One thing such a Connector must get right, and it is not obvious:
-[ADR-0014](docs/adr/0014-exactly-one-runtime-replica.md) gives the Open Question **one writer after
+[ADR-0014](../../docs/adr/0014-exactly-one-runtime-replica.md) gives the Open Question **one writer after
 creation, the User**. A connector inside the Runtime that stamped the answer onto that document
 would be a second Runtime write to a document the User may be editing — the exact hazard that moved
 answer *consumption* onto the Conversation in the first place. So the answer must arrive either as
@@ -493,9 +493,9 @@ Ranked, with a verdict, what it costs and what it would need.
 | # | Learning | Verdict | Cost | Needs |
 |---|---|---|---|---|
 | 1 | An Operation may declare that it requires an answered Open Question before it executes — so "nothing is booked without an answer" stops being prose | **Adopt** | Small; `advance()` already writes the intent there | An ADR. The sharpest finding in this document |
-| 2 | A Schedule Trigger needs its own exactly-once identity — `(assistantKey, scheduledFor)`, keyed on the *due instant* | **Decided** — [ADR-0016](docs/adr/0016-a-schedule-fires-on-its-due-instant.md) | Small | The watcher's seventh scan, and one indexed field |
+| 2 | A Schedule Trigger needs its own exactly-once identity — `(assistantKey, scheduledFor)`, keyed on the *due instant* | **Decided** — [ADR-0016](../../docs/adr/0016-a-schedule-fires-on-its-due-instant.md) | Small | The watcher's seventh scan, and one indexed field |
 | 3 | A channel is a Connector for the UserInterface, not a gateway | **Adopt** (as the design) | A Connector to build | Nothing new — it is already the shape |
-| 4 | Enforce the single Runtime instead of asserting it | **Decided** — [ADR-0017](docs/adr/0017-the-runtime-claims-ownership-and-stands-down.md) | Small | An owner stamped beside the heartbeat |
+| 4 | Enforce the single Runtime instead of asserting it | **Decided** — [ADR-0017](../../docs/adr/0017-the-runtime-claims-ownership-and-stands-down.md) | Small | An owner stamped beside the heartbeat |
 | 5 | Auto-disable a Schedule after N consecutive failures | **Adopt** with (2) | Trivial | `Assistant.enabled` already exists; nothing sets it |
 | 6 | Record token usage on the Turn | **Adopt** | Two fields; both providers already receive it | A model change |
 | 7 | A scheduled Conversation that finds nothing must be quiet by construction | **Adopt** with (2) | Free — a convention in the Assistant's prompt | Nothing |
@@ -554,11 +554,11 @@ over-engineering in a personal chat agent.
    trigger-eligible allow-list that structurally prevents feeding on our own output, `enabled`, and
    a global pause. Selma's loop has *no* turn cap and *no* token budget. **(Selma)**
 9. **The Assistant is a governed Thing, not a folder.** Prompts, Skills, Triggers and Tools are
-   fields on a modelled document with a form ([ADR-0003](docs/adr/0003-assistants-are-things.md)).
+   fields on a modelled document with a form ([ADR-0003](../../docs/adr/0003-assistants-are-things.md)).
    Selma's equivalent is seven markdown files plus a JSON config — and its installer writes
    `MEMORY.md` to a path the loader does not read, so the curated memory never reaches the prompt.
    A modelled field cannot be in the wrong place. **(Selma)**
-10. **The vocabulary is enforced.** [CONTEXT.md](CONTEXT.md) lists forbidden synonyms per term. That
+10. **The vocabulary is enforced.** [CONTEXT.md](../../CONTEXT.md) lists forbidden synonyms per term. That
     is why "waiting" means one thing in the models, the code and the prose.
 11. **No durable memory is also a security property.** Their hardest problem — a payload sitting in
     memory for weeks — cannot happen to a system whose Conversations are episodes and whose facts

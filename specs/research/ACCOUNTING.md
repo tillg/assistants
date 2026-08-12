@@ -1,6 +1,6 @@
 # Accounting / BookKeeping
 
-The **BookKeeping** external system (see [README](README.md)) is the system our **Accountant** assistant talks to. This document describes what a simple bookkeeping system needs to provide — the core concepts and the operations — and gives a market overview of existing (open source, ideally CLI) systems we could use instead of building our own.
+The **BookKeeping** external system (see [README](../../README.md)) is the system our **Accountant** assistant talks to. This document describes what a simple bookkeeping system needs to provide — the core concepts and the operations — and gives a market overview of existing (open source, ideally CLI) systems we could use instead of building our own.
 
 [TOC]
 
@@ -184,7 +184,7 @@ If pure agent-driven simplicity ever outweighs the UI: **hledger** remains the b
 
 ## Budgets in Firefly III
 
-Firefly III is the chosen Bookkeeping system, and Bookkeeping is the **Authority** for budgets (see [ADR-0006](docs/adr/0006-one-authority-per-fact.md)) — no Budget is a Thing. The Accountant therefore has to work with Firefly's concept of a budget, not with one of our own. What that concept is:
+Firefly III is the chosen Bookkeeping system, and Bookkeeping is the **Authority** for budgets (see [ADR-0006](../../docs/adr/0006-one-authority-per-fact.md)) — no Budget is a Thing. The Accountant therefore has to work with Firefly's concept of a budget, not with one of our own. What that concept is:
 
 * A **Budget** is a spending-control device, not a classification. It applies to **withdrawals only** — income and transfers never touch a budget. This is what separates it from a **Category** (which classifies past transactions) and a **Tag**.
 * A **Budget Limit** is a separate object: an amount plus a date range. Monthly is the common case; weekly, quarterly, yearly and custom ranges are all supported, and limits may differ per period (€500 in January, €400 in a normal month).
@@ -198,6 +198,6 @@ Firefly's budget is a **recurring cap per period**. That fits ongoing household 
 
 It fits the **house renovation** badly. That budget is a one-off total for a multi-year project, not a per-period cap — the question is "how much of the €X is left", not "did we overspend in July". Options within Firefly: a single Budget Limit with a custom date range spanning the whole project, or a Category plus a target tracked in a report. Neither is what Firefly's budget UI is built for.
 
-Firefly also has nowhere to put **committed but not yet booked** money — an accepted €12,000 roofer's quote, an estimate for windows not yet ordered. Its **Bills** cover *expected recurring* expenses, and **Piggy banks** cover *savings goals*; neither models a one-off commitment. Since no External System owns that fact, the ThingStore is its Authority — see the open question in [README](README.md).
+Firefly also has nowhere to put **committed but not yet booked** money — an accepted €12,000 roofer's quote, an estimate for windows not yet ordered. Its **Bills** cover *expected recurring* expenses, and **Piggy banks** cover *savings goals*; neither models a one-off commitment. Since no External System owns that fact, the ThingStore is its Authority — see the open question in [README](../../README.md).
 
 Sources: [Budgets](https://firefly-iii-firefly-iii.mintlify.app/features/budgets), [Organizing transactions](https://docs.firefly-iii.org/explanation/data-classification/what-to-use/), [Budgets (docs)](https://docs.firefly-iii.org/explanation/financial-concepts/budgets/).

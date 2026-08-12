@@ -33,14 +33,11 @@ Spelling throughout the project is British English.
 reversal costs) · [BUGS.md](BUGS.md) (43 reproduced defects from the 2026-08-09 hunt; each entry
 records whether it still stands) ·
 [docs/adr/](docs/adr/) (seventeen architecture decisions) ·
-[ACCOUNTING.md](ACCOUNTING.md) (what Bookkeeping must provide, and why Firefly III) ·
-[AGENTIC_LOOP.md](AGENTIC_LOOP.md) (the loop's open questions, and a survey of how three existing
-agent systems answer them) ·
-[ASSISTANTS_VS_OPENCLAW.md](ASSISTANTS_VS_OPENCLAW.md) (the same exercise against OpenClaw: what
-its gateway, channels, heartbeat and skill market would and would not buy us — and the two places
-it found where our own structure stops short) ·
-[MARKDOWN_FIELDS.md](MARKDOWN_FIELDS.md) (what is still undecided
-about markdown fields) · and [specs/system/](specs/system/) (the system as it stands: its
+[RESEARCH_INDEX.md](RESEARCH_INDEX.md) (the four research papers in
+[specs/research/](specs/research/), each with what it settled and what it left open: what
+Bookkeeping must provide and why Firefly III, how the agentic loop should work and why no workflow
+engine, what is still undecided about markdown fields, and what OpenClaw does that we do not) ·
+and [specs/system/](specs/system/) (the system as it stands: its
 [domain](specs/system/domain.md), its [architecture](specs/system/architecture.md) and what it
 [does](specs/system/functional.md)).
 
@@ -303,7 +300,7 @@ Lexical-based, with the collaborative-editing subsystem dropped). A field become
 by three coordinated facts — `lineBreaksPermitted` on the `StringType`, `"exposition": "AREA"` in
 the form model, and a `widget: markdown-editor` annotation on the Control — which is what makes an
 Assistant's prompts editable in the ordinary UI, as [ADR-0003](docs/adr/0003-assistants-are-things.md)
-requires. See [MARKDOWN_FIELDS.md](MARKDOWN_FIELDS.md).
+requires. See [MARKDOWN_FIELDS.md](specs/research/MARKDOWN_FIELDS.md).
 
 **Runtime** (`runtime/`) — TypeScript on Node 24, in two halves. The **Trigger Watcher** scans the
 ThingStore every two seconds, in six passes: things that materialised, questions that were
@@ -501,8 +498,10 @@ This is one running vertical slice, not a finished system. What is honestly miss
 │   └── keycloak/             the A12Realm import, as *.template + the renderer
 ├── scripts/setup-env.mjs     writes .env and generates the machine credentials
 ├── e2e/                      Playwright
+├── RESEARCH_INDEX.md         what each research paper settled, and what it left open
 ├── specs/
 │   ├── system/               the system as it stands: domain, architecture, functional
+│   ├── research/             the research papers, and the sources they were read from
 │   └── changes/              proposal, domain, architecture and plan, per change in flight
 ├── docs/                     adr/ — seventeen architecture decision records; logo/ — design explorations
 ├── assets/                   the logo and its derived files

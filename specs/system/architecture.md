@@ -174,7 +174,7 @@ A field becomes a markdown field by three coordinated facts:
 Wiring is a `formModelMap.Control` bridge plus a `widgetMap.TextAreaStateless` entry in
 `client/src/appsetup.ts`. This uses native A12 features only, which is what makes an Assistant's
 prompts editable in the ordinary UI as ADR-0003 requires. See
-[MARKDOWN_FIELDS.md](../../MARKDOWN_FIELDS.md).
+[MARKDOWN_FIELDS.md](../research/MARKDOWN_FIELDS.md).
 
 **Constraint**: `lexical` must resolve to a single instance shared with `widgets-core`, or
 Lexical's `$`-functions break. Verified in the build with `npm ls lexical`.

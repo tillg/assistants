@@ -2,7 +2,7 @@
 
 ## What
 
-Five items adopted from [ASSISTANTS_VS_OPENCLAW.md](../../../ASSISTANTS_VS_OPENCLAW.md), numbered
+Five items adopted from [ASSISTANTS_VS_OPENCLAW.md](../../research/ASSISTANTS_VS_OPENCLAW.md), numbered
 as they are in that document's learnings table:
 
 | # | Item | Why it is here |

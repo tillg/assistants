@@ -155,7 +155,7 @@ authorisation boundary moves. `Assistant.enabled` keeps its meaning: something t
 
 Nothing aggregates, nothing bills, no dashboard. A Conversation carries what its Turns cost and the
 transcript is where you read it — which is [item 5 of the comparison's inspectability
-argument](../../../ASSISTANTS_VS_OPENCLAW.md) applied to itself: the record, not a second store.
+argument](../../research/ASSISTANTS_VS_OPENCLAW.md) applied to itself: the record, not a second store.
 
 ---
 

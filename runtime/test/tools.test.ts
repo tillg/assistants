@@ -30,7 +30,7 @@ interface SearchRow {
  */
 function requiredBookkeepingOperations(): string[] {
     const document = readFileSync(
-        new URL("../../ACCOUNTING.md", import.meta.url).pathname,
+        new URL("../../specs/research/ACCOUNTING.md", import.meta.url).pathname,
         "utf8",
     );
     const section = document.slice(

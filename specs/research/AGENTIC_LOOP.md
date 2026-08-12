@@ -2,7 +2,7 @@
 
 # Agentic Loop — open research questions
 
-The **agentic loop** is what actually executes an Assistant: it watches Triggers, gives birth to Conversations, drives the exchange with the LLM and its tools, and continues Conversations when the actor they were waiting for responds. The concept-level decisions are recorded in [ADR-0004](docs/adr/0004-assistants-suspend-and-resume.md), [ADR-0005](docs/adr/0005-triggers-give-birth-responses-continue.md) and [ADR-0007](docs/adr/0007-assistants-call-each-other-asynchronously.md). This document collects what is *not* decided, to be settled by a dedicated research thread.
+The **agentic loop** is what actually executes an Assistant: it watches Triggers, gives birth to Conversations, drives the exchange with the LLM and its tools, and continues Conversations when the actor they were waiting for responds. The concept-level decisions are recorded in [ADR-0004](../../docs/adr/0004-assistants-suspend-and-resume.md), [ADR-0005](../../docs/adr/0005-triggers-give-birth-responses-continue.md) and [ADR-0007](../../docs/adr/0007-assistants-call-each-other-asynchronously.md). This document collects what is *not* decided, to be settled by a dedicated research thread.
 
 The thread should also survey how existing implementations solve these — [Opencode](https://github.com/anomalyco/opencode), [Pi](https://github.com/earendil-works/pi), the Claude Agent SDK — and what concepts they name.
 
@@ -35,7 +35,7 @@ Note: a timeout is also what stops a Conversation waiting forever on an Assistan
 
 ## Q4 — `Process`: passive routing slip, or an actor?
 
-`Process` is the most under-specified Thing in the [README](README.md) and the backbone of the construction-permit scenario. Three shapes:
+`Process` is the most under-specified Thing in the [README](../../README.md) and the backbone of the construction-permit scenario. Three shapes:
 
 1. **Passive** — a Thing holding what is done and what is outstanding; any Assistant may append; nothing "runs" it.
 2. **Owned** — a dedicated Assistant owns each Process and drives it forward.
@@ -168,7 +168,7 @@ happens. Ours scans every two seconds, gives birth on its own, and can go a whol
 looking. So bounds had to exist: `maxTurns` (twenty, reached as a finish reason and an Open Question
 rather than a silent stop), a cap on births per hour, an allow-list of the Models a Trigger may fire
 on — which is what structurally stops the Runtime triggering on its own Conversations and Assistants,
-both of which are Things ([ADR-0003](docs/adr/0003-assistants-are-things.md)) — and a global pause
+both of which are Things ([ADR-0003](../../docs/adr/0003-assistants-are-things.md)) — and a global pause
 flag as a kill switch. None of these is a refinement. Without them the first bug is a bill.
 
 **The pending tool call held up exactly as predicted.** Any Tool may answer `pending` instead of
