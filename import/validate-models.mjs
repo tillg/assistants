@@ -104,8 +104,8 @@ const FORM_CONTENT_KEYS = [
  * Fields without which a Thing is not a Thing of that Model.
  *
  * `requirednessConfig` is the only requiredness carrier a Model has, and it binds *both* writers —
- * the User through the form and the Runtime through `thingstore.create`. A tool-layer check would
- * leave the UI hole open, which is why this lives in the Model.
+ * the User through the form and the Runtime through `thingstore.create`. An Operation-layer check
+ * would leave the UI hole open, which is why this lives in the Model.
  *
  * Invoice is the entry that matters: it declared none at all, so `thingstore.create` with `{}` was
  * accepted, and an Invoice with no number, no issuer, no date and no amount appeared in the overview
@@ -293,7 +293,8 @@ for (const [dm, required] of Object.entries(MANDATORY_FIELDS)) {
 // are load-bearing. Breaking one produces a watcher that silently returns nothing". The validator
 // already owned the list of filtered fields and checked the sibling rule (`indexed`) against it, and
 // simply never inspected the type. Checked for *every* indexed field rather than only the ones
-// WATCHER_FIELDS names, because `tools.ts` exposes field filters the watcher itself does not use.
+// WATCHER_FIELDS names, because `operations/implementations.ts` exposes field filters the watcher
+// itself does not use.
 for (const [dm, fields] of dmFields) {
     for (const [fieldId, field] of fields) {
         if (field.group || !field.indexed) continue;

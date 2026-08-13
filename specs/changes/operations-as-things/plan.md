@@ -117,63 +117,63 @@ Atomic, and before any new code leans on either vocabulary. A half-rename is wha
 
 ## E — The Turn loads a catalogue
 
-- [ ] Failing test: `advance()` throws before the provider is called when the catalogue is empty, and
+- [x] Failing test: `advance()` throws before the provider is called when the catalogue is empty, and
   the Conversation's `turnCount` is unchanged.
-- [ ] Add a catalogue read at the top of `LoopDriver.advance()` — one unconstrained
+- [x] Add a catalogue read at the top of `LoopDriver.advance()` — one unconstrained
   `things.search(SPECS.Operation_DM)` — and thread the snapshot to `callLlmWithRetries`, the tool-call
   loop and `reconcile()`.
-- [ ] Refuse an empty catalogue with a message that says bootstrap has not run, and log it at error.
-- [ ] **The belt message consults `dropped`.** At `advance.ts:575`, a call that resolves to nothing is
+- [x] Refuse an empty catalogue with a message that says bootstrap has not run, and log it at error.
+- [x] **The belt message consults `dropped`.** At `advance.ts:575`, a call that resolves to nothing is
   answered with the true reason — *"`bank.sendMoney` is switched off"*, *"…is no longer
   implemented"*, *"…is not granted to you"* — instead of *"is not one of your tools"*, which is false
   whenever the grant is still in the Assistant's definition. Test each reason's wording.
-- [ ] **The startup check** in the watcher: before the first scan, read the catalogue; if it is empty
+- [x] **The startup check** in the watcher: before the first scan, read the catalogue; if it is empty
   or unreadable, log at error with the remedy, do not scan, and report unhealthy. Re-check on every
   scan, and log the transition — *"catalogue found: 17 Operations; scanning resumed"* — when one
   appears. Tests: no scan while empty; scanning resumes without a restart; the transition is logged
   once, not per scan.
-- [ ] Give `runtime/test/support/harness.ts` a default catalogue derived from the registered
+- [x] Give `runtime/test/support/harness.ts` a default catalogue derived from the registered
   Implementations' seeds, so existing tests keep working with one call-signature change each.
-- [ ] Update the call sites in `runtime/test/loop.test.ts` (`schemasFor`, `grantedTo`, `calleesOf`).
-- [ ] Test: an Operation switched off under a **suspended** Conversation. The Open Question is
+- [x] Update the call sites in `runtime/test/loop.test.ts` (`schemasFor`, `grantedTo`, `calleesOf`).
+- [x] Test: an Operation switched off under a **suspended** Conversation. The Open Question is
   answered, the Conversation resumes, the model takes a fresh Turn and is told the Operation is
   switched off. This is **not** the reconciliation path — a suspended call already has a `pending`
   tool-result, so `unresolvedIntent` never finds it — and the test must assert the message, not just
   that nothing was stranded.
-- [ ] Test: an Operation switched off under a Conversation that **crashed** mid-call still reaches
+- [x] Test: an Operation switched off under a Conversation that **crashed** mid-call still reaches
   `reconcile()`'s *"no longer available"* settlement, unchanged.
-- [ ] Test: the effective `requiresApproval` from the Thing gates `bookkeeping.postTransaction`
+- [x] Test: the effective `requiresApproval` from the Thing gates `bookkeeping.postTransaction`
   end-to-end within the unit tier — the existing approval tests keep passing with the flag arriving
   from data instead of code.
-- [ ] `just test-runtime` — green, including every test that existed before this change.
+- [x] `just test-runtime` — green, including every test that existed before this change.
 
 ## F — Bootstrap
 
-- [ ] Failing integration test in `runtime/test/integration/`: bootstrap creates one Operation per
+- [x] Failing integration test in `runtime/test/integration/`: bootstrap creates one Operation per
   Implementation; a second run with a changed seed `system` updates the Thing; a second run with a
   changed seed **description** leaves the Thing alone **and reports it**; a second run leaves an
   `enabled: false` and a hand-set `requiresApproval` untouched.
-- [ ] Add the Operation loop to `bootstrap()`, **before** the Assistant loop, keyed
+- [x] Add the Operation loop to `bootstrap()`, **before** the Assistant loop, keyed
   `operation:<key>`. On create, every seeded field plus `enabled: true`. On update, only the
   mechanical mirror: `system`, `kind`, `parameters`, `mutating`.
-- [ ] Collect the Operations whose stored `description` differs from their seed and report them by
+- [x] Collect the Operations whose stored `description` differs from their seed and report them by
   name, changing nothing.
-- [ ] Extend the returned counts and the CLI's report with the Operation totals and the divergence
+- [x] Extend the returned counts and the CLI's report with the Operation totals and the divergence
   list.
-- [ ] Rewrite the doc comment on `bootstrap()`: it now has three behaviours, not two, and the third
+- [x] Rewrite the doc comment on `bootstrap()`: it now has three behaviours, not two, and the third
   one — re-apply what the code knows, never re-apply a decision — is the one a reader will not guess.
   Say explicitly that the prose is on the decision side of that line.
-- [ ] `just bootstrap` against the live stack, then read the catalogue in the web application: all
+- [x] `just bootstrap` against the live stack, then read the catalogue in the web application: all
   seventeen present, descriptions rendering as markdown, `bookkeeping.createAccount` there.
 
 ## G — Security
 
-- [ ] Add `Operation_DM` to the model set in the *"User Has ASSISTANT_WRITE Right For An Assistant"*
+- [x] Add `Operation_DM` to the model set in the *"User Has ASSISTANT_WRITE Right For An Assistant"*
   rule in `import/auth/childAuthorizationDefinition.json` — **all three resource shapes**: the bare
   model-name string, the `DocumentV2`, and both sides of the `DocumentUpdateResource`.
-- [ ] Rename that policy and the *"Assistant Write Permission"* to name what they guard now (the
+- [x] Rename that policy and the *"Assistant Write Permission"* to name what they guard now (the
   system's own definition), and extend both descriptions.
-- [ ] Update the `ASSISTANT_WRITE` comments in `import/auth/roles.yaml`: the right now covers
+- [x] Update the `ASSISTANT_WRITE` comments in `import/auth/roles.yaml`: the right now covers
   `Assistant_DM` and `Operation_DM`, and the name is narrower than the job.
 - [ ] Restart the stack (or reload the rules with `RELOAD_AUTH_RULES`) and confirm the definitions
   are actually in force before writing the test — an auth change that did not load is a test that
@@ -219,23 +219,23 @@ match what was built.
   ownership; **Assistant**'s *"set of Tools it may use"* → *"the Operations it is granted"*;
   **Runtime** noting the one Operation it offers; **Conversation**'s *"a called tool"* →
   *"an Operation it called"*; **Pending Tool Call** keeping its name, with the reason.
-- [ ] `specs/system/domain.md`: nine Models not eight, `Operation` in the Models table, the
+- [x] `specs/system/domain.md`: nine Models not eight, `Operation` in the Models table, the
   single-writer table, ADR-0010's rule as a conjunction, the vocabulary table's **Tool** row →
   **Granted Operation**, and the known departures from this change's [domain.md](domain.md).
-- [ ] `specs/system/architecture.md`: the Operations table becomes a pointer at the catalogue plus the
+- [x] `specs/system/architecture.md`: the Operations table becomes a pointer at the catalogue plus the
   grant matrix; the `#### Tools` section is retitled `#### Operations` and gains the split and the
   per-Turn snapshot; the Models paragraph's counts are corrected — and note while there that its
   *"seven `_OM`s"* is already wrong (there are eight before this change, nine after); the roles table
   and the D-007a bullet gain `Operation_DM`.
-- [ ] `specs/system/functional.md`: a feature section for reading and editing the catalogue; the
+- [x] `specs/system/functional.md`: a feature section for reading and editing the catalogue; the
   permissions table gains a `Write Operation` row; the edge-cases list notes that switching an
   Operation off is not retroactive for a Conversation already waiting on it.
-- [ ] `import/models/CONVENTIONS.md`: `Operation` into the who-writes-what table.
-- [ ] `README.md`: the recipe table and the model list where they name counts; one paragraph on the
+- [x] `import/models/CONVENTIONS.md`: `Operation` into the who-writes-what table.
+- [x] `README.md`: the recipe table and the model list where they name counts; one paragraph on the
   catalogue as the answer to *"what can my Assistants actually do?"*; and three entries under
   *Status and limitations* — the catalogue does not say where an Operation's code lives, Operations
   cannot be added dynamically, and the read guard covers one Model only.
-- [ ] `specs/research/ASSISTANTS_VS_OPENCLAW.md`: nothing to mark built — this change is not on the
+- [x] `specs/research/ASSISTANTS_VS_OPENCLAW.md`: nothing to mark built — this change is not on the
   learnings list — but check learning 17's wording still reads correctly now that a catalogue exists,
   since the distinction between *describing* an Operation and *inventing* one is what keeps it a
   rejection.

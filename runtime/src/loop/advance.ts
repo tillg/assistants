@@ -253,12 +253,12 @@ function approvalRequestsFor(
  * experience. A JSON blob in the inbox is how a safety feature becomes a thing the User clicks yes
  * on without reading.
  */
-export function renderApprovalPrompt(tool: GrantedOperation, args: Record<string, unknown>): string {
-    const described = tool.describeCall?.(args)?.trim();
+export function renderApprovalPrompt(operation: GrantedOperation, args: Record<string, unknown>): string {
+    const described = operation.describeCall?.(args)?.trim();
     const body = described
         ? described
         : [
-              `Approve calling **${tool.name}** with these arguments?`,
+              `Approve calling **${operation.name}** with these arguments?`,
               ``,
               "```json",
               JSON.stringify(args, null, 2),
@@ -560,15 +560,15 @@ export class LoopDriver {
         let usageRecorded = false;
 
         for (const call of response.toolCalls) {
-            const tool =
+            const resolved =
                 granted.find((candidate) => toolNameForLlm(candidate.name) === call.name) ??
                 granted.find((candidate) => candidate.name === operationFromLlm(call.name));
-            // Record the tool's OWN name, not the reverse-mapped wire name. `__` maps back to `.`
+            // Record the Operation's OWN name, not the reverse-mapped wire name. `__` maps back to `.`
             // unconditionally, so `assistant.call:accountant` became `assistant.call.accountant` —
-            // a name no tool has. Recovery then looked it up, failed, and told the model the call
+            // a name no Operation has. Recovery then looked it up, failed, and told the model the call
             // "did not take effect", when in fact the child Conversation had already been born.
             // The model's natural response is to call again: two Accountants on one invoice.
-            const operation = tool?.name ?? operationFromLlm(call.name);
+            const operation = resolved?.name ?? operationFromLlm(call.name);
 
             const seq = nextSeq(conversation);
             const idempotencyKey = `${stored.thingId}:${seq}`;
@@ -588,7 +588,7 @@ export class LoopDriver {
             }
             await this.write(stored);
 
-            if (!tool) {
+            if (!resolved) {
                 // An Operation that was never offered should be unreachable — the registry does not
                 // put it in the schemas — so this is a belt, and there is a test for it. What it
                 // *says* is not a belt: after ADR-0019 the likeliest reason a granted Operation is
@@ -610,15 +610,15 @@ export class LoopDriver {
             // That position is not incidental: the intent is already in the transcript, so a refusal
             // is visible in the Conversation rather than inferred from its absence, and it is the
             // same place a `pending` outcome is handled, so the refusal path is the existing path.
-            const argsHash = tool.requiresApproval ? canonicalArgsHash(call.arguments) : undefined;
+            const argsHash = resolved.requiresApproval ? canonicalArgsHash(call.arguments) : undefined;
             const refusal = argsHash
-                ? await this.gateOnApproval(stored, assistant, tool, call.arguments, argsHash)
+                ? await this.gateOnApproval(stored, assistant, resolved, call.arguments, argsHash)
                 : undefined;
             if (refusal) {
                 outcome = refusal;
             } else {
                 try {
-                    outcome = await tool.execute(call.arguments, context);
+                    outcome = await resolved.execute(call.arguments, context);
                 } catch (error) {
                     // Recoverable by the model: it sees the error as a tool result and self-corrects.
                     // Which requires the message to say what was wrong — so the model gets the
@@ -627,7 +627,7 @@ export class LoopDriver {
                     // tokens on every failure, and leaked host paths into the prompt.
                     log.error("a tool call threw", {
                         conversationId: stored.thingId,
-                        tool: operation,
+                        operation,
                         error: describeError(error),
                     });
                     outcome = { kind: "error", message: describeForModel(error) };
@@ -714,11 +714,11 @@ export class LoopDriver {
     private async gateOnApproval(
         stored: Stored<Conversation>,
         assistant: Stored<Assistant>,
-        tool: GrantedOperation,
+        operation: GrantedOperation,
         args: Record<string, unknown>,
         argsHash: string,
     ): Promise<OperationOutcome | undefined> {
-        const approval = await findApproval(stored.data, tool.name, argsHash, (questionId) =>
+        const approval = await findApproval(stored.data, operation.name, argsHash, (questionId) =>
             this.loadQuestion(questionId),
         );
 
@@ -731,7 +731,7 @@ export class LoopDriver {
                 // only by `maxTurns`.
                 log.info("an operation requiring approval was declined", {
                     conversationId: stored.thingId,
-                    tool: tool.name,
+                    operation: operation.name,
                 });
                 return { kind: "error", message: approval.reason };
             case "waiting":
@@ -743,10 +743,10 @@ export class LoopDriver {
                 };
             case "missing":
             case "consumed": {
-                const questionId = await this.raiseApproval(stored, assistant, tool, args, argsHash);
+                const questionId = await this.raiseApproval(stored, assistant, operation, args, argsHash);
                 log.info("an operation requiring approval was refused and the User was asked", {
                     conversationId: stored.thingId,
-                    tool: tool.name,
+                    operation: operation.name,
                     questionId,
                     // Which of the two it was matters when reading a log: a consumed approval means
                     // the model asked to do the same thing twice.
@@ -773,17 +773,17 @@ export class LoopDriver {
     private async raiseApproval(
         stored: Stored<Conversation>,
         assistant: Stored<Assistant>,
-        tool: GrantedOperation,
+        operation: GrantedOperation,
         args: Record<string, unknown>,
         argsHash: string,
     ): Promise<string> {
         const conversation = stored.data;
-        const attempt = approvalRequestsFor(conversation, tool.name, argsHash).length + 1;
+        const attempt = approvalRequestsFor(conversation, operation.name, argsHash).length + 1;
         const questionId = await this.deps.raiseQuestion({
             conversation: stored,
             assistantKey: assistant.data.key ?? "",
             kind: "confirm",
-            prompt: renderApprovalPrompt(tool, args),
+            prompt: renderApprovalPrompt(operation, args),
             // Short enough for the store's 100-character `exact_match` ceiling; the (Operation,
             // argsHash) pair is matched by the walk-back, so the key only has to separate attempts.
             idempotencyKey: `approval:${stored.thingId}:${argsHash.slice(0, 16)}:${attempt}`,
@@ -791,7 +791,7 @@ export class LoopDriver {
         appendEntry(conversation, {
             role: "system",
             kind: "approval-request",
-            toolName: tool.name,
+            toolName: operation.name,
             argsHash,
             questionId,
         });
@@ -835,7 +835,7 @@ export class LoopDriver {
         log.info("conversation suspended", {
             conversationId: stored.thingId,
             waitingFor: outcome.waitingFor,
-            tool: operation,
+            operation,
         });
         return { status: "waiting", turnsRun, note: `pending ${operation}` };
     }
@@ -858,13 +858,13 @@ export class LoopDriver {
         const conversation = stored.data;
         const operation = intent.toolName ?? "";
         const key = intent.idempotencyKey ?? "";
-        const tool = this.deps.registry
+        const resolved = this.deps.registry
             .grantedTo(assistant.data, catalogue)
             .granted.find((candidate) => candidate.name === operation);
 
         log.warn("reconciling an interrupted tool call", {
             conversationId: stored.thingId,
-            tool: operation,
+            operation,
             idempotencyKey: key,
         });
 
@@ -879,13 +879,13 @@ export class LoopDriver {
             // A reconciled call that DID land spent its approval, exactly as an ordinary one does.
             // Without this a crash between the booking and its result would leave the approval
             // looking unspent, and one yes could place the same transaction twice.
-            if (tool?.requiresApproval && verdict.kind === "value") {
+            if (resolved?.requiresApproval && verdict.kind === "value") {
                 stampSpentApproval(result, canonicalArgsHash(safeParse(intent.toolArgs)));
             }
             return verdict;
         };
 
-        if (!tool) {
+        if (!resolved) {
             // The Operation is gone (renamed, or revoked from this Assistant). Nothing did it.
             return settle(
                 { kind: "error", message: `"${operation}" is no longer available` },
@@ -893,7 +893,7 @@ export class LoopDriver {
             );
         }
 
-        if (!tool.mutating) {
+        if (!resolved.mutating) {
             // Read-only: repeating it is free and cannot be wrong.
             return settle(
                 { kind: "value", value: null },
@@ -901,15 +901,15 @@ export class LoopDriver {
             );
         }
 
-        if (!tool.reconcile) return undefined;
+        if (!resolved.reconcile) return undefined;
 
         const context: OperationContext = { conversation: stored, assistant, idempotencyKey: key };
         let outcome: OperationOutcome | undefined;
         try {
-            outcome = await tool.reconcile(safeParse(intent.toolArgs), context);
+            outcome = await resolved.reconcile(safeParse(intent.toolArgs), context);
         } catch (error) {
             log.error("reconciliation itself failed", {
-                tool: operation,
+                operation,
                 error: describeError(error),
             });
             return undefined;
