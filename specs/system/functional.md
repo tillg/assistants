@@ -349,6 +349,12 @@ This is one running vertical slice, not a finished system.
 - **Nothing aggregates what a Conversation cost.** A Turn carries what the model charged for it and
   the transcript is where you read it. No dashboard, no billing, no second store — and the sum is a
   lower bound, because a Turn that errored records nothing.
+- **An answered question does not leave the pending view.** `OpenQuestionPending_QeM` filters on
+  `answeredAt` being unset, and nothing stamps that field — while the Runtime's `isAnswered` counts
+  *any* filled answer field, so the Conversation does continue. The row simply stays in the inbox
+  looking unanswered. Pre-existing, and approvals make it twice as visible, because a booking now
+  raises two questions rather than one. The fix is to widen the query model's constraint to all four
+  answer fields, which wants `undefined_match` on a Boolean verified against the live store first.
 - **`updatedAt` records the last Runtime write only.** A save from the web application moves only
   `__meta.modifiedAt`, because the machine fields are on no form and A12's form engine offers no
   save hook that could reach one.

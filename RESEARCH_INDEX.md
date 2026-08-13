@@ -128,8 +128,9 @@ answer* was a sentence in a system prompt rather than a refusal in the Runtime â
 **The more valuable half turned out to be the two learnings that were dropped.** Auto-disabling a
 failing Schedule and active hours were both adopted from OpenClaw and both **reversed** while the
 work was being planned: ADR-0016's rule that a slot is skipped while the previous one is unfinished
-means our schedule cannot run away, so there is nothing for a failure threshold to count. See
-[`specs/changes/openclaw-learnings/proposal.md`](specs/changes/openclaw-learnings/proposal.md).
+means our schedule cannot run away, so there is nothing for a failure threshold to count. The
+argument is recorded where a reader arriving from OpenClaw will look for it, in
+[ADR-0016's consequences](docs/adr/0016-a-schedule-fires-on-its-due-instant.md).
 
 **A caveat this paper insists on.** The c't article describes OpenClaw as built on Mario Zechner's
 Pi toolkit. That was true until 2026-05-28, when three of the four Pi packages were dropped. Any
