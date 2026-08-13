@@ -182,6 +182,16 @@ Lexical's `$`-functions break. Verified in the build with `npm ls lexical`.
 There is no custom client code beyond this. The User answers an Open Question by opening it in the
 ordinary A12 instance form and saving it (D-005).
 
+**If a Thing is ever reached outside the web application — a messenger, a push notification, mail —
+it hooks `raiseQuestion` and nothing else.** Every Open Question in the system passes through that
+one function: `ui.askUser`, every Manual Connector, every escalation, and every approval refusal.
+`ui.askUser` looks like the natural hook and is the wrong one — it misses all of those but the first,
+which is to say it misses precisely the questions worth pushing to a phone. Such a notification must
+also be **non-fatal**, because [ADR-0015](../../docs/adr/0015-nothing-ends-silently.md)'s rule that
+the escalation path must not share fate with the failures it reports cuts both ways: a dead channel
+must never fail a Conversation. Nothing does this today, and the decision is recorded here rather
+than in the change that declined to build it.
+
 ### Runtime (`runtime/`)
 
 Two halves, roughly 6,900 lines of TypeScript.

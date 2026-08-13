@@ -32,7 +32,7 @@ Spelling throughout the project is British English.
 [DECISIONS.md](DECISIONS.md) (decisions taken while building, with their alternatives and
 reversal costs) · [BUGS.md](BUGS.md) (43 reproduced defects from the 2026-08-09 hunt; each entry
 records whether it still stands) ·
-[docs/adr/](docs/adr/) (seventeen architecture decisions) ·
+[docs/adr/](docs/adr/) (eighteen architecture decisions) ·
 [RESEARCH_INDEX.md](RESEARCH_INDEX.md) (the four research papers in
 [specs/research/](specs/research/), each with what it settled and what it left open: what
 Bookkeeping must provide and why Firefly III, how the agentic loop should work and why no workflow

@@ -81,7 +81,7 @@ An event that gives birth to a new Conversation — the User asking something, a
 _Avoid_: event, hook, webhook
 
 **Schedule**:
-A Trigger configured on an Assistant that fires by the clock and gives birth to a Conversation where none exists. Distinct from a **wakeAt**, which is state on a Conversation that already exists: one is configuration on a template, the other is state on an instance.
+A Trigger configured on an Assistant that fires by the clock and gives birth to a Conversation where none exists. Distinct from a **wakeAt**, which is state on a Conversation that already exists: one is configuration on a template, the other is state on an instance. A Schedule is a standing instruction about the current state of the world, not an event log: missed slots are caught up **once**, never once per slot, and a slot is skipped entirely while the previous one is unfinished — so a Schedule stalls rather than accumulates.
 _Avoid_: timer, cron job, timeout
 
 **Pending Tool Call**:
@@ -94,7 +94,7 @@ _Avoid_: deadline, TTL, retry-at
 
 **Open Question**:
 A question an Assistant has put to the User and is waiting on, and a Thing in its own right: the Runtime creates one at the moment its Assistant suspends, and the User completes it by answering. It carries a kind — free text, a confirmation, a choice from a declared list, or a request to *perform* something by hand and report back — which is what says how the User is to be asked. Because it is stored rather than held, a restart loses nothing.
-_Avoid_: prompt, request, task, approval, suggestion
+_Avoid_: prompt, request, task, suggestion — and never "approval", which is something an **Operation** requires, not something the User is sent
 
 **Skill**:
 Instructions for the LLM — judgement, procedure or knowledge, written as markdown — belonging to exactly one Assistant. Skills are never shared between Assistants; an Assistant that needs another's capability calls that Assistant.
@@ -123,6 +123,10 @@ _Avoid_: service, integration, backend
 **Operation**:
 Something an External System can do, as the system defines it — `sendMoney`, `getNewMails`, `askUser`.
 _Avoid_: method, endpoint, action
+
+**Approval**:
+A property of an **Operation**: it either requires one or does not, and the Runtime refuses the call when it is missing. What satisfies it is an answered confirmation, raised by the Runtime rather than by the Assistant, bound to that Operation and to the arguments it was asked with — so a yes to one thing cannot authorise another, and an Assistant cannot talk its way past a check it is never asked about. Not a kind of Open Question: the question is the ordinary form, asked and answered the ordinary way. What is new is that something checks.
+_Avoid_: permission, sign-off, confirmation gate, four-eyes
 
 **Tool**:
 An Operation made available to a particular Assistant. An Assistant may only use the Tools its definition grants it; what it may reach is declared, not asked for in prose.
