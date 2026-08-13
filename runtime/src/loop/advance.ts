@@ -32,6 +32,7 @@ import {
     operationFromLlm,
     OperationRegistry,
     toolNameForLlm,
+    type DroppedGrant,
     type OperationContext,
     type GrantedOperation,
     type OperationOutcome,
@@ -80,6 +81,17 @@ const TURN_GRANT_ON_ESCALATION = 5;
  * tell the model its booking is on its way. It is not: nothing is queued, and the call has to be
  * made again once the answer arrives.
  */
+/**
+ * Why a Turn refuses to start against an empty catalogue, in the words the operator needs.
+ *
+ * It names the remedy rather than the symptom: an empty `Operation_DM` on a stack that is otherwise
+ * up means `just up` ran and `just bootstrap` did not, which is a normal ordering rather than a
+ * fault, and is fixed by one command.
+ */
+const EMPTY_CATALOGUE =
+    "The Operation catalogue is empty: no Operation_DM Thing exists, so no Assistant can be " +
+    "offered anything and no Turn can be taken. Bootstrap has not run — run `just bootstrap`.";
+
 const REFUSED_PENDING_APPROVAL =
     "Refused pending approval, not queued. Nothing was booked and nothing is waiting to be. The " +
     "User has been asked to approve this exact call; when they answer you will be resumed, and you " +
@@ -427,15 +439,8 @@ export class LoopDriver {
         conversation.status = "running";
         conversation.waitingFor = "";
 
-        /**
-         * The catalogue this Turn resolves against.
-         *
-         * **PHASE E SHIM.** It is derived from the registered Implementations' seeds rather than
-         * read from `Operation_DM`. Phase E replaces this one line with a single unconstrained
-         * `things.search(SPECS.Operation_DM)` and the refusal for an empty catalogue; the three
-         * call sites below already take the snapshot, so nothing else here moves.
-         */
-        const catalogue = this.deps.registry.seedCatalogue();
+        // One read, and everything this Turn resolves comes out of it (ADR-0019).
+        const catalogue = await this.loadCatalogue();
 
         // --- reconcile an interrupted Turn before starting a new one ----------------------
         //
@@ -545,7 +550,7 @@ export class LoopDriver {
         }
 
         // --- tool calls -------------------------------------------------------------------
-        const { granted } = this.deps.registry.grantedTo(assistant.data, catalogue);
+        const { granted, dropped } = this.deps.registry.grantedTo(assistant.data, catalogue);
         /**
          * A Turn that ends `wants-tools` appends no `assistant` Entry at all — only one
          * `tool-intent` per call — so "the Turn's assistant Entry" names a row that does not exist
@@ -584,15 +589,16 @@ export class LoopDriver {
             await this.write(stored);
 
             if (!tool) {
-                // Undeclared Operations should be unreachable — the registry never offers them —
-                // so this is a belt, and there is a test for it.
+                // An Operation that was never offered should be unreachable — the registry does not
+                // put it in the schemas — so this is a belt, and there is a test for it. What it
+                // *says* is not a belt: after ADR-0019 the likeliest reason a granted Operation is
+                // missing is that the User switched it off, and the drop reason is the only thing
+                // that can tell the model the truth about that.
                 appendEntry(conversation, {
                     role: "tool",
                     kind: "tool-result",
                     toolName: operation,
-                    toolResult: `Error: "${operation}" is not one of your tools. Available: ${granted
-                        .map((candidate) => candidate.name)
-                        .join(", ")}`,
+                    toolResult: unresolvedCallMessage(operation, call.name, dropped, granted),
                     idempotencyKey,
                 });
                 continue;
@@ -668,6 +674,30 @@ export class LoopDriver {
         conversation.status = "running";
         await this.write(stored);
         return { status: "running", turnsRun: 1 };
+    }
+
+    /**
+     * The Operation catalogue, read once at the top of a Turn.
+     *
+     * One unconstrained query over a table of seventeen rows, with **no cache and no TTL**: a cache
+     * would add a second answer to "what can this Assistant do" and a window in which it is stale,
+     * to save a query nobody will notice. One snapshot per Turn rather than one per call site is
+     * also what stops a User editing the catalogue mid-Turn from producing a Turn whose offered
+     * schemas and executed Operations disagree.
+     *
+     * **No fallback to the seeds.** An empty catalogue throws, before the provider is called: the
+     * Turn is not spent against `maxTurns`, the lease never reaches the store, the next scan
+     * retries, and if it persists the heartbeat goes stale and the healthcheck fails — the path
+     * ADR-0015 built for exactly this. Running quietly on a catalogue nobody configured is the one
+     * failure this system cannot afford, because the catalogue is where approvals are decided.
+     */
+    private async loadCatalogue(): Promise<Operation[]> {
+        const found = await this.deps.things.search<Operation>(SPECS.Operation_DM, undefined, 100);
+        if (found.length === 0) {
+            log.error(EMPTY_CATALOGUE);
+            throw new Error(EMPTY_CATALOGUE);
+        }
+        return found.map((stored) => stored.data);
     }
 
     /**
@@ -1023,6 +1053,48 @@ export class LoopDriver {
     private async write(stored: Stored<Conversation>): Promise<void> {
         await this.deps.things.update(CONVERSATION, stored.docRef, stored.data as Record<string, unknown>);
     }
+}
+
+/**
+ * What the model is told when the Operation it called resolved to nothing.
+ *
+ * The drop reason is matched by **wire name**, not by the Operation name: `assistant.call:accountant`
+ * comes back from the provider as `assistant__call__accountant`, and `operationFromLlm` maps `__` to
+ * `.` unconditionally — so the reverse-mapped name is `assistant.call.accountant`, which matches no
+ * grant. Comparing in the direction the mapping is total gets the per-callee grants right.
+ *
+ * Each sentence is one the User could be shown beside the Assistant's own definition, because in
+ * every case except the last the grant is still sitting there.
+ */
+function unresolvedCallMessage(
+    operation: string,
+    wireName: string,
+    dropped: DroppedGrant[],
+    granted: GrantedOperation[],
+): string {
+    const drop =
+        dropped.find((candidate) => toolNameForLlm(candidate.key) === wireName) ??
+        dropped.find((candidate) => candidate.key === operation);
+    const named = `"${drop?.key ?? operation}"`;
+    const reason = !drop
+        ? `${named} is not granted to you.`
+        : drop.reason === "disabled"
+          ? `${named} is switched off. The User has disabled it, so nothing was done; ask them if you need it.`
+          : drop.reason === "unimplemented"
+            ? `${named} is no longer implemented, so there is nothing to call.`
+            : drop.reason === "absent"
+              ? `${named} is granted to you, but no such Operation exists in this system.`
+              : drop.reason === "unparseable"
+                ? `${named} is misconfigured: its parameters are not valid JSON, so it cannot be called.`
+                : drop.reason === "self-call"
+                  ? `${named} would call yourself, which is not permitted.`
+                  : `${named} is not a wildcard: name the Assistant you mean, as "assistant.call:<key>".`;
+    const available = granted.map((candidate) => candidate.name);
+    return `Error: ${reason} ${
+        available.length > 0
+            ? `Available: ${available.join(", ")}`
+            : "You have no Operations available at all."
+    }`;
 }
 
 export function sleep(ms: number): Promise<void> {

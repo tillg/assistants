@@ -49,9 +49,9 @@ its next scan, within about two seconds.
 
 ### Browsing and editing Things
 
-Eight navigation modules, one per Model: **Open Questions**, **Documents**, **Invoices**,
-**Processes**, **Parties**, **Assistants**, **Conversations**, **Runtime**. Each is an ordinary
-A12 master-detail: an overview of scalars, and a form for one row.
+Nine navigation modules, one per Model: **Open Questions**, **Documents**, **Invoices**,
+**Processes**, **Parties**, **Assistants**, **Operations**, **Conversations**, **Runtime**. Each is
+an ordinary A12 master-detail: an overview of scalars, and a form for one row.
 
 Four are freely editable by the User — `Party`, `Document`, `Invoice`, `Process`. Creating an
 `Invoice` or a `Document` by hand is a supported way in; so is pasting extracted text into a
@@ -61,19 +61,66 @@ Document's `extractedText`.
 
 **Assistants are Things you edit in the UI, not code you deploy** (ADR-0003). Changing the
 Receptionist's behaviour is editing a document: its `systemPrompt`, its `skills[]` (each a name
-and a markdown body), its `llmModel`, its `maxTurns`, its `enabled` flag, its `triggers[]` and the
-`tools[]` it may reach.
+and a markdown body), its `llmModel`, its `maxTurns`, its `enabled` flag, its `triggers[]` and its
+`grants[]` — one row per Operation it may use, under **Granted operations**, and one row per callee
+for `assistant.call:<key>`.
 
 Prompts and Skill bodies are **markdown fields**, rendered by the lifted Lexical editor — headings,
 lists, tables, code blocks, admonitions, a table of contents. Round-tripping markdown through that
 editor is covered by the end-to-end tier.
 
 Only the User may write an `Assistant`. The Runtime holds no `ASSISTANT_WRITE` right, so an
-Assistant cannot grant itself a Tool; the store refuses it (D-007a).
+Assistant cannot grant itself an Operation; the store refuses it (D-007a).
 
 Note that `just bootstrap` **reconciles**: it re-applies the two seeded Assistant definitions on
 every run, so a prompt edited in the web application is overwritten the next time it runs. To keep
 an edit, change the seed in `runtime/src/bootstrap/assistants.ts`.
+
+### Reading and editing the catalogue of Operations
+
+The **Operations** module is the answer to *"what can my Assistants actually do?"* — a question that
+used to require reading TypeScript. It lists every Operation the Runtime knows how to perform, one
+row each: its key, the System it belongs to, its kind, whether it is switched on, whether it needs
+your approval, and whether it changes anything out there.
+
+Opening one shows the whole of it, and which half of it is yours is the interesting part of the
+form. The fields that are facts about the code are rendered read-only; the fields that are decisions
+are not:
+
+| Field | Whose | What it is for |
+|---|---|---|
+| `Key`, `System`, `Kind`, `Parameters` | the code's, read-only | What the Operation is and what arguments it takes. `Key` is what a grant names and what the Implementation is found by, so renaming it would point every grant at nothing |
+| `Mutating` | the code's, read-only | Whether performing it changes something outside this system. It sits beside the approval checkbox because it is the input to the question that checkbox answers |
+| `Name`, `Description` | **yours** | The label, and the prose the model reads, in markdown. The description is how a model decides which Operation to call, so it is prompt engineering, and it is now something you can edit without a deploy |
+| `Enabled` | **yours** | Whether the Operation is offered at all |
+| `Requires approval` | **yours** | Whether the Runtime refuses the call until it has asked you about those exact arguments and been told yes |
+| `Notes` | **yours** | Why you did what you did |
+
+Two of those deserve their own sentence.
+
+**Switching an Operation off is the kill switch that was missing.** `just pause` stops everything
+and an Assistant's `enabled` flag stops one Assistant; between them there was nothing. Unticking
+`Enabled` on `bank.sendMoney` withdraws it from every Assistant that was granted it, takes effect on
+the next Turn of every Conversation, survives a restart, and needs no deploy. An Assistant that then
+tries to call it is told it is *switched off* — not that it never had it, which its own definition
+would visibly contradict.
+
+**`Requires approval` is yours in both directions.** You may add one where the code asks for none,
+and remove one it does ask for — including on `bookkeeping.postTransaction`. The Runtime writes a
+line in the log naming any Operation whose requirement you have weakened, once per restart, and
+obeys you. That is deliberate: it is your money. It is also the one route an Assistant has to this
+setting, since it cannot edit the catalogue but can compose a persuasive sentence asking you to.
+
+What you cannot do is invent an Operation. The catalogue describes Operations; the code performs
+them, and the two are joined by the key. An Operation with no Implementation registered under its
+key is not offered to anybody and says so (ADR-0019).
+
+Editing the catalogue never gives birth to a Conversation, and `just bootstrap` will not undo what
+you decided: it re-applies only the fields the code owns — `System`, `Kind`, `Parameters`,
+`Mutating` — and leaves the description, the approval requirement, the kill switch and your notes
+exactly as you left them. The cost of that is the mirror image of the Assistant seeds: a description
+improved in the source does *not* reach a system that already has the Operation, and bootstrap
+reports it by name rather than letting you wonder.
 
 ### Giving an Assistant a schedule
 
@@ -234,7 +281,7 @@ LLM API.
 stateDiagram-v2
     [*] --> running: Trigger — a Thing materialised,<br/>assistant.call, or a schedule slot fell due
     running --> running: a Turn completes,<br/>the model wants more tools
-    running --> waiting: a Tool returns pending
+    running --> waiting: an Operation returns pending
     waiting --> running: the answer arrives,<br/>wakeAt passes,<br/>or a child result is delivered
     running --> waiting: terminal failure —<br/>an Open Question carries the error
     running --> done: finishReason = answered
@@ -300,6 +347,7 @@ between the human and the machine.
 | Read every Thing | ✓ | ✓ |
 | Create / update `Party`, `Document`, `Invoice`, `Process` | ✓ | ✓ |
 | Write `Assistant` | ✓ | ✗ — no `ASSISTANT_WRITE` (D-007a) |
+| Write `Operation` | ✓ | ✗ — the same right and the same refusal (ADR-0019) |
 | Write `Conversation`, `RuntimeState` | form is read-only | ✓ |
 | Write `OpenQuestion` | the answer fields | once, at creation |
 | Delete anything | ✓ | ✗ — no `DOCUMENT_DELETE` (D-007) |

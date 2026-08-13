@@ -173,27 +173,7 @@
       ]
     },
     "subHeaderBox": {
-      "leftSlot": [
-        {
-          "type": "button",
-          "label": [
-            {
-              "locale": "en",
-              "text": "Add"
-            },
-            {
-              "locale": "de",
-              "text": "Hinzufügen"
-            }
-          ],
-          "event": "add",
-          "icon": {
-            "name": "add"
-          },
-          "destructive": false,
-          "primary": false
-        }
-      ],
+      "leftSlot": [],
       "rightSlot": [
         {
           "type": "search"

@@ -153,30 +153,15 @@ export class OperationRegistry {
         return this.operations.get(name);
     }
 
-    /** Every registered Implementation, for bootstrap and for the seed catalogue. */
+    /**
+     * Every registered Implementation, for bootstrap.
+     *
+     * Deliberately not a catalogue: the seeds are what an Operation Thing is *created* with, and
+     * `advance()` has no path back to them — an empty catalogue throws rather than falling back
+     * (ADR-0019).
+     */
     all(): OperationImplementation[] {
         return [...this.operations.values()];
-    }
-
-    /**
-     * A catalogue built from the registered seeds, as bootstrap would have created it.
-     *
-     * **A shim for phase E.** The real catalogue is a snapshot of `Operation_DM`, read once per
-     * Turn; until `advance()` reads it, this stands in so the join is exercised end to end. Delete
-     * it — and its call sites in `LoopDriver` and the test harness — when the read arrives.
-     */
-    seedCatalogue(): Operation[] {
-        return this.all().map((implementation) => ({
-            key: implementation.name,
-            name: implementation.seed.name,
-            system: implementation.seed.system,
-            kind: implementation.seed.kind,
-            description: implementation.seed.description,
-            parameters: JSON.stringify(implementation.seed.parameters),
-            mutating: implementation.mutating,
-            requiresApproval: implementation.seed.requiresApproval ?? false,
-            enabled: true,
-        }));
     }
 
     /**

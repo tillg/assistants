@@ -43,8 +43,10 @@ The terms below are the ones the models, the code and the documents all share. D
 | **wakeAt** | An instant after which a waiting Conversation is continued anyway |
 | **Open Question** | A question put to the User, and its answer. A Thing |
 | **Skill** | Markdown instructions belonging to exactly one Assistant, never shared |
-| **Operation** | Something an External System can do |
-| **Tool** | An Operation granted to a particular Assistant |
+| **Operation** | A capability one System offers — external, internal, or the Runtime itself. A Thing; the ThingStore holds the catalogue of them |
+| **Implementation** | The code that performs one Operation. Not a Thing, because it is behaviour rather than data |
+| **grant** | One row of an Assistant's `grants[]`, naming an Operation by its key. A field, not a Model of its own |
+| **Granted Operation** | What an Assistant may actually reach: an Operation, the grant naming it and the Implementation performing it, resolved together for the length of a Turn |
 | **Connector** | The translator between one External System's representation and Things |
 | **Manual Connector** | A Connector that fulfils its Operation by asking the User to do it by hand |
 | **Runtime** | Watches Triggers, births Conversations, drives the loop. Not an External System |
@@ -52,8 +54,14 @@ The terms below are the ones the models, the code and the documents all share. D
 | **ThingStore** / **UserInterface** | The two Internal Systems — they speak Things natively, so they need no Connector |
 | **Bookkeeping** | The External System holding the books, and the Authority for all of them |
 
-Two distinctions are load-bearing and easy to lose:
+Three distinctions are load-bearing and easy to lose:
 
+- An **Operation** is what exists; a **Granted Operation** is what one Assistant may reach. One
+  Operation Thing, many grants. And an **Implementation** is code where an Operation is data, which
+  is not cosmetic: the catalogue can describe an Operation, guard it, reword it and switch it off,
+  and it cannot make one exist ([ADR-0019](../../docs/adr/0019-an-operation-is-a-thing.md)).
+  *Tool* is the LLM provider's word for the schema we send it and survives only at that boundary
+  ([ADR-0020](../../docs/adr/0020-tool-is-the-providers-word.md)).
 - A **Schedule** is a Trigger configured on an Assistant and births a Conversation where none
   exists. A **wakeAt** is state on a Conversation that already exists. Configuration on a
   template versus state on an instance. A Schedule is a standing instruction about the current state
@@ -65,7 +73,9 @@ Two distinctions are load-bearing and easy to lose:
 
 ## Concepts and entities
 
-Eight Models. Six are the household's subject matter, two are the machinery.
+Nine Models. Six are the household's subject matter and three are the machinery — and two of those
+three, `Assistant` and `Operation`, are configuration rather than machinery proper: they describe
+what the system *is* rather than what the household *has*. That is ADR-0003's bet taken twice.
 
 ```mermaid
 erDiagram
@@ -83,7 +93,8 @@ erDiagram
 ```
 
 `RuntimeState` is deliberately absent: it is a singleton holding the Runtime's own state and
-stands in no relation to the household's subject matter.
+stands in no relation to the household's subject matter. `Operation` is absent for the same
+reason — an Assistant's grants name one by key, and nothing the household owns points at one.
 
 `BOOKING` sits deliberately outside the Things: it is a Firefly III transaction, and Bookkeeping
 is its Authority. The Invoice holds no reference to it at all — see the rules below.
@@ -94,7 +105,8 @@ is its Authority. The Invoice holds no reference to it at all — see the rules 
 | `Document` | ThingStore | An item that has arrived but has not yet been understood, plus whatever text was extracted from it |
 | `Invoice` | ThingStore *(document facts only)* | The extracted invoice: issuer, number, dates, amounts, subject |
 | `Process` | ThingStore | The routing slip — a title, a status, an append-only list of steps. Passive |
-| `Assistant` | ThingStore | An Assistant's definition: key, prompts, Skills, Triggers, granted Tools |
+| `Assistant` | ThingStore | An Assistant's definition: key, prompts, Skills, Triggers, and the Operations it is granted |
+| `Operation` | ThingStore | One capability of one System: its key, what it does, whether it needs an approval, and whether it is switched on |
 | `Conversation` | ThingStore | One run of one Assistant: status, what it waits on, turn count, entries — and either the subject Thing or the `scheduledFor` instant that gave birth to it |
 | `OpenQuestion` | ThingStore | A question put to the User and the User's answer |
 | `RuntimeState` | ThingStore | A singleton: watermark, pause flag, births-per-hour counter, heartbeat |
@@ -107,6 +119,12 @@ the model layer, which is the typed-identifier design ADR-0002 rejects.
 **Skills are fields, not Things.** A Skill belongs to exactly one Assistant and is never shared
 (ADR-0009), so it has no independent identity. Skills are a repeating group inside `Assistant_DM`:
 a name and a markdown body. Making them Things would invite precisely the sharing the rule forbids.
+
+**An Operation's Implementation is code, and `Operation_DM` has no field naming it.** The
+Implementation is registered under the Operation's key and found by it, so there is exactly one
+name to keep in step rather than two. An Operation for which no Implementation is registered is
+reported as *unimplemented* and is not offered — which is a different state from being switched
+off, and the system says which.
 
 ## Actors
 
@@ -133,7 +151,8 @@ flowchart TB
 
 **User** — the human the system works for, and the supervisor of every Assistant. They answer Open
 Questions, create and edit Things in the web application, edit Assistant prompts, and work in
-Bookkeeping directly. They are the only actor who may write an `Assistant`.
+Bookkeeping directly. They are the only actor who may write an `Assistant` or an `Operation` — the
+two Models that describe the system itself, and the two the store withholds from the Runtime.
 
 **Receptionist** — the Assistant that classifies what arrives. Triggered by a `Document`
 materialising. It decides what the Document really is, extracts the invoice fields, creates the
@@ -247,7 +266,7 @@ silently lose one writer's work. Every Model is therefore arranged around a sing
 | Model | Written by |
 |---|---|
 | `Conversation`, `RuntimeState` | **Runtime only** — the Conversation form is read-only |
-| `Assistant` | **User only** — the store refuses the Runtime write access (D-007a) |
+| `Assistant`, `Operation` | **User only** — the store refuses the Runtime write access (D-007a). The Runtime reads the catalogue on every Turn and may not write a word of it |
 | `OpenQuestion` | Runtime writes it **once** at creation, then **User only** |
 | `Party`, `Document`, `Invoice`, `Process` | User and Runtime, never at the same instant |
 
@@ -255,12 +274,22 @@ This is why an answer is consumed by **advancing the Conversation**, not by stam
 Question — stamping would give that document a second Runtime write at the worst possible moment,
 while the User may still be editing it.
 
-### An Assistant may reach only what it declares (ADR-0010)
+### An Assistant may reach only what it declares (ADR-0010), and the rule is a conjunction
 
-Tools are declared one row per Operation, and a call to another Assistant is declared per callee
+Grants are declared one row per Operation, and a call to another Assistant is declared per callee
 as `assistant.call:<key>`. A bare `assistant.call` would let an Assistant reach every Assistant
 including itself. Self-calls are rejected at registry level. The registry filters the schemas
 offered to the model, so an undeclared Operation is not merely refused — it is invisible.
+
+Declaring it is no longer sufficient. An Operation is offered when it is **granted** by the
+Assistant *and* **enabled** in the catalogue *and* **implemented** in the Runtime. Two of those
+three conditions are new, both live outside the Assistant's definition, and both can only ever
+remove a capability — nothing in the catalogue can give an Assistant something its grants do not
+name. A grant that fails any of them is **dropped with its reason**, and the reason reaches the
+model as well as the log: *not granted*, *switched off*, *no longer implemented*, or a parameter
+schema that will not parse. Saying *"that is not one of your tools"* to a model whose Assistant
+plainly still grants the Operation is a false premise to re-plan around, which is why the four
+reasons exist.
 
 ### Every Operation is read-only or idempotent under a caller-supplied key
 
@@ -279,7 +308,16 @@ Three consequences follow from putting it there rather than in a prompt:
   the loop already has. It goes through `raiseQuestion` and never through `escalate()`: a missing
   approval is the ordinary path, not a stuck Conversation.
 - Reading an Operation tells you whether it needs an answer, the same way reading an Assistant tells
-  you what it may reach (ADR-0010).
+  you what it may reach (ADR-0010) — and since the catalogue moved into the store, *reading* it means
+  opening a form rather than a source file.
+
+**The requirement is the User's, in both directions.** `requiresApproval` is a field on the
+Operation Thing, so the User may add one where the code demands none and remove one it does demand.
+The Implementation's value is only what the Operation was created with. Where the effective value is
+the weaker of the two, the Runtime logs it once, names the Operation, and does not override it: this
+is the User's money, and a system that overrules them about it is not the system this one is. The
+consequence for ADR-0018's sentence is recorded in an amendment on the ADR itself and under the
+departures below.
 
 **Only the Runtime can raise an approval, and it approves exact arguments.** An Assistant asking
 *"shall I book this?"* of its own accord is good manners and nothing more — a question the Assistant
@@ -327,8 +365,9 @@ this forces.
 ### Bounds on an LLM loop with a credit card
 
 - A **trigger-eligible allow-list** — `Document`, `Invoice`, `Process`, `Party`. It structurally
-  excludes `Conversation`, `Assistant`, `OpenQuestion` and `RuntimeState`, because an Assistant is
-  a Thing and a Conversation is a Thing, so without it the Runtime would trigger on its own output.
+  excludes `Conversation`, `Assistant`, `OpenQuestion`, `RuntimeState` and `Operation`, because an
+  Assistant is a Thing and a Conversation is a Thing, so without it the Runtime would trigger on its
+  own output — and editing the catalogue must not give birth to a Conversation either.
 - **`maxTurns`** (default 20) → `finishReason = limit` and an Open Question, never a silent stop.
 - **`createdByConversationId`** on everything an Assistant creates, and no birth from a Thing
   whose creating Conversation is still running.
@@ -356,6 +395,27 @@ Recorded rather than hidden:
   arguments after the yes. A drifted call misses its approval and the User is asked a second,
   near-identical question. Visible and safe — a second question, never a wrong booking — but it will
   be seen.
+- **`requiresApproval` is a checkbox now, and a checkbox can be lobbied for.** ADR-0018 made
+  *"nothing is booked without an answer"* un-talk-past-able by putting the check where the Assistant
+  is never asked. It still is — but the field it reads is one the User owns, and an Assistant that
+  has read a hostile document can compose a persuasive sentence to the human who holds the pen. The
+  Runtime logs the weakening and names the Operation; it does not override it. Deliberate, in favour
+  of the User's sovereignty over their own money, and recorded in an amendment on ADR-0018 itself so
+  that a reader who lands there alone is not left believing the old sentence.
+- **A description improved in code does not reach a running system.** The prose on an Operation is
+  created from the Implementation's seed and never re-applied, because rewording the sentence a model
+  reads in order to change how it behaves is a decision rather than a fact about `execute`. The
+  opposite departure from the one `Assistant` has, and the price of the prose being the User's.
+  Bootstrap reports the divergence by name rather than resolving it.
+- **The catalogue answers *what exists*, not *who may*.** An Operation Thing carries no grants, so
+  "which Assistants may book a transaction" is still answered by opening each Assistant. The only
+  component positioned to compute the reverse index is the Runtime, which is precisely the actor
+  forbidden to write `Operation_DM`; a read-side join in the web application is the honest route and
+  a later change.
+- **Read access is guarded for exactly one Model.** `Operation_DM` is the one Model an Assistant may
+  not read, because its entire content is the safety configuration constraining the reader.
+  `Assistant_DM`, `Conversation_DM`, `OpenQuestion_DM` and `RuntimeState_DM` stay readable, as they
+  have been all along. Narrowing that further is a separate change with its own blast radius.
 - **Batching is a correctness property of a Skill's prose**, which is not where anyone looks for one.
   A scheduled Skill that asks about three findings one at a time stalls its own schedule on the
   first, because of the skip rule. The failure mode is quiet in exactly the wrong way: with nothing

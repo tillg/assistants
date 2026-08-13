@@ -47,10 +47,23 @@ export class MemoryStore {
             this.failNextAdd = undefined;
             throw failure;
         }
+        const docRef = this.seed(documentModelName, document);
+        this.writes.push({ method: "ADD_DOCUMENT", docRef });
+        return docRef;
+    }
+
+    /**
+     * Put a document in place without going through the write path, and synchronously.
+     *
+     * Both halves matter for the Operation catalogue: `buildHarness` is not `async`, and the
+     * catalogue has to be in the store before the first Turn reads it — a Turn against an empty
+     * catalogue throws by design. It is not a write, so it is not in `writes`: the tests that read
+     * that list are asserting what a Turn did, and fixture setup is not that.
+     */
+    seed(documentModelName: string, document: A12Document): string {
         counter += 1;
         const docRef = `${documentModelName}/${documentModelName.toLowerCase()}-${counter}`;
         this.rows.set(docRef, { docRef, documentModelName, document: structuredClone(document) });
-        this.writes.push({ method: "ADD_DOCUMENT", docRef });
         return docRef;
     }
 

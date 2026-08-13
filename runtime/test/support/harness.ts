@@ -1,7 +1,7 @@
 /** Wires a whole Runtime around the in-memory store, so tests can drive real scans and Turns. */
 
 import { MemoryStore } from "./memory-store.js";
-import { ThingRepository, SPECS, nowIso } from "../../src/a12/things.js";
+import { ThingRepository, SPECS, nowIso, toDocument } from "../../src/a12/things.js";
 import type { A12Client } from "../../src/a12/client.js";
 import { LoopDriver } from "../../src/loop/advance.js";
 import { OperationRegistry, type GrantedOperation } from "../../src/operations/registry.js";
@@ -12,14 +12,50 @@ import type { FireflyConnector } from "../../src/connectors/firefly.js";
 import type { Assistant, Conversation, OpenQuestion, Operation, Stored } from "../../src/domain/types.js";
 import { ASSISTANT_SEEDS } from "../../src/bootstrap/assistants.js";
 
+/**
+ * The catalogue a bootstrapped stack has: one Operation per registered Implementation, from its
+ * seed, all enabled.
+ *
+ * It lives here rather than on the registry deliberately. `advance()` reads the catalogue from the
+ * store and refuses an empty one, and architecture.md is explicit that there is **no fallback to
+ * the seeds** — so a seed-derived catalogue reachable from `src/` would keep alive exactly the
+ * behaviour that decision forbids. In `test/` it is a fixture, which is all it ever was.
+ */
+export function seedCatalogue(registry: OperationRegistry): Operation[] {
+    return registry.all().map((implementation) => ({
+        key: implementation.name,
+        name: implementation.seed.name,
+        system: implementation.seed.system,
+        kind: implementation.seed.kind,
+        description: implementation.seed.description,
+        parameters: JSON.stringify(implementation.seed.parameters),
+        mutating: implementation.mutating,
+        requiresApproval: implementation.seed.requiresApproval ?? false,
+        enabled: true,
+    }));
+}
+
+/** Put a catalogue in the store, as bootstrap would have. Synchronous, so `buildHarness` can be. */
+export function putCatalogue(store: MemoryStore, catalogue: Operation[]): void {
+    for (const operation of catalogue) {
+        store.seed(SPECS.Operation_DM.model, toDocument(SPECS.Operation_DM, { ...operation }));
+    }
+}
+
+/** Take the catalogue away, which is what a stack that never ran `just bootstrap` looks like. */
+export function clearCatalogue(store: MemoryStore): void {
+    for (const [docRef, row] of store.rows) {
+        if (row.documentModelName === SPECS.Operation_DM.model) store.rows.delete(docRef);
+    }
+}
+
 export interface Harness {
     store: MemoryStore;
     things: ThingRepository;
     registry: OperationRegistry;
     /**
-     * The catalogue the resolution tests resolve against: one Operation per registered
-     * Implementation, from its seed, all enabled — which is what bootstrap creates on a fresh
-     * stack. A test that cares about a switched-off or hand-edited Operation builds its own.
+     * The catalogue in the store, and the one the resolution tests resolve against. A test that
+     * cares about a switched-off or hand-edited Operation edits the stored Thing, or builds its own.
      */
     catalogue: Operation[];
     driver: LoopDriver;
@@ -225,6 +261,13 @@ export function buildHarness(
         }),
     );
 
+    // After `registerAll`, and before anything can take a Turn: the catalogue is read from the
+    // store once per Turn, and a Turn against an empty one throws.
+    const catalogue = seedCatalogue(registry);
+    // A reused store already has the catalogue in it — a restart is a second Runtime over the same
+    // data, and seeding again would give it seventeen duplicate Operations.
+    if (!options.store) putCatalogue(store, catalogue);
+
     const watcher = new Watcher({
         things,
         driver,
@@ -237,7 +280,7 @@ export function buildHarness(
         store,
         things,
         registry,
-        catalogue: registry.seedCatalogue(),
+        catalogue,
         driver,
         watcher,
         firefly,

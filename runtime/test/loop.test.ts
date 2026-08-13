@@ -6,13 +6,28 @@
  * mechanism, and that recovering a crashed Turn does not do the work twice.
  */
 
-import { describe, expect, it } from "vitest";
-import { buildHarness, nowIso, type Harness } from "./support/harness.js";
-import { SPECS } from "../src/a12/things.js";
+import { describe, expect, it, vi } from "vitest";
+import { buildHarness, clearCatalogue, nowIso, putCatalogue, type Harness } from "./support/harness.js";
+import { eq, path as fieldPath, SPECS } from "../src/a12/things.js";
 import { buildMessages, canonicalArgsHash } from "../src/loop/advance.js";
 import { A12RpcError } from "../src/a12/client.js";
 import { FireflyError } from "../src/connectors/firefly.js";
-import type { Conversation, OpenQuestion, Stored } from "../src/domain/types.js";
+import type { Conversation, OpenQuestion, Operation, Stored } from "../src/domain/types.js";
+
+/** Edit one Operation Thing, the way the User would in the web application. */
+async function editOperation(
+    harness: Harness,
+    key: string,
+    patch: Partial<Operation>,
+): Promise<void> {
+    const [thing] = await harness.things.search<Operation>(
+        SPECS.Operation_DM,
+        eq(fieldPath(SPECS.Operation_DM, "key"), key),
+        2,
+    );
+    expect(thing, `the catalogue holds ${key}`).toBeDefined();
+    await harness.things.update(SPECS.Operation_DM, thing!.docRef, { ...thing!.data, ...patch });
+}
 
 /** The posting the approval tests approve, and the recovery test books. */
 const POSTING = {
@@ -114,6 +129,67 @@ describe("one turn", () => {
     });
 });
 
+/**
+ * The catalogue a Turn resolves against (ADR-0019).
+ *
+ * One unconstrained read at the top of `advance()`, and no fallback to the seeds: a system that ran
+ * on a catalogue nobody configured would be wrong in the one place where the wrong answer costs
+ * money.
+ */
+describe("the catalogue a Turn loads", () => {
+    it("throws before the provider is called when the catalogue is empty, and spends no Turn", async () => {
+        const harness = buildHarness([{ text: "this must never be reached", finishReason: "answered" }]);
+        const assistant = await harness.seedAssistant();
+        const docRef = await harness.birth({ assistant });
+        clearCatalogue(harness.store);
+        const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+        await expect(harness.driver.advance(docRef)).rejects.toThrow(/bootstrap/i);
+
+        // At error, with the remedy, so an operator reading the log knows what to run.
+        expect(errors.mock.calls.map((call) => String(call[0] ?? "")).join("\n")).toMatch(
+            /just bootstrap/,
+        );
+        errors.mockRestore();
+
+        const conversation = await harness.conversation(docRef);
+        // The Turn is not spent against maxTurns, the model was never asked, and the lease never
+        // reached the store — so the next scan retries rather than finding it claimed.
+        expect(conversation.data.turnCount ?? 0).toBe(0);
+        expect(conversation.data.status).toBe("running");
+        expect(conversation.data.result).toBeFalsy();
+        expect(conversation.data.entries).toHaveLength(1);
+        expect(conversation.data.leaseUntil).toBeFalsy();
+    });
+
+    it("reads the catalogue once per Turn, whatever the Turn goes on to do", async () => {
+        // One snapshot per Turn rather than per call site: a User editing the catalogue mid-Turn
+        // must not produce a Turn whose offered schemas and executed Operations disagree.
+        const harness = buildHarness([
+            {
+                turn: 0,
+                toolCalls: [
+                    { name: "thingstore__search", arguments: { model: "Party_DM" } },
+                    { name: "thingstore__search", arguments: { model: "Invoice_DM" } },
+                ],
+            },
+        ]);
+        const assistant = await harness.seedAssistant({ grants: [{ operationKey: "thingstore.search" }] });
+        const docRef = await harness.birth({ assistant });
+
+        const query = harness.store.query.bind(harness.store);
+        let reads = 0;
+        harness.store.query = async (spec) => {
+            if (spec.targetDocumentModel === "Operation_DM") reads += 1;
+            return query(spec);
+        };
+
+        await harness.driver.advance(docRef);
+
+        expect(reads).toBe(1);
+    });
+});
+
 describe("what a failure tells the model", () => {
     it("passes on the store's own reason for a rejection, not a stack trace", async () => {
         // The store gives a precise reason for each of a dozen structurally different mistakes —
@@ -190,8 +266,110 @@ describe("tool gating (ADR-0010)", () => {
 
         const conversation = await harness.conversation(docRef);
         const result = (conversation.data.entries ?? []).find((entry) => entry.kind === "tool-result");
-        expect(result?.toolResult).toMatch(/not one of your tools/);
+        // Nothing was dropped — this Operation was never granted — so this is the one case where
+        // "you do not have it" is the whole truth.
+        expect(result?.toolResult).toMatch(/"bookkeeping\.postTransaction" is not granted to you/);
+        expect(result?.toolResult).toMatch(/Available: thingstore\.get/);
         expect(harness.firefly.posted).toHaveLength(0);
+    });
+
+    /**
+     * The belt, and what it says.
+     *
+     * *"X is not one of your tools"* is **false** for the likeliest case after ADR-0019: the User
+     * switched the Operation off, the grant is still in the Assistant's definition where the User
+     * can see it, and a model told it never had a capability re-plans around a premise that is not
+     * true. So the belt consults the drop reason and says the thing that is.
+     */
+    describe("what the model is told when a granted Operation resolved to nothing", () => {
+        /** One Turn in which the model calls `call`, and the tool-result it was given. */
+        async function told(input: {
+            grants: string[];
+            call: string;
+            key?: string;
+            edit?: (harness: Harness) => Promise<void>;
+        }): Promise<string> {
+            const harness = buildHarness([
+                { turn: 0, toolCalls: [{ name: input.call, arguments: {} }] },
+            ]);
+            const assistant = await harness.seedAssistant({
+                key: input.key ?? "receptionist",
+                grants: input.grants.map((operationKey) => ({ operationKey })),
+            });
+            await input.edit?.(harness);
+            const docRef = await harness.birth({ assistant });
+            const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+            await harness.driver.advance(docRef);
+            warnings.mockRestore();
+            const conversation = await harness.conversation(docRef);
+            return (
+                (conversation.data.entries ?? []).find((entry) => entry.kind === "tool-result")
+                    ?.toolResult ?? ""
+            );
+        }
+
+        it("says an Operation the User switched off is switched off", async () => {
+            const result = await told({
+                grants: ["bank.sendMoney"],
+                call: "bank__sendMoney",
+                edit: (harness) => editOperation(harness, "bank.sendMoney", { enabled: false }),
+            });
+            expect(result).toMatch(/"bank\.sendMoney" is switched off/);
+            expect(result).not.toMatch(/not one of your tools|not granted to you/);
+        });
+
+        it("says an Operation with no Implementation is no longer implemented", async () => {
+            const result = await told({
+                grants: ["email.forward"],
+                call: "email__forward",
+                // A Thing left behind by an Implementation that was deleted — bootstrap never
+                // removes one, because the User may have notes on it.
+                edit: async (harness) =>
+                    putCatalogue(harness.store, [
+                        {
+                            key: "email.forward",
+                            name: "Forward an email",
+                            system: "Email",
+                            kind: "connector",
+                            description: "Forward an email.",
+                            parameters: '{"type":"object","properties":{}}',
+                            enabled: true,
+                        },
+                    ]),
+            });
+            expect(result).toMatch(/"email\.forward" is no longer implemented/);
+        });
+
+        it("says a grant naming nothing in the catalogue names nothing", async () => {
+            const result = await told({ grants: ["email.forward"], call: "email__forward" });
+            expect(result).toMatch(/"email\.forward" is granted to you, but no such Operation exists/);
+        });
+
+        it("says an Operation whose parameters will not parse is misconfigured", async () => {
+            const result = await told({
+                grants: ["bank.sendMoney"],
+                call: "bank__sendMoney",
+                edit: (harness) =>
+                    editOperation(harness, "bank.sendMoney", { parameters: "{ not json at all" }),
+            });
+            expect(result).toMatch(/"bank\.sendMoney" is misconfigured/);
+            expect(result).toMatch(/not valid JSON/);
+        });
+
+        it("says a self-call is a self-call", async () => {
+            const result = await told({
+                key: "receptionist",
+                grants: ["assistant.call:receptionist"],
+                call: "assistant__call__receptionist",
+            });
+            expect(result).toMatch(/"assistant\.call:receptionist" would call yourself/);
+        });
+
+        it("says a bare assistant.call needs a callee, rather than pretending it is a wildcard", async () => {
+            const result = await told({ grants: ["assistant.call"], call: "assistant__call" });
+            expect(result).toMatch(/"assistant\.call" is not a wildcard/);
+            expect(result).toMatch(/assistant\.call:<key>/);
+        });
     });
 
     it("rejects an Assistant calling itself", async () => {
@@ -495,6 +673,52 @@ describe("an Operation that requires an approval (ADR-0018)", () => {
         expect(question.data.prompt).toContain("```json");
         expect(question.data.prompt).not.toContain("no postings");
         expect(harness.firefly.posted).toHaveLength(0);
+    });
+
+    /**
+     * The flag arrives from **data**, not from code (ADR-0018, amended). The tests above are the
+     * ordinary case — a Thing bootstrap created from a seed that asked for an approval — and these
+     * two are the User exercising their sovereignty in each direction.
+     */
+    it("books without asking when the User has switched the approval off, and warns once", async () => {
+        const harness = buildHarness([
+            { turn: 0, toolCalls: [{ name: "bookkeeping__postTransaction", arguments: POSTING }] },
+            { turn: 1, text: "Booked.", finishReason: "answered" },
+        ]);
+        const assistant = await bookingAssistant(harness);
+        await editOperation(harness, "bookkeeping.postTransaction", { requiresApproval: false });
+        const docRef = await harness.birth({ assistant });
+        const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+        await harness.driver.advance(docRef);
+
+        // It went through, on the User's decision and with nobody asked.
+        expect(harness.firefly.posted).toHaveLength(1);
+        expect(await harness.questions()).toHaveLength(0);
+        // And the log carries the record: weaker than the code shipped with, named, once.
+        const weakened = warnings.mock.calls
+            .map((call) => call.map(String).join(" "))
+            .filter((line) => line.includes("bookkeeping.postTransaction") && /approval/i.test(line));
+        expect(weakened).toHaveLength(1);
+        warnings.mockRestore();
+    });
+
+    it("asks about an Operation the User ticked, though its code never required one", async () => {
+        const harness = buildHarness([
+            { turn: 0, toolCalls: [{ name: "bookkeeping__listAccounts", arguments: {} }] },
+        ]);
+        const assistant = await harness.seedAssistant({
+            grants: [{ operationKey: "bookkeeping.listAccounts" }],
+        });
+        await editOperation(harness, "bookkeeping.listAccounts", { requiresApproval: true });
+        const docRef = await harness.birth({ assistant });
+
+        const result = await harness.driver.advance(docRef);
+
+        expect(result.status).toBe("waiting");
+        const question = await pendingQuestion(harness, docRef);
+        expect(question.data.prompt).toContain("Approval needed");
+        expect(question.data.prompt).toContain("bookkeeping.listAccounts");
     });
 
     it("leaves an Operation that does not require one alone", async () => {
@@ -896,6 +1120,75 @@ describe("recovery", () => {
         await harness.driver.advance((await children())[0]!.docRef);
         await harness.watcher.scan();
         expect((await harness.conversation(docRef)).data.status).toBe("done");
+    });
+});
+
+/**
+ * An Operation switched off underneath a Conversation that is already using it.
+ *
+ * The two states look alike and are reached by different code. A **suspended** call already has a
+ * `pending` tool-result written, so `unresolvedIntent` never finds it and the fresh Turn is the
+ * only thing that can say anything — through the belt. A **crashed** call has no result at all, so
+ * it goes through `reconcile()`, which settles it with *"no longer available"*.
+ */
+describe("switching an Operation off under a live Conversation", () => {
+    const SEND = { iban: "DE00", amount: "10.00", reference: "r" };
+
+    it("tells a resumed Conversation, on its next Turn, that the Operation is switched off", async () => {
+        const harness = buildHarness([
+            { turn: 0, toolCalls: [{ name: "bank__sendMoney", arguments: SEND }] },
+            { turn: 1, toolCalls: [{ name: "bank__sendMoney", arguments: SEND }] },
+            { turn: 2, text: "Understood, I will leave it.", finishReason: "answered" },
+        ]);
+        const assistant = await harness.seedAssistant({ grants: [{ operationKey: "bank.sendMoney" }] });
+        const docRef = await harness.birth({ assistant });
+
+        await harness.driver.advance(docRef);
+        const suspended = await harness.conversation(docRef);
+        expect(suspended.data.status).toBe("waiting");
+        expect(suspended.data.waitingFor).toBe("tool");
+
+        // The User switches it off while the Conversation is waiting on it, and then answers.
+        await editOperation(harness, "bank.sendMoney", { enabled: false });
+        const [question] = await harness.questions();
+        const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+        await harness.answer(question!.thingId, { text: "I have sent it by hand." });
+        await harness.watcher.scan();
+        warnings.mockRestore();
+
+        const results = ((await harness.conversation(docRef)).data.entries ?? []).filter(
+            (entry) => entry.kind === "tool-result",
+        );
+        // The message, not merely the absence of a stranded call: the model has to know why.
+        expect(results.at(-1)!.toolResult).toMatch(/"bank\.sendMoney" is switched off/);
+        // And this is not the reconciliation path — the suspended call's `pending` result is still
+        // there, so nothing was ever unresolved and nothing said "no longer available".
+        expect(results.map((entry) => entry.toolResult).join("\n")).not.toMatch(/no longer available/);
+        expect(results[0]!.toolResult).toMatch(/"pending":true/);
+    });
+
+    it("still settles a call that crashed mid-flight with 'no longer available'", async () => {
+        const harness = buildHarness([
+            { turn: 0, toolCalls: [{ name: "bank__sendMoney", arguments: SEND }] },
+            { turn: 1, text: "Understood, I will leave it.", finishReason: "answered" },
+        ]);
+        const assistant = await harness.seedAssistant({ grants: [{ operationKey: "bank.sendMoney" }] });
+        const docRef = await harness.birth({ assistant });
+        await harness.driver.advance(docRef);
+
+        await editOperation(harness, "bank.sendMoney", { enabled: false });
+        await crashAfterIntent(harness, docRef);
+        const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+        await harness.watcher.scan();
+        warnings.mockRestore();
+
+        const after = await harness.conversation(docRef);
+        const results = (after.data.entries ?? []).filter((entry) => entry.kind === "tool-result");
+        // The existing revoked-grant path, unchanged: nothing is stranded and nothing is repeated.
+        expect(results).toHaveLength(1);
+        expect(results[0]!.toolResult).toMatch(/"bank\.sendMoney" is no longer available/);
+        expect(results[0]!.toolResult).toMatch(/did not take effect/);
+        expect(after.data.escalationCount ?? 0).toBe(0);
     });
 });
 

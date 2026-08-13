@@ -35,6 +35,7 @@ import {
     type Assistant,
     type Conversation,
     type OpenQuestion,
+    type Operation,
     type RuntimeState,
     type Stored,
     type ThingModel,
@@ -116,9 +117,23 @@ export class Watcher {
         { scheduledFor: string; since: number; warned: boolean }
     >();
 
+    /**
+     * Has an empty or unreadable catalogue already been reported? In memory, so a restart
+     * re-announces it, and so the recovery line is written exactly once when one appears.
+     */
+    private catalogueMissing = false;
+
     /** One pass. Returns what it did, so the caller can log and stamp the heartbeat. */
     async scan(): Promise<ScanReport> {
         const report: ScanReport = { births: 0, continuations: 0, paused: false, errors: 0 };
+
+        // Before anything else, including the heartbeat: every Turn this pass could start would
+        // throw on the catalogue read anyway (ADR-0019), so scanning would produce one identical
+        // error per Conversation per two seconds and a green heartbeat over a system doing nothing.
+        if (!(await this.catalogueIsThere())) {
+            report.errors += 1;
+            return report;
+        }
 
         const state = await this.loadState();
         if (state.data.paused) {
@@ -152,6 +167,52 @@ export class Watcher {
 
         await this.stampHeartbeat(state);
         return report;
+    }
+
+    /**
+     * Is there a catalogue to scan against?
+     *
+     * The Runtime does not exit when there is not: `just up` before `just bootstrap` is a normal
+     * ordering rather than an error, and a container restarting every two seconds is harder to read
+     * than one that is up and saying why. So it stays inspectable, does no work, and — by leaving
+     * the heartbeat unstamped — reports unhealthy, which is the signal an operator gets without
+     * reading the log at all.
+     *
+     * Said **once per outage** rather than once per scan, for the reason {@link noteBadCron} and
+     * {@link noteFrozenFrontier} both give: an operator flooded with a line every two seconds stops
+     * reading them. The heartbeat is the continuous signal; this is the explanation. The recovery
+     * is logged at the transition for the same reason in reverse — "it seems to be working now"
+     * becomes evidence.
+     */
+    private async catalogueIsThere(): Promise<boolean> {
+        let operations: number;
+        try {
+            operations = (
+                await this.deps.things.search<Operation>(SPECS.Operation_DM, undefined, PAGE_SIZE)
+            ).length;
+        } catch (error) {
+            this.noteMissingCatalogue(`the Operation catalogue could not be read: ${describeError(error)}`);
+            return false;
+        }
+        if (operations === 0) {
+            this.noteMissingCatalogue("the Operation catalogue is empty");
+            return false;
+        }
+        if (this.catalogueMissing) {
+            this.catalogueMissing = false;
+            log.info(`catalogue found: ${operations} Operations; scanning resumed`, { operations });
+        }
+        return true;
+    }
+
+    private noteMissingCatalogue(reason: string): void {
+        if (this.catalogueMissing) return;
+        this.catalogueMissing = true;
+        log.error(
+            `not scanning: ${reason}, so no Assistant can be offered anything and every Turn would ` +
+                `fail. Run \`just bootstrap\`; scanning resumes by itself once it has.`,
+            { reason },
+        );
     }
 
     // ---------------------------------------------------------------- scan 1: birth

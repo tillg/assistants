@@ -1,20 +1,26 @@
 /**
  * Loading what the system *is*.
  *
- * Two opposite requirements meet here, which is why it is worth its own file: the seeded Assistants
- * are a **definition** and re-running bootstrap must apply an edited one, while the RuntimeState
- * singleton is **live state** and re-running bootstrap must not touch it. Getting the second wrong
- * would reset the global pause and the watermark.
+ * Three requirements meet here, which is why it is worth its own file: the seeded Assistants are a
+ * **definition** and re-running bootstrap must apply an edited one; the RuntimeState singleton is
+ * **live state** and re-running bootstrap must not touch it; and an Operation is **half of each** —
+ * its mechanical mirror of the code is re-applied, and every field a human might have thought about
+ * is not. Getting the second wrong would reset the global pause and the watermark; getting the third
+ * wrong would let `just dev` disengage a kill switch the User set.
  */
 
 import { describe, expect, it } from "vitest";
-import { buildHarness, nowIso, SPECS } from "./support/harness.js";
+import { buildHarness, clearCatalogue, nowIso, SPECS } from "./support/harness.js";
 import { bootstrap, setPaused } from "../src/bootstrap/bootstrap.js";
 import { RUNTIME_STATE_KEY } from "../src/watcher/watcher.js";
 import { ASSISTANT_SEEDS } from "../src/bootstrap/assistants.js";
-import type { Assistant, RuntimeState, Stored } from "../src/domain/types.js";
+import type { OperationImplementation } from "../src/operations/registry.js";
+import type { Assistant, Operation, RuntimeState, Stored } from "../src/domain/types.js";
 
 const RECEPTIONIST = ASSISTANT_SEEDS[0]!;
+
+/** The Operation the asymmetry cases push around: granted to no Assistant, so nothing depends on it. */
+const VICTIM = "bookkeeping.createAccount";
 
 async function storedAssistant(
     harness: ReturnType<typeof buildHarness>,
@@ -26,10 +32,35 @@ async function storedAssistant(
     return assistant;
 }
 
+async function storedOperation(
+    harness: ReturnType<typeof buildHarness>,
+    key: string,
+): Promise<Stored<Operation>> {
+    const found = await harness.things.findByIdempotencyKey<Operation>(
+        SPECS.Operation_DM,
+        `operation:${key}`,
+    );
+    if (!found) throw new Error(`no Operation ${key}`);
+    return found;
+}
+
+/** The registered Implementations with one seed edited — which is what a developer does. */
+function withSeed(
+    implementations: readonly OperationImplementation[],
+    key: string,
+    patch: Partial<OperationImplementation["seed"]>,
+): OperationImplementation[] {
+    return implementations.map((implementation) =>
+        implementation.name === key
+            ? { ...implementation, seed: { ...implementation.seed, ...patch } }
+            : implementation,
+    );
+}
+
 describe("bootstrap", () => {
     it("seeds the Assistants and the RuntimeState on an empty store", async () => {
         const harness = buildHarness([]);
-        const result = await bootstrap(harness.things);
+        const result = await bootstrap(harness.things, harness.registry.all());
 
         expect(result.created).toContain(RECEPTIONIST.key);
         expect(result.created).toContain("runtime-state");
@@ -43,7 +74,7 @@ describe("bootstrap", () => {
         // seeded Assistant definitions", so the one documented way to apply an edit did not work,
         // and the only thing that did was `just clean` / `just demo-reset`, which destroys the books.
         const harness = buildHarness([]);
-        await bootstrap(harness.things);
+        await bootstrap(harness.things, harness.registry.all());
 
         // Somebody edits the prompt — in the UI, or in the seed and then re-runs.
         const before = await storedAssistant(harness, RECEPTIONIST.key);
@@ -53,7 +84,7 @@ describe("bootstrap", () => {
             maxTurns: 99,
         });
 
-        const result = await bootstrap(harness.things);
+        const result = await bootstrap(harness.things, harness.registry.all());
 
         expect(result.updated).toContain(RECEPTIONIST.key);
         const after = await storedAssistant(harness, RECEPTIONIST.key);
@@ -70,7 +101,7 @@ describe("bootstrap", () => {
         // Rewriting the singleton the way the Assistants are rewritten would disengage a `just pause`
         // and reset the watermark — re-queueing every Thing in the store as new work.
         const harness = buildHarness([]);
-        await bootstrap(harness.things);
+        await bootstrap(harness.things, harness.registry.all());
 
         await setPaused(harness.things, true);
         const watermark = nowIso(new Date(Date.now() - 600_000));
@@ -80,12 +111,100 @@ describe("bootstrap", () => {
             watermark,
         });
 
-        const result = await bootstrap(harness.things);
+        const result = await bootstrap(harness.things, harness.registry.all());
 
         expect(result.kept).toContain("runtime-state");
         const after = await harness.things.search<RuntimeState>(SPECS.RuntimeState_DM, undefined, 2);
         expect(after[0]!.data.singletonKey).toBe(RUNTIME_STATE_KEY);
         expect(after[0]!.data.paused).toBe(true);
         expect(after[0]!.data.watermark).toBe(watermark);
+    });
+
+    it("creates one Operation per registered Implementation, switched on", async () => {
+        // A stack that has never run `just bootstrap`: the harness puts a catalogue in the store
+        // because `advance()` refuses an empty one, and creating it is the thing under test here.
+        const harness = buildHarness([]);
+        clearCatalogue(harness.store);
+        const implementations = harness.registry.all();
+
+        const result = await bootstrap(harness.things, implementations);
+
+        expect(result.operationsCreated).toHaveLength(implementations.length);
+        const catalogue = await harness.things.search<Operation>(SPECS.Operation_DM, undefined, 100);
+        expect(catalogue).toHaveLength(implementations.length);
+        const victim = await storedOperation(harness, VICTIM);
+        const seed = implementations.find((one) => one.name === VICTIM)!.seed;
+        expect(victim.data.key).toBe(VICTIM);
+        expect(victim.data.name).toBe(seed.name);
+        expect(victim.data.description).toBe(seed.description);
+        expect(victim.data.enabled).toBe(true);
+        expect(victim.data.mutating).toBe(true);
+        // An object in the seed, text on the Thing — and the catalogue read parses it back.
+        expect(JSON.parse(victim.data.parameters ?? "")).toEqual(seed.parameters);
+    });
+
+    it("re-applies the mechanical mirror of an edited seed, and creates no second Thing", async () => {
+        const harness = buildHarness([]);
+        clearCatalogue(harness.store);
+        await bootstrap(harness.things, harness.registry.all());
+        const before = await storedOperation(harness, VICTIM);
+
+        const result = await bootstrap(
+            harness.things,
+            withSeed(harness.registry.all(), VICTIM, { system: "Bookkeeping (moved)" }),
+        );
+
+        expect(result.operationsCreated).toEqual([]);
+        expect(result.operationsUpdated).toContain(VICTIM);
+        const after = await storedOperation(harness, VICTIM);
+        expect(after.data.system).toBe("Bookkeeping (moved)");
+        expect(after.thingId).toBe(before.thingId);
+    });
+
+    it("never re-applies the prose, and reports the divergence instead of resolving it", async () => {
+        // The cost of the asymmetry, paid out loud. A developer who improves a description in the
+        // seed does not reach a running system — and finds out from this list rather than by
+        // wondering why the model still behaves the way it did.
+        const harness = buildHarness([]);
+        clearCatalogue(harness.store);
+        await bootstrap(harness.things, harness.registry.all());
+
+        const result = await bootstrap(
+            harness.things,
+            withSeed(harness.registry.all(), VICTIM, {
+                description: "Add an account to the chart of accounts. Ask first if it looks odd.",
+            }),
+        );
+
+        expect(result.divergedDescriptions).toEqual([`Create an account (${VICTIM})`]);
+        const after = await storedOperation(harness, VICTIM);
+        expect(after.data.description).toBe(
+            harness.registry.get(VICTIM)!.seed.description,
+        );
+    });
+
+    it("leaves a switched-off Operation switched off, and a hand-set approval set", async () => {
+        // Both are the User's (ADR-0018, as amended). A kill switch that `just dev` disengages is
+        // not a kill switch, and an approval a re-run removes is worse than one that was never there.
+        const harness = buildHarness([]);
+        clearCatalogue(harness.store);
+        await bootstrap(harness.things, harness.registry.all());
+        const before = await storedOperation(harness, VICTIM);
+        await harness.things.update(SPECS.Operation_DM, before.docRef, {
+            enabled: false,
+            requiresApproval: true,
+            name: "Create an account (renamed by hand)",
+            notes: "Switched off while the chart is being tidied.",
+        });
+
+        await bootstrap(harness.things, harness.registry.all());
+
+        const after = await storedOperation(harness, VICTIM);
+        expect(after.data.enabled).toBe(false);
+        expect(after.data.requiresApproval).toBe(true);
+        expect(after.data.name).toBe("Create an account (renamed by hand)");
+        expect(after.data.notes).toBe("Switched off while the chart is being tidied.");
+        // …while the mechanical half underneath the decision was re-applied all the same.
+        expect(after.data.system).toBe(harness.registry.get(VICTIM)!.seed.system);
     });
 });

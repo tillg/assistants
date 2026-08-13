@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { buildHarness, nowIso, type Harness } from "./support/harness.js";
+import { buildHarness, clearCatalogue, nowIso, putCatalogue, type Harness } from "./support/harness.js";
 import { SPECS } from "../src/a12/things.js";
 import { RUNTIME_STATE_KEY } from "../src/watcher/watcher.js";
 import { isPaused, setPaused } from "../src/bootstrap/bootstrap.js";
@@ -278,6 +278,113 @@ describe("the materialised scan (scan 1)", () => {
         expect((await subjectsBirthed(harness)).has(blockedInvoice.thingId)).toBe(false);
         // The Document's progress must not carry the watermark past the Invoice that was skipped.
         expect((await state(harness)).data.watermark! < nowIso(new Date(t0 + 60_000))).toBe(true);
+    });
+});
+
+/**
+ * The startup check (ADR-0019).
+ *
+ * The per-Turn refusal is what makes "no fallback to the seeds" true under a live edit, but on its
+ * own it produces a stack that boots into a guaranteed-failing loop and reports it one identical
+ * error at a time. So the watcher looks before it scans — and looks again on every scan, so that
+ * bootstrapping a running stack heals it without a restart.
+ */
+describe("the catalogue check in front of the scan", () => {
+    /** A Document waiting to be birthed, and the watermark that would let it be. */
+    async function workWaiting(harness: Harness): Promise<void> {
+        const t0 = Date.now() - 3_600_000;
+        await harness.seedAssistant();
+        await seedState(harness, nowIso(new Date(t0)));
+        await harness.things.create(SPECS.Document_DM, {
+            title: "a Document nobody will look at until the catalogue is there",
+            createdAt: nowIso(new Date(t0 + 60_000)),
+            idempotencyKey: "waiting",
+        });
+    }
+
+    it("does not scan while the catalogue is empty, says why once, and reports unhealthy", async () => {
+        const harness = buildHarness([{ text: "Done.", finishReason: "answered" }]);
+        await workWaiting(harness);
+        clearCatalogue(harness.store);
+        const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+        for (let pass = 0; pass < 3; pass += 1) await harness.watcher.scan();
+
+        // Nothing was born, and nothing was advanced.
+        expect(await conversations(harness)).toHaveLength(0);
+        // The heartbeat is what the compose healthcheck reads, and a scan that did not run must not
+        // stamp it: an unhealthy container is how "the catalogue is missing" reaches an operator who
+        // is not reading the log.
+        expect((await state(harness)).data.heartbeatAt).toBeFalsy();
+
+        const complaints = errors.mock.calls
+            .map((call) => String(call[0] ?? ""))
+            .filter((line) => line.includes("just bootstrap"));
+        // Once per outage, not thirty times a minute — the same argument the pinned-watermark and
+        // held-schedule warnings make. The healthcheck is the continuous signal; this is the reason.
+        expect(complaints).toHaveLength(1);
+        expect(complaints[0]).toMatch(/catalogue/i);
+        errors.mockRestore();
+    });
+
+    it("does not scan when the catalogue cannot be read at all", async () => {
+        const harness = buildHarness([]);
+        await workWaiting(harness);
+        const query = harness.store.query.bind(harness.store);
+        harness.store.query = async (spec) => {
+            if (spec.targetDocumentModel === "Operation_DM") throw new Error("the store is down");
+            return query(spec);
+        };
+        const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+        await harness.watcher.scan();
+
+        expect(await conversations(harness)).toHaveLength(0);
+        expect(errors.mock.calls.map((call) => String(call[0] ?? "")).join("\n")).toMatch(
+            /the store is down/,
+        );
+        errors.mockRestore();
+    });
+
+    it("resumes scanning when a catalogue appears, without a restart, and says so once", async () => {
+        const harness = buildHarness([{ text: "Done.", finishReason: "answered" }]);
+        await workWaiting(harness);
+        const catalogue = harness.catalogue;
+        clearCatalogue(harness.store);
+        const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+        const infos = vi.spyOn(console, "info").mockImplementation(() => {});
+
+        await harness.watcher.scan();
+        expect(await conversations(harness)).toHaveLength(0);
+
+        // `just bootstrap` against the running stack.
+        putCatalogue(harness.store, catalogue);
+        for (let pass = 0; pass < 3; pass += 1) await harness.watcher.scan();
+
+        expect(await conversations(harness)).toHaveLength(1);
+        expect((await state(harness)).data.heartbeatAt).toBeTruthy();
+
+        const resumed = infos.mock.calls
+            .map((call) => String(call[0] ?? ""))
+            .filter((line) => line.includes("scanning resumed"));
+        // "It seems to be working now" becomes evidence — once, at the transition, not per scan.
+        expect(resumed).toHaveLength(1);
+        expect(resumed[0]).toMatch(new RegExp(`catalogue found: ${catalogue.length} Operations`));
+        errors.mockRestore();
+        infos.mockRestore();
+    });
+
+    it("says nothing at all when the catalogue was there from the first scan", async () => {
+        const harness = buildHarness([{ text: "Done.", finishReason: "answered" }]);
+        await workWaiting(harness);
+        const infos = vi.spyOn(console, "info").mockImplementation(() => {});
+
+        await harness.watcher.scan();
+
+        expect(
+            infos.mock.calls.filter((call) => String(call[0] ?? "").includes("scanning resumed")),
+        ).toHaveLength(0);
+        infos.mockRestore();
     });
 });
 

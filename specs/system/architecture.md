@@ -2,7 +2,7 @@
 
 The domain this realises is in [domain.md](domain.md); the vocabulary is in
 [CONTEXT.md](../../CONTEXT.md). [README.md](../../README.md) is the operator's view — how to run
-it, and what every `just` recipe does — and is not repeated here. The eighteen decisions with
+it, and what every `just` recipe does — and is not repeated here. The twenty decisions with
 their alternatives and reversal costs are in [docs/adr/](../../docs/adr/), and the running record
 of decisions taken while building is [DECISIONS.md](../../DECISIONS.md).
 
@@ -110,13 +110,13 @@ every Gradle task the template provides.
 │   ├── src/llm/              provider interface + openai / anthropic / scripted
 │   ├── src/loop/             advance() — one Conversation, one Turn
 │   ├── src/watcher/          the seven scans
-│   ├── src/tools/            the registry and the seventeen Operations
+│   ├── src/operations/       the registry and the seventeen Implementations
 │   ├── src/connectors/       firefly
 │   ├── src/bootstrap/        seeds the two Assistants and the RuntimeState singleton
 │   ├── src/demo/             the demo household loader
 │   └── fixtures/             the scripted LLM transcript
 ├── import/
-│   ├── models/               the eight Things (DM/FM/OM) + the application model + CONVENTIONS.md
+│   ├── models/               the nine Things (DM/FM/OM) + the application model + CONVENTIONS.md
 │   ├── auth/                 roles.yaml — realm role → A12 access rights
 │   └── validate-models.mjs   the model validator
 ├── compose/                  docker-compose.yml, firefly/, postgres/, keycloak/
@@ -129,7 +129,7 @@ every Gradle task the template provides.
 
 ### ThingStore (`server/`, `import/models/`)
 
-An A12 Data Service holding every Thing and exposing A12's JSON-RPC interface. Eight Models, each
+An A12 Data Service holding every Thing and exposing A12's JSON-RPC interface. Nine Models, each
 with a document model (`_DM`), a form model (`_FM`) and an overview model (`_OM`), plus one
 application model (`_AM`) for navigation and one query model (`OpenQuestionPending_QeM`).
 
@@ -201,7 +201,7 @@ flowchart TB
     subgraph RT["Runtime"]
         W["Trigger Watcher<br/>watcher.ts<br/>seven scans, every 2s"]
         L["Loop Driver<br/>advance.ts<br/>one Conversation, one Turn"]
-        TR["Tool registry<br/>registry.ts + tools.ts<br/>17 Operations, per-Assistant filtering"]
+        TR["Operation registry<br/>registry.ts + implementations.ts<br/>17 Implementations, joined to<br/>the catalogue per Turn"]
         C["A12 client + Thing repository<br/>a12/client.ts, a12/things.ts"]
         P["LlmProvider<br/>openai | anthropic | scripted"]
         FFC["Firefly connector<br/>connectors/firefly.ts"]
@@ -225,8 +225,10 @@ advance(conversationId):
     conv = thingStore.get(conversationId)
     if conv.status not in (running, waiting) or not claimLease(conv): return
     if conv.turnCount >= assistant.maxTurns: raiseTerminal(conv, 'limit'); return
+    catalogue = thingStore.search(Operation_DM)   # ← ONE SNAPSHOT, ONCE PER TURN
+    if catalogue is empty: throw                  # bootstrap has not run; the Turn is not spent
     context = buildContext(conv)              # system prompt + skills + entries
-    response = llm.complete(context, toolsOf(conv.assistant))
+    response = llm.complete(context, registry.schemasFor(assistant, catalogue))
     append(conv, response); conv.turnCount++
     if response.finishReason != 'wants-tools':
         finish(conv)                          # done, or deliver the result to the parent
@@ -235,9 +237,9 @@ advance(conversationId):
         key = conv.id + ':' + nextSeq(conv)
         append(conv, intent(call, key))
         write(conv)                           # ← INTENT IS WRITTEN BEFORE EXECUTION
-        hash    = canonicalArgsHash(call.args) if call.tool.requiresApproval else none
+        hash    = canonicalArgsHash(call.args) if call.operation.requiresApproval else none
         refusal = gateOnApproval(conv, call, hash) if hash else none
-        result  = refusal or tools.execute(call, conv, key)   # ← APPROVED BEFORE IT RUNS
+        result  = refusal or operations.execute(call, conv, key)   # ← APPROVED BEFORE IT RUNS
         if result.pending:
             conv.status = 'waiting'; conv.waitingFor = result.waitingFor
             conv.wakeAt = result.wakeAt
@@ -248,11 +250,11 @@ advance(conversationId):
     write(conv)
 ```
 
-Four properties are load-bearing:
+Five properties are load-bearing:
 
 1. **One call, one Turn.** `advance` never loops internally. Continuing is re-entry through the
    same door birth uses.
-2. **The pending path is the normal path.** Every Tool may answer `pending`. That single
+2. **The pending path is the normal path.** Every Operation may answer `pending`. That single
    generalisation is what turns a coding-agent loop into this one. Coding agents assume tools
    return in seconds and block inside the Turn; here the Operations are human-paced by design.
 3. **The Conversation is an intent log, not a result log** (ADR-0012). The intent, including its
@@ -260,6 +262,13 @@ Four properties are load-bearing:
 4. **The approval gate sits between the two.** Its position is not incidental: after the intent, so
    a refusal is visible in the transcript rather than inferred from an absence; before execution, so
    there is nothing to undo. See below.
+5. **One catalogue per Turn.** The Operations the model is offered and the Operations it is then
+   allowed to run are resolved from the *same* snapshot, read once at the top of `advance()`, so a
+   User editing the catalogue mid-Turn cannot produce a Turn whose schemas and executions disagree.
+   An empty catalogue is refused rather than defaulted to the Implementations' seeds — a fallback
+   would be a second answer to *"what can this Assistant do"*, in the one place where the wrong
+   answer costs money — and refusing before the provider is called means the Turn is not spent, the
+   lease lapses, and the next scan retries.
 
 Where a Turn's cost is recorded is a consequence of this shape. A Turn that ends `wants-tools`
 appends no `assistant` Entry at all — only one `tool-intent` per call — so "the Turn's assistant
@@ -270,7 +279,11 @@ Turn wrote**: the `assistant` entry for a text reply, the first `tool-intent` ot
 
 An Operation may declare `requiresApproval`, and the Runtime refuses to run it without an answered
 confirmation that **the Runtime itself** raised, for that Operation, with those exact arguments, in
-that Conversation. `bookkeeping.postTransaction` is the only Operation that declares it today. The
+that Conversation. `bookkeeping.postTransaction` is the only Operation seeded with it today, and
+since the catalogue moved into the store the flag is read from the Operation **Thing** — the
+Implementation's value is what the Thing was created with and nothing more, so the User may add a
+requirement where the code demands none and remove one it does demand. A weakening is logged once
+per Operation per process, named, and not overridden (ADR-0019, and the amendment on ADR-0018). The
 domain rules are in [domain.md](domain.md); what belongs here is the mechanism, which is three small
 additions and one walk-back.
 
@@ -335,7 +348,11 @@ inbox is how a safety feature becomes a thing the User clicks yes on without rea
 
 #### The trigger watcher
 
-A scan every two seconds. It does nothing at all while `RuntimeState.paused` is true.
+A scan every two seconds. It does nothing at all while `RuntimeState.paused` is true, and nothing at
+all while the catalogue is empty: before its first scan the watcher reads `Operation_DM`, and an
+empty or unreadable catalogue is logged at error with its remedy (`just bootstrap`), reported as
+unhealthy, and re-checked on every scan — so a stack brought up before it is bootstrapped says what
+is missing, heals when it arrives, and logs the transition rather than quietly starting to work.
 
 | # | Scan | Action |
 |---|---|---|
@@ -411,44 +428,55 @@ landed*; it never re-executes blind.
 | Tier | Examples | Response |
 |---|---|---|
 | **Transient** | LLM timeout, 429, 5xx | Bounded retry with backoff inside the Turn; each attempt recorded as an entry |
-| **Recoverable by the model** | Malformed tool-call JSON, undeclared Tool requested, 422 from a Connector, a ThingStore validation error | Append the error **as a tool result** and let the next Turn see it. This is how the model self-corrects, and it costs nothing |
+| **Recoverable by the model** | Malformed tool-call JSON, an Operation called that is not granted, is switched off or is no longer implemented, 422 from a Connector, a ThingStore validation error | Append the error **as a tool result** and let the next Turn see it. This is how the model self-corrects, and it costs nothing |
 | **Terminal** | Retries exhausted, `maxTurns` reached, an Authority refusing repeatedly | **Never silent**: `status = waiting`, `waitingFor = user`, and an `OpenQuestion` of kind `perform` carrying the error. Capped at three escalations per Conversation |
 
 Because the terminal tier shares fate with the failures it reports, `heartbeatAt` is stamped at
 the end of every *successful* scan, a scan that throws deliberately leaves it untouched, and the
 compose healthcheck fails once it is stale (ADR-0015).
 
-#### Tools
+#### Operations
 
-Seventeen Operations. The registry filters the schemas offered to the LLM by the Assistant's
-declared `tools[]`, so an undeclared Operation is invisible rather than merely refused. A
-`ToolDefinition` also declares whether it is `mutating`, whether it `requiresApproval`, and — if it
-does — how the approval question reads, through `describeCall(args)`.
+An Operation is split in two (ADR-0019). The **Implementation** is code — `execute`, and optionally
+`reconcile` and `describeCall(args)`, plus `mutating`, which is a claim about what `execute` does
+and is never read back from data. The **Operation** is a Thing: its key, its System, its kind, the
+prose the model reads, its parameter schema, whether it requires an approval and whether it is
+switched on. The two are joined by the Operation's key, which is why the catalogue can describe an
+Operation and cannot invent one. The product of the join — an Operation resolved for one Assistant,
+with its Implementation bound in — is a **Granted Operation**, and that is the shape `advance()`
+consumes.
+
+**There is no table of Operations here any more, on purpose.** The one that used to open with
+*"Seventeen Operations"* was a hand-maintained copy of a list that lives somewhere else, and it was
+true on the day it was written. The catalogue is the answer now: open **Operations** in the web
+application, or read `runtime/src/operations/implementations.ts` for the seventeen Implementations
+that seed it. What a User wants from it — what does this Operation do, which System does it touch,
+does it need my approval, is it on — is four columns of an overview rather than four questions for
+whoever last read the source.
+
+The registry resolves the Assistant's `grants[]` against a **catalogue snapshot taken once per
+Turn**, and returns both halves of its answer: the Granted Operations, and the grants it dropped
+with the reason for each — `absent`, `disabled`, `unimplemented`, `unparseable`, `self-call`,
+`bare-call`. The schemas offered to the LLM are derived from the same call, so the advertised set
+and the executable set cannot drift, and an Operation that is not offered is invisible rather than
+merely refused. The dropped half is what lets the belt check at execution tell a model *why* — that
+its Operation is switched off, rather than that it never had one, which after this change would
+often be false.
 
 **The Manual Connectors do not require approvals, and must not.** `bank.sendMoney`, `email.send` and
 `document.requestText` already suspend with an Open Question, because the User *performs* them by
 hand. An approval there would ask the User to approve doing something they are about to be asked to
 do themselves.
 
-| Operation | System | Kind |
-|---|---|---|
-| `thingstore.create` / `.get` / `.update` / `.search` | ThingStore | internal; create is search-then-create |
-| `ui.askUser` | UserInterface | internal, **pending** — writes an `OpenQuestion` |
-| `assistant.call:<key>` | — | **pending** (ADR-0007), `awaitMode: wait \| chase \| detach` |
-| `bookkeeping.listAccounts` / `.getBalance` / `.listOpenItems` / `.getBudgetReport` / `.listTransactions` | Firefly III | Connector, read-only |
-| `bookkeeping.postTransaction` | Firefly III | Connector, keyed; **requires an approval** (ADR-0018) |
-| `bookkeeping.createAccount` | Firefly III | Connector; **granted to no Assistant** |
-| `document.requestText` | — | **Manual Connector** |
-| `email.send` / `email.fetch` / `bank.sendMoney` | Email, Bank | **Manual Connector** |
-
-What each seeded Assistant is granted:
+What each seeded Assistant is granted is a property of the two Assistant seeds rather than of the
+catalogue, so it is worth having here:
 
 | | Receptionist | Accountant |
 |---|---|---|
 | Trigger | `thing-materialised` on `Document_DM` | `assistant-call`, and a `schedule` — `0 7 * * *` |
 | ThingStore | `get`, `search`, `create`, `update` | `get`, `search`, `update` |
 | `ui.askUser` | ✓ | ✓ |
-| Bookkeeping | — | all six reads and `postTransaction`; **not** `createAccount` |
+| Bookkeeping | — | all five reads and `postTransaction`; **not** `createAccount` |
 | Manual | `document.requestText` | — |
 | Calls | `assistant.call:accountant` | — |
 
@@ -511,8 +539,12 @@ second database *engine* — that was the point.
 
 ### Models
 
-See [domain.md](domain.md) for what each Model means and who its Authority is. Structurally: eight
-`_DM` / `_FM` pairs, seven `_OM`s, one `_AM`, one `_QeM`.
+See [domain.md](domain.md) for what each Model means and who its Authority is. Structurally: nine
+`_DM` / `_FM` pairs, nine `_OM`s, one `_AM`, one `_QeM` — twenty-nine models, which is the number
+`import/validate-models.mjs` reports. This sentence used to say *seven* `_OM`s, and it was already
+wrong before `Operation` was added: there were eight, one per Model, and there have been for as long
+as every Model has had a navigation module. A count nobody can check by looking is a count that
+rots, which is why the validator's total is quoted beside it.
 
 Every Model ends its root group with the same four machine fields, in order: `idempotencyKey`,
 `createdByConversationId`, `createdAt`, `updatedAt`.
@@ -571,15 +603,23 @@ authorization that is ours rather than the platform's.
 | `systemAdmin` | `ACCESS_ACTUATOR`, `MANAGE_CACHES`, `RELOAD_AUTH_RULES` |
 | `runtime` | `DOCUMENT_CREATE`, `DOCUMENT_UPDATE`, `DOCUMENT_PARTIAL_UPDATE`, `MODEL_READ`, `QUERY` |
 
+`ASSISTANT_WRITE` covers **`Assistant_DM` and `Operation_DM`** — the system's own definition, as
+opposed to what the household owns. The right's name is narrower than its job, which is the accepted
+cost of reusing it rather than minting an `OPERATION_WRITE`: a "may edit Assistants but not
+Operations" role is one a single-household system has no use for (ADR-0019).
+
 The **absent** rights on `runtime` are the point:
 
 - no `DOCUMENT_DELETE` (D-007), so an Assistant that hallucinates a delete gets a `-32059` from
   the store instead of losing an invoice;
 - no `MODEL_MANAGE`;
-- no `ASSISTANT_WRITE` (D-007a), so an Assistant cannot grant itself a Tool. `ASSISTANT_WRITE` is
-  **not an A12 built-in** — it is ours, named in `roles.yaml` and enforced by the "Assistant Write
-  Permission" in `import/auth/childAuthorizationDefinition.json`. It is held by every human role
-  and by no machine one.
+- no `ASSISTANT_WRITE` (D-007a), so an Assistant can neither grant itself an Operation nor edit the
+  Operation it was granted — no unticking *requires approval* on the one that moves money, and no
+  widening the sentence the model reads to decide when to call it. `ASSISTANT_WRITE` is **not an A12
+  built-in** — it is ours, named in `roles.yaml` and enforced by the "System Definition Write
+  Permission" in `import/auth/childAuthorizationDefinition.json`, which tests both Models in all
+  three resource shapes the Data Service checks writes with. It is held by every human role and by
+  no machine one.
 
 Both refusals are enforced **by the store**, not inside the same LLM-driven process that would be
 doing the escalating.
@@ -589,7 +629,7 @@ The Runtime logs in as a dedicated `runtime` user, never as `admin`, for a secon
 be indistinguishable from the human's edits in the UI.
 
 `just bootstrap` runs as the **User** (`BOOTSTRAP_USER`, default `human`), not as the Runtime,
-because an Assistant is the User's to write.
+because an Assistant is the User's to write — and so, now, is an Operation.
 
 ### Secrets
 
@@ -647,10 +687,15 @@ recipe table.
 
 Two loaders, deliberately distinct:
 
-- **`just bootstrap`** loads what the system *is*: the Receptionist, the Accountant and the
-  `RuntimeState` singleton. It **reconciles** — the Assistant seeds are re-applied on every run,
-  so a prompt edited in the web application is overwritten. `RuntimeState` is left alone, because
-  it is live state.
+- **`just bootstrap`** loads what the system *is*: the Receptionist, the Accountant, the catalogue
+  of Operations and the `RuntimeState` singleton. It **reconciles**, in three different ways,
+  because the three have different owners. The Assistant seeds are re-applied on every run, so a
+  prompt edited in the web application is overwritten. `RuntimeState` is left alone, because it is
+  live state. An Operation gets both: the mechanical mirror of the code — `system`, `kind`,
+  `parameters`, `mutating` — is re-applied, while the prose, `requiresApproval`, `enabled` and
+  `notes` are created once and never touched again. The rule in one line is *re-apply what the code
+  knows and never re-apply a decision*; a description improved in code therefore reaches only fresh
+  installs, and bootstrap reports the divergence by name rather than leaving it to be discovered.
 - **`just demo-data`** loads what the household *has*: parties, processes, documents, invoices and
   the matching Firefly accounts, budgets and transactions. It pauses the Runtime while loading, so
   the demo set lands as history rather than as a work queue, and advances the watermark past

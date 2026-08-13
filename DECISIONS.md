@@ -1138,3 +1138,33 @@ Two consequences, and I have acted on the first only:
 The `exposes` rule is worth having either way: its **error** half — an annotation naming a group the
 bound Document Model does not have — is load-bearing today and catches a typo that would otherwise
 claim coverage of nothing.
+
+## D-034 — ⚠ The Operations overview loses its *Add* button
+
+*Decided 2026-08-14 01:55 CEST, after phase F surfaced the hazard.*
+
+Phase A modelled `Operation_OM` on `Assistant_OM`, which gave it an **Add** button. Phase F then
+found what that button costs: an Operation Thing created by hand carries **no `operation:<key>`
+idempotency key**, so the next `just bootstrap` does not recognise it, creates a *second* Thing with
+the same `Key`, and `grantedTo`'s `catalogue.find(…)` then resolves whichever the store returns
+first. Two Operations with one key, and which one wins is arbitrary.
+
+**Decided**: empty `subHeaderBox.leftSlot`, keeping search, filter and the confirmed `delete` row
+action. This is the treatment `CONVENTIONS.md` already documents for overviews whose lifecycle the
+User does not own.
+
+**Why this and not a bootstrap fix**: the proposal is explicit that *"Operations authored entirely in
+the UI"* is out of scope — *"An Operation with no Implementation is not an Operation; it is a
+description of one."* The Add button was therefore inviting the User to create something that can
+never work **and** opening the duplicate-key hole. Removing it addresses both, and it is the smaller
+change. Making bootstrap fall back to matching on `Key` would paper over a screen that should not
+have existed.
+
+**Delete stays**, deliberately: architecture.md requires it — *"An Implementation that has been
+deleted leaves its Operation Thing behind … Cleaning it up is one click in the form, and only the
+User can do it (D-007: the Runtime holds no `DOCUMENT_DELETE`)."*
+
+**What is still open, and is not fixed here**: nothing stops a duplicate arriving through the
+JSON-RPC API directly, since `Operation_DM` is writable by any identity holding `ASSISTANT_WRITE`.
+The resolution would still be arbitrary. A `document_unique_constraint` on `Operation.Key` is the
+real answer and is a Model-level change nobody asked for in this change — worth its own commit.
