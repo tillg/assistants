@@ -541,5 +541,10 @@ This is one running vertical slice, not a finished system. What is honestly miss
 
 ## Licence
 
-EUPL-1.2 or a commercial licence from mgm technology partners GmbH — see [LICENSE](LICENSE),
-[NOTICE](NOTICE) and [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
+[EUPL-1.2](https://eupl.eu/), © 2026 Till Gartner — see [LICENSE](LICENSE), [NOTICE](NOTICE) and
+[THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
+
+Parts of the scaffolding derive from the mgm A12 project template (© mgm technology partners GmbH),
+which mgm licenses as EUPL-1.2 or commercial; Assistants takes the EUPL-1.2 option, and those files
+keep mgm's copyright notice alongside mine. A12 itself is an unmodified dependency under the same
+option. Assistants is an independent personal project, not affiliated with or endorsed by mgm.

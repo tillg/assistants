@@ -1,6 +1,14 @@
 <!--
-SPDX-License-Identifier: EUPL-1.2 OR LicenseRef-commercial
-Copyright (c) 2012-2026 mgm technology partners GmbH
+SPDX-License-Identifier: EUPL-1.2
+
+Copyright (c) 2026 Till Gartner
+
+Part of Assistants.
+
+Licensed under the European Union Public Licence, version 1.2 - see
+https://eupl.eu/ and the LICENSE file at the root of this repository.
+Distributed on an "AS IS" basis, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.
 -->
 
 # End-to-end tests

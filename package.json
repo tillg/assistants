@@ -13,7 +13,7 @@
     "household"
   ],
   "author": "Till Gartner",
-  "license": "(EUPL-1.2 OR LicenseRef-commercial)",
+  "license": "EUPL-1.2",
   "scripts": {
     "prepack": "cat .gitignore >> .npmignore;"
   }

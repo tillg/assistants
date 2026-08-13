@@ -1,47 +1,50 @@
 LICENSE
-SPDX-License-Identifier: EUPL-1.2 OR LicenseRef-commercial
+SPDX-License-Identifier: EUPL-1.2
 
-mgm A12 Platform - https://www.mgm-tp.com
-Copyright (c) 2012-2026 mgm technology partners GmbH
+Assistants - https://github.com/tillg/assistants
+Copyright (c) 2026 Till Gartner
 
-This software is developed by mgm technology partners GmbH and
-is available under a choice of two different licenses:
+Assistants is licensed under the European Union Public Licence, version 1.2
+("EUPL"). You may not use this work except in compliance with the Licence.
 
-1. Open-Source License - EUPL v1.2
-   You may redistribute and/or modify this software under the
-   terms of the European Union Public Licence, version 1.2.
-   The license text is available at https://eupl.eu/
-   and included in this distribution as:
-       licenses/EUPL-1.2.txt
+The full licence text is available at https://eupl.eu/ and is included in this
+distribution as:
+    licenses/EUPL-1.2.txt
 
-2. Commercial License
-   Alternatively, you may obtain a commercial license from
-   mgm technology partners GmbH, that permits use of this
-   software under different terms (including support and
-   maintenance options). For commercial licensing, please contact:
-       a12-license@mgm-tp.com
+The EUPL is published by the European Commission in all official languages of
+the European Union; all language versions are equally valid.
 
-You must select and comply with exactly one of the above
-licensing options.
+Portions of this work
+---------------------
+Parts of this repository derive from the mgm A12 project template,
+Copyright (c) 2012-2026 mgm technology partners GmbH, which mgm licenses under
+a choice of EUPL-1.2 or a commercial licence. Assistants takes the EUPL-1.2
+option. Files carrying mgm's copyright notice retain it. The commercial option
+remains available from mgm (a12-license@mgm-tp.com) for mgm's own work; it is
+not offered for Assistants.
+
+Assistants builds on the mgm A12 Platform, which it consumes as an unmodified
+dependency under the same EUPL-1.2 option.
 
 Third-Party Components
 ----------------------
-This software includes third-party components.
-Their licenses are provided in:
-   THIRD_PARTY_NOTICES
-   licenses/   (folder with full license texts)
+This work includes and depends on third-party components. Their licences are
+provided in:
+    THIRD_PARTY_NOTICES
+    licenses/   (folder with full licence texts)
 
 Trademarks
 ----------
-"mgm A12" is a registered trademark of mgm technology partners GmbH.
-The A12 logo is protected by copyright.
+"mgm A12" is a registered trademark of mgm technology partners GmbH. Assistants
+is an independent personal project. It is not affiliated with, endorsed by, or
+supported by mgm technology partners GmbH.
 
-Warranty Disclaimer (applies to either option)
-----------------------------------------------
-THIS SOFTWARE IS PROVIDED "AS IS" AND WITHOUT WARRANTY OF ANY KIND,
-WHETHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
-OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT,
+Warranty Disclaimer
+-------------------
+THIS SOFTWARE IS PROVIDED "AS IS" AND WITHOUT WARRANTY OF ANY KIND, WHETHER
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT,
 EXCEPT WHERE SUCH DISCLAIMERS ARE NOT PERMITTED BY APPLICABLE LAW.
-SEE THE RESPECTIVE LICENSE TEXT FOR DETAILS.
+SEE THE LICENCE TEXT FOR DETAILS.
 
 End of LICENSE.

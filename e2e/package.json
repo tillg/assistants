@@ -1,8 +1,8 @@
 {
   "name": "@com.mgmtp.assistants/e2e",
   "description": "End to end test for Assistants",
-  "author": "mgm technology partners",
-  "license": "(EUPL-1.2 OR LicenseRef-commercial)",
+  "author": "Till Gartner",
+  "license": "EUPL-1.2",
   "private": true,
   "type": "module",
   "scripts": {

@@ -1,15 +1,23 @@
 THIRD_PARTY_NOTICES
 
-Component: A12 Project Template with local-auth
-Generated: 2026-08-04 for mgm A12 Platform 2026.06
+Assistants - https://github.com/tillg/assistants
+Copyright (c) 2026 Till Gartner, licensed under EUPL-1.2 (see LICENSE).
 
-The mgm A12 Platform is developed by mgm technology partners GmbH.
+This file lists third-party software distributed with, or depended upon by,
+Assistants, and the licenses that apply to them.
 
-https://www.mgm-tp.com.
+Primary dependency
+------------------
 
-This file lists third-party software components included in this
-distribution of the mgm A12 Platform and the licenses that apply
-to them.
+mgm A12 Platform 2026.06 - https://www.mgm-tp.com
+Copyright (c) 2012-2026 mgm technology partners GmbH
+Developed by mgm technology partners GmbH.
+Licensed as EUPL-1.2 or commercial; used here under the EUPL-1.2 option.
+Consumed as an unmodified dependency. Parts of this repository's scaffolding
+derive from the A12 project template (local-auth variant).
+
+The component list below was generated on 2026-08-04 for the A12 Project
+Template with local-auth, mgm A12 Platform 2026.06.
 
 Component Overview
 -------------------

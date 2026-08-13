@@ -4,8 +4,8 @@
   "publishConfig": {
     "registry": "<YOUR_CLIENT_PUBLISH_CONFIG_REGISTRY>"
   },
-  "author": "mgm technology partners",
-  "license": "(EUPL-1.2 OR LicenseRef-commercial)",
+  "author": "Till Gartner",
+  "license": "EUPL-1.2",
   "private": true,
   "scripts": {
     "clean": "rimraf build node_modules",
