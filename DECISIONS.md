@@ -948,3 +948,53 @@ together. `Enabled` sits in the identity row beside `Key` and `Name`, because `M
 `RequiresApproval` had to be a two-cell row of their own (architecture.md requires them adjacent).
 
 **Reversal cost**: Trivial.
+
+## D-027 — ⚠ The `Tools` → `Grants` rename needs a real migration, and the artefacts said it did not
+
+*Diagnosed and fixed 2026-08-13 23:20–23:30 CEST.*
+
+**What the artefacts claimed.** `specs/changes/operations-as-things/architecture.md` was explicit
+that renaming the A12 group was free in this repo:
+
+> the stored Assistant documents hold a `Tools` group, the new Model reads `Grants`, and
+> `fromDocument` will find nothing, so an Assistant's grants read as empty until bootstrap re-seeds
+> them. In *this* repo the cost is zero.
+
+`plan.md`'s phase B repeated it as *"the expected, recoverable state … not a bug to chase"*.
+
+**What actually happens.** A12 does not ignore a group it cannot find — it **fails the document's
+validation**, and it does so inside the query re-index the server runs at startup:
+
+```
+Batch indexing failed (rolled back the batch, interrupting). model=Assistant_DM, batchSize=2
+The validation of document with document reference 'Assistant_DM/75db…' failed.
+For the entity instance 'Assistant/Tools', the corresponding entity was not found in the
+corresponding document model.
+```
+
+The batch failure aborts startup. The server never came up: **34 restarts** before I caught it. The
+blast radius is the entire stack — server, and therefore the Runtime and the web application — not
+one Assistant's empty grant list. `just wait` reported *"the stack did not come up in time"*, which
+is what surfaced it.
+
+**Decided**: ship the migration the change needs, as
+`import/migrations/2026-08-13-assistant-tools-to-grants.sql`. It rewrites the stored group in place
+— `Assistant.Tools` → `Assistant.Grants`, `ToolOperation` → `OperationKey` — is idempotent (its
+`WHERE` clause matches only documents still carrying the old group), and preserves `__meta.creator`
+and `__meta.createdAt`. Applied to both stored Assistants; the server then started clean
+(`restarts=0`, health `UP`) and `just bootstrap` reported `updated: [receptionist, accountant]`.
+
+**Why in place rather than delete-and-re-bootstrap**: deleting the two documents would also have
+worked *here*, and only here — precisely because there are no hand-edited Assistants, which is the
+assumption the original claim leaned on. A rename is the migration a repo with hand-edited
+Assistants would actually need, and it costs the same to write.
+
+**Alternative**: `just clean`. Rejected — it drops the Postgres volume, taking the Things and the
+books with it, to avoid writing twelve lines of SQL.
+
+**Reversal cost**: Low. The inverse SQL is the same statement with the two names swapped.
+
+**Artefact corrected**: architecture.md's *"the cost is zero"* paragraph now says what happens
+instead and points at the migration file. This is the one place in this session where an artefact
+asserted something about A12's behaviour that turned out to be false rather than merely unspecified,
+so it is worth reading the corrected paragraph rather than trusting the old one from memory.

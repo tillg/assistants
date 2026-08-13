@@ -60,10 +60,13 @@ Atomic, and before any new code leans on either vocabulary. A half-rename is wha
   **stored data** — renaming them makes every existing Conversation unreadable to `buildMessages`.
   `runtime/fixtures/llm-script.json` uses the wire spelling and needs no change.
 - [x] `just test-runtime` — green on the rename alone, before any behaviour changes.
-- [x] `just build && just up && just bootstrap`, then open an Assistant in the web application and
-  confirm the granted Operations are listed under the renamed section. Until bootstrap runs, the
-  stored `Tools` group is unreadable and grants are empty — the expected, recoverable state described
-  in [architecture.md](architecture.md), not a bug to chase.
+- [x] `just build && just up`, then **run the migration** —
+  `import/migrations/2026-08-13-assistant-tools-to-grants.sql` — and restart the server. Without it
+  the server crash-loops rather than starting with empty grants: A12 fails validation on a stored
+  group the model no longer declares, and the failure aborts the startup re-index. See
+  [architecture.md](architecture.md).
+- [x] `just bootstrap`, then open an Assistant in the web application and confirm the granted
+  Operations are listed under the renamed section.
 
 ## C — Types and the repository
 

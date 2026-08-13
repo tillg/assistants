@@ -370,14 +370,29 @@ docs | `CONTEXT.md`, `specs/system/{domain,architecture,functional}.md`, `README
 No new bootstrap file: an Implementation's `seed` lives beside the code it describes, in
 `implementations.ts`, because a seed in a second file is a seed that drifts from its `execute`.
 
-**`Assistant_DM` is in the list, and in principle that is a migration.** A12 has no column rename: the
-stored Assistant documents hold a `Tools` group, the new Model reads `Grants`, and `fromDocument` will
-find nothing, so an Assistant's grants read as empty until bootstrap re-seeds them. In *this* repo the
-cost is zero and it is worth saying so rather than hedging: the only grant lists that exist are the
-two `AssistantSeed` arrays in `runtime/src/bootstrap/assistants.ts`, which are re-applied in full by
-every `just bootstrap`, and `just dev` runs bootstrap. What would *not* be recoverable is a grant
-added by hand in the web application and never written into a seed. There are none today; a future
-reader with hand-edited Assistants should write them down before running this migration.
+**`Assistant_DM` is in the list, and that is a migration — a load-bearing one.** A12 has no column
+rename, and it does **not** quietly ignore a stored group the model no longer declares. It fails the
+document's validation, inside the query re-index the server runs at startup:
+
+```
+Batch indexing failed (rolled back the batch, interrupting). model=Assistant_DM, batchSize=2
+The validation of document with document reference 'Assistant_DM/75db…' failed.
+For the entity instance 'Assistant/Tools', the corresponding entity was not found in the
+corresponding document model.
+```
+
+The batch failure aborts startup, so **the server never comes up**. An earlier draft of this
+document predicted that grants would merely "read as empty until bootstrap re-seeds them" and that
+the cost here was zero; that was measured and is wrong — the blast radius is the whole stack, and it
+presents as a crash loop rather than as a missing field. `fromDocument` never gets the chance to find
+nothing.
+
+So the change ships `import/migrations/2026-08-13-assistant-tools-to-grants.sql`, which renames the
+group in place — `Assistant.Tools` → `Assistant.Grants`, `ToolOperation` → `OperationKey` — and is
+idempotent. Run it after the new model is imported; if the server is already crash-looping, run it
+and restart the server. Renaming rather than deleting the documents keeps `__meta.creator` and
+`__meta.createdAt`, and is the migration a repo with hand-edited Assistants would actually need —
+delete-and-re-bootstrap is lossless only under the assumption this paragraph used to make.
 
 ## Failure modes
 
