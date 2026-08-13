@@ -157,6 +157,35 @@
               },
               {
                 "type": "Field",
+                "id": "f_scheduledFor",
+                "name": "ScheduledFor",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 40
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Scheduled for"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Geplant für"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
                 "id": "f_status",
                 "name": "Status",
                 "annotations": [
@@ -775,6 +804,100 @@
                           {
                             "locale": "de",
                             "text": "Idempotenzschlüssel"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "Field",
+                      "id": "f_entry_questionId",
+                      "name": "QuestionId",
+                      "Field": {
+                        "fieldType": {
+                          "type": "StringType",
+                          "StringType": {
+                            "maxLength": 200
+                          }
+                        },
+                        "label": [
+                          {
+                            "locale": "en",
+                            "text": "Question"
+                          },
+                          {
+                            "locale": "de",
+                            "text": "Frage"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "Field",
+                      "id": "f_entry_argsHash",
+                      "name": "ArgsHash",
+                      "Field": {
+                        "fieldType": {
+                          "type": "StringType",
+                          "StringType": {
+                            "maxLength": 80
+                          }
+                        },
+                        "label": [
+                          {
+                            "locale": "en",
+                            "text": "Arguments hash"
+                          },
+                          {
+                            "locale": "de",
+                            "text": "Argument-Hash"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "Field",
+                      "id": "f_entry_promptTokens",
+                      "name": "PromptTokens",
+                      "Field": {
+                        "fieldType": {
+                          "type": "NumberType",
+                          "NumberType": {
+                            "minFractionalDigits": 0,
+                            "maxFractionalDigits": 0
+                          }
+                        },
+                        "label": [
+                          {
+                            "locale": "en",
+                            "text": "Prompt tokens"
+                          },
+                          {
+                            "locale": "de",
+                            "text": "Prompt-Tokens"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "Field",
+                      "id": "f_entry_completionTokens",
+                      "name": "CompletionTokens",
+                      "Field": {
+                        "fieldType": {
+                          "type": "NumberType",
+                          "NumberType": {
+                            "minFractionalDigits": 0,
+                            "maxFractionalDigits": 0
+                          }
+                        },
+                        "label": [
+                          {
+                            "locale": "en",
+                            "text": "Completion tokens"
+                          },
+                          {
+                            "locale": "de",
+                            "text": "Completion-Tokens"
                           }
                         ]
                       }

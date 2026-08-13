@@ -34,7 +34,8 @@ The terms below are the ones the models, the code and the documents all share. D
 | **Authority** | The one system that owns the truth for a given fact. No fact has two |
 | **Assistant** | An LLM-driven actor. Itself a Thing; a template, whose runs are Conversations |
 | **Conversation** | One run of one Assistant. Append-only list of Entries. A Thing |
-| **Turn** | One LLM response plus the tool calls it asked for. The unit of progress and of cost |
+| **Turn** | One LLM response plus the tool calls it asked for. The unit of progress and of cost — and it now carries what the model charged for it |
+| **Approval** | A property of an Operation: it either requires one or does not, and the Runtime refuses the call when it is missing |
 | **Entry** | One appended item in a Conversation's history |
 | **Finish Reason** | Why the LLM stopped: `answered`, `wants-tools`, `length`, `limit`, `error` |
 | **Trigger** | An event that gives *birth* to a Conversation. A response that continues one is not a Trigger |
@@ -55,7 +56,10 @@ Two distinctions are load-bearing and easy to lose:
 
 - A **Schedule** is a Trigger configured on an Assistant and births a Conversation where none
   exists. A **wakeAt** is state on a Conversation that already exists. Configuration on a
-  template versus state on an instance.
+  template versus state on an instance. A Schedule is a standing instruction about the current state
+  of the world, not an event log: missed slots are caught up **once**, never once per slot, and a
+  slot is skipped entirely while the previous one is unfinished — so a Schedule **stalls rather than
+  accumulates** (ADR-0016).
 - A **Trigger** gives birth; a **response** continues. The User answering, a Manual Connector
   reporting back and one Assistant returning to another are all the second kind.
 
@@ -91,7 +95,7 @@ is its Authority. The Invoice holds no reference to it at all — see the rules 
 | `Invoice` | ThingStore *(document facts only)* | The extracted invoice: issuer, number, dates, amounts, subject |
 | `Process` | ThingStore | The routing slip — a title, a status, an append-only list of steps. Passive |
 | `Assistant` | ThingStore | An Assistant's definition: key, prompts, Skills, Triggers, granted Tools |
-| `Conversation` | ThingStore | One run of one Assistant: status, what it waits on, turn count, entries |
+| `Conversation` | ThingStore | One run of one Assistant: status, what it waits on, turn count, entries — and either the subject Thing or the `scheduledFor` instant that gave birth to it |
 | `OpenQuestion` | ThingStore | A question put to the User and the User's answer |
 | `RuntimeState` | ThingStore | A singleton: watermark, pause flag, births-per-hour counter, heartbeat |
 
@@ -181,12 +185,17 @@ sequenceDiagram
     U->>TS: answers the Open Question
     RT->>TS: scan 2 — answered
     RT->>A: continue the same Conversation
-    A->>BK: postTransaction (keyed, idempotent)
+    A->>RT: postTransaction
+    Note over RT: An Operation requiring an approval refuses<br/>a call the Runtime did not ask about (ADR-0018).
+    RT->>TS: raise the approval question, bound to these arguments
+    U->>TS: confirms the exact posting
+    RT->>A: scan 2 — continue again
+    A->>BK: postTransaction (keyed, idempotent, approved)
     A->>TS: append a step to the Process
     RT->>R: scan 5 — deliver the child's result to the parent
 ```
 
-The pause in the middle is the point of the whole design. Nothing holds it — no process, no
+Each pause is the point of the whole design. Nothing holds one — no process, no
 timer, no in-memory promise. The Conversation is `waiting`, `waitingFor = user`, and its
 `currentQuestionId` names the Open Question. A restart at that instant changes nothing.
 
@@ -198,7 +207,8 @@ One mechanism covers what look like three (ADR-0005):
 |---|---|
 | A Thing materialised matching an Assistant's `thing-materialised` Trigger | **birth** |
 | An Assistant called another with `assistant.call` | **birth** of the callee, **suspension** of the caller |
-| The User answered an Open Question | **continuation** |
+| A `schedule` Trigger's latest due instant has no Conversation yet | **birth**, carrying that instant as `scheduledFor` |
+| The User answered an Open Question — including an approval | **continuation** |
 | A Manual Connector's `perform` question was answered | **continuation** |
 | A `wakeAt` passed with no answer | **continuation** |
 | A child Conversation finished and its result is owed to its parent | **continuation** of the parent |
@@ -258,6 +268,44 @@ No Operation may be both mutating and unkeyed. Where the Authority offers no uni
 keyed idempotency is achieved by **search-then-act**. This is what separates a bug from a lost
 €184.30 when the Runtime dies between a 200 and a write.
 
+### An Operation that requires an approval cannot execute without one (ADR-0018)
+
+The check is on the **Operation**, evaluated by the Runtime, in the same place the intent is written.
+Three consequences follow from putting it there rather than in a prompt:
+
+- An Assistant cannot talk its way past it, because it is not asked.
+- It composes with the pending path: a missing approval is not an error, it is an Operation that
+  cannot complete *yet* — so the Conversation suspends and the question is raised, which is the path
+  the loop already has. It goes through `raiseQuestion` and never through `escalate()`: a missing
+  approval is the ordinary path, not a stuck Conversation.
+- Reading an Operation tells you whether it needs an answer, the same way reading an Assistant tells
+  you what it may reach (ADR-0010).
+
+**Only the Runtime can raise an approval, and it approves exact arguments.** An Assistant asking
+*"shall I book this?"* of its own accord is good manners and nothing more — a question the Assistant
+composed is a question the Assistant could have composed differently, so a yes to *"file this under
+Renovation?"* must not authorise a booking of any amount. The approval is bound to the Operation
+**and** to the canonical hash of the arguments the call was made with.
+
+**An approval belongs to a Conversation and is consumed by the call it approves.** Not an approval of
+the Invoice, and not a standing approval of the Assistant — so no `approved` field appears on any
+Thing and ADR-0006 stays intact. A second Conversation about the same Invoice asks again, which is
+correct: it is a different piece of work. Two identical bookings need two approvals, or one yes would
+place the same transaction twice under two idempotency keys (ADR-0012).
+
+**A no is an answer, not a missing yes.** A declined approval is terminal for that Operation with
+those arguments in that Conversation: the Assistant is told plainly, as an ordinary tool error it can
+act on, and is not asked again. Anything short of an explicit yes counts as a no, because `isAnswered`
+is deliberately generous and a User who typed a sentence without ticking the box has answered.
+Re-asking a User who has said no is how a safety feature becomes a thing people click through.
+
+### Nothing needs to be said when there was nothing to do
+
+A scheduled Conversation that finds no work finishes with a short result and no Open Question.
+ADR-0015 requires noise when something *failed*, and nothing failed. The Conversation itself is the
+record that the slot was served — which is also the answer to "how do I know it ran": `scheduledFor`
+is indexed, so it is one query rather than a second store.
+
 ### Nothing ends silently (ADR-0015)
 
 `failed` must never be somewhere a Conversation *falls*. Terminal failure sets `waiting` and
@@ -294,5 +342,21 @@ Recorded rather than hidden:
 - **Parties have no proper Authority.** CONTEXT.md assigns people to an address book. There is no
   address book External System, so the ThingStore holds them provisionally — a small violation of
   ADR-0006's spirit, to be reversed the day a Connector exists (ADR-0013).
-- **`schedule` is vocabulary, not behaviour.** `TriggerKind` admits `schedule` and `Assistant_DM`
-  carries a `cron` field, but no watcher scan fires one. A Schedule Trigger is currently inert.
+- **The recorded cost of a Conversation is a lower bound, not its cost.** A Turn carries what the
+  model charged for it, and a Turn that *errored* carries nothing: usage exists only where a provider
+  returned a response, and both the thrown-transient path and `finishReason: "error"` return none. So
+  the Turns of a Conversation sum to at least what it cost. Chasing usage onto the error paths would
+  buy precision nobody will spend; saying so costs nothing.
+- **A booking costs a round trip, always.** An Operation that requires an approval refuses its first
+  call even when the Assistant asked the User politely of its own accord, because a question the
+  Assistant composed cannot be the thing that constrains the Assistant (ADR-0018). The Assistant is
+  then asked on its own behalf and must re-issue the identical call. One extra Turn per first booking,
+  accepted deliberately.
+- **An approval can be missed by argument drift.** Nothing forces the model to re-issue *identical*
+  arguments after the yes. A drifted call misses its approval and the User is asked a second,
+  near-identical question. Visible and safe — a second question, never a wrong booking — but it will
+  be seen.
+- **Batching is a correctness property of a Skill's prose**, which is not where anyone looks for one.
+  A scheduled Skill that asks about three findings one at a time stalls its own schedule on the
+  first, because of the skip rule. The failure mode is quiet in exactly the wrong way: with nothing
+  to report the schedule looks perfect, and it misbehaves the first time it finds two things.

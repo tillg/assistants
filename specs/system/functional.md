@@ -30,6 +30,19 @@ Opening a row shows the question and an answer control decided by its **kind**:
 email, move money, paste in a document's text — and what a terminal failure raises to report an
 error. It is not a special mechanism; it is the same Open Question with a different prompt.
 
+An **approval** is not a kind either. When an Assistant calls an Operation that requires one —
+`bookkeeping.postTransaction`, and nothing else today — the Runtime refuses the call and raises an
+ordinary `confirm` question, opening *"**Approval needed.**"* and rendering the exact posting as a
+sentence: *"Book €96.50 from Payables to Expenses:Health, dated 2026-08-01, for …?"* Saying yes is
+the whole of the interaction; nothing is booked until you do (ADR-0018). Two things about it are
+worth knowing:
+
+- **The Assistant's own polite question does not count.** It will often ask first, because its prompt
+  tells it to. That question authorises nothing, so a booking usually costs two answers — the
+  Assistant's, and the Runtime's.
+- **Answer it with the tick, not only with words.** Anything short of an explicit yes is read as a no,
+  and a no is final for that exact posting.
+
 Saving the form is the whole of the interaction. There is no button that calls the Runtime and
 nothing in the web application that knows the Runtime exists — the Runtime notices the answer on
 its next scan, within about two seconds.
@@ -62,11 +75,33 @@ Note that `just bootstrap` **reconciles**: it re-applies the two seeded Assistan
 every run, so a prompt edited in the web application is overwritten the next time it runs. To keep
 an edit, change the seed in `runtime/src/bootstrap/assistants.ts`.
 
+### Giving an Assistant a schedule
+
+An Assistant's `triggers[]` may carry a `schedule` row with a `cron` expression, read in
+`SCHEDULE_TIMEZONE` (default `Europe/Berlin`). The seeded **Accountant** has one — `0 7 * * *` — so
+it looks at what is outstanding each morning without anybody asking it to.
+
+What to expect from one, because none of it is obvious:
+
+- **It fires immediately.** A cron has no start date, so a schedule added this afternoon finds this
+  morning's slot already past and runs on the next scan.
+- **A missed run is caught up once.** Three days of downtime produce one Conversation, about today.
+  A Schedule is a standing instruction about the current state of the world, not a backlog.
+- **A run that finds nothing is silent**, and that silent Conversation is the record that the slot
+  was served. `scheduledFor` is a column on the Conversations overview, so *"did Monday's run
+  happen?"* is one search.
+- **An unanswered question stops the schedule** until it is answered. That is why a scheduled Skill
+  must gather everything and ask **once**.
+
 ### Watching an Assistant work
 
-- The **Conversations** module shows every run: which Assistant, what it is about, its status,
-  what it is waiting for, its turn count, and its `entries[]` — the full transcript, as a
-  read-only inline repeat. It is readable, but it is a data grid, not a transcript view.
+- The **Conversations** module shows every run: which Assistant, what it is about — or which
+  `scheduledFor` instant it was born to serve — its status, what it is waiting for, its turn count,
+  and its `entries[]`: the full transcript, as a read-only inline repeat. It is readable, but it is a
+  data grid, not a transcript view.
+- Each Entry carries what the Turn that wrote it cost, as prompt and completion tokens, on the first
+  Entry that Turn wrote. Nothing adds them up — the transcript is the record, and a Turn that errored
+  records nothing, so the total is a lower bound.
 - `just logs runtime` is the better debugging surface.
 - The **Runtime** module shows the singleton: the watermark, the pause flag, the births-per-hour
   counter, the heartbeat and the last error.
@@ -117,14 +152,20 @@ sequenceDiagram
     UI->>TS: answeredAt + confirmed saved
     RT->>TS: scan 2 — answered
     RT->>A: continue the same Conversation
+    A->>RT: postTransaction
+    Note over RT: the Assistant's own question authorises nothing.<br/>Refused before Firefly is reached (ADR-0018).
+    RT->>TS: raise the approval question — "Book €96.50 from …?"
+    U->>UI: confirms the exact posting
+    RT->>A: scan 2 — continue again
     A->>BK: postTransaction, keyed and tagged thing:<id>
     A->>TS: append a step to the Process; finish
     RT->>R: scan 5 — deliver the result to the parent
     U->>BK: sees the transaction in the books
 ```
 
-What the User actually does in this journey is two things: put a Document in, and answer one
-question. Everything between is unattended.
+What the User actually does in this journey is three things: put a Document in, and answer two
+questions — the Assistant's, and the Runtime's. Everything between is unattended. The second answer
+is the one that books: the first is the Assistant being polite, and being polite authorises nothing.
 
 ### Surviving a restart mid-question
 
@@ -170,6 +211,7 @@ is stale, and `just ps` shows it.
 | An **Assistant definition** | Editing the Assistant form, or the seed file | Markdown prompts and Skills |
 | **Demo data** | `just demo-data` | Parties, processes, documents, invoices, and matching Firefly books |
 | **LLM configuration** | `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_BASE_URL` | `scripted` by default; costs nothing and needs no key |
+| A **schedule** | A `cron` on an Assistant's `schedule` Trigger | Read in `SCHEDULE_TIMEZONE`, default `Europe/Berlin`. One timezone for the whole system |
 
 ### Out
 
@@ -190,7 +232,7 @@ LLM API.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> running: Trigger — a Thing materialised,<br/>or assistant.call
+    [*] --> running: Trigger — a Thing materialised,<br/>assistant.call, or a schedule slot fell due
     running --> running: a Turn completes,<br/>the model wants more tools
     running --> waiting: a Tool returns pending
     waiting --> running: the answer arrives,<br/>wakeAt passes,<br/>or a child result is delivered
@@ -297,10 +339,16 @@ This is one running vertical slice, not a finished system.
 
 **Gaps**
 
-- **A `schedule` Trigger does nothing.** `TriggerKind` admits `schedule` and `Assistant_DM`
-  carries `cron`, but no watcher scan fires one.
 - **Parties have no proper Authority.** The ThingStore holds them provisionally, pending an
   address book Connector (ADR-0013).
+- **A schedule stalls on an unanswered question.** A slot is skipped entirely while the previous one
+  is unfinished (ADR-0016), so one question nobody answers holds every later firing. That is
+  deliberate — two live Conversations for one recurring errand would be two questions the User cannot
+  tell apart — and it is a log warning rather than a second question about the first. The fix is to
+  answer it.
+- **Nothing aggregates what a Conversation cost.** A Turn carries what the model charged for it and
+  the transcript is where you read it. No dashboard, no billing, no second store — and the sum is a
+  lower bound, because a Turn that errored records nothing.
 - **`updatedAt` records the last Runtime write only.** A save from the web application moves only
   `__meta.modifiedAt`, because the machine fields are on no form and A12's form engine offers no
   save hook that could reach one.

@@ -6,8 +6,10 @@
  * ThingStore — which is also the only Authority for pending work (ADR-0004), so there is nothing
  * else it *could* scan.
  *
- * Six scans. Birth is exactly-once by query rather than by timing: a Thing does not birth a
- * Conversation if one already exists for `(assistantKey, subjectThingId)`.
+ * Seven scans. Birth is exactly-once by query rather than by timing: a Thing does not birth a
+ * Conversation if one already exists for `(assistantKey, subjectThingId)` — and a Schedule, which has
+ * no subject Thing to ask about, does not birth one if one already exists for
+ * `(assistantKey, scheduledFor)` (ADR-0016).
  */
 
 import { log, describeError } from "../log.js";
@@ -38,16 +40,21 @@ import {
     type ThingModel,
 } from "../domain/types.js";
 import { appendEntry, LoopDriver } from "../loop/advance.js";
+import { describeInstant, latestDueInstantBefore } from "./schedule.js";
 
 export interface WatcherDeps {
     things: ThingRepository;
     driver: LoopDriver;
     maxBirthsPerHour: number;
+    /** The timezone every `cron` is read in (ADR-0016). */
+    scheduleTimezone: string;
     /** Create a Conversation for an Assistant, about a Thing. Returns its docRef. */
     birth(input: {
         assistant: Stored<Assistant>;
         subjectThingId?: string;
         subjectModel?: string;
+        /** The due instant a scheduled Conversation serves. Exactly one of this and the subject is set. */
+        scheduledFor?: string;
         prompt: string;
         title: string;
         parentConversationId?: string;
@@ -71,6 +78,15 @@ const PAGE_SIZE = 100;
  */
 const FROZEN_FRONTIER_WARN_AFTER_MS = 5 * 60_000;
 
+/**
+ * How long a Schedule may be held by an unfinished run before it is worth saying so.
+ *
+ * Longer than the frontier warning, because a held schedule is more ordinary and less urgent: the
+ * question holding it is already in the User's inbox, and answering it is the fix. Half an hour is
+ * long enough that an approval answered over a cup of coffee never produces a line.
+ */
+const STALLED_SCHEDULE_WARN_AFTER_MS = 30 * 60_000;
+
 export interface ScanReport {
     births: number;
     continuations: number;
@@ -89,6 +105,15 @@ export class Watcher {
     private readonly frozenFrontiers = new Map<
         string,
         { at: string; since: number; warned: boolean }
+    >();
+
+    /** Assistants whose `cron` could not be read, so the complaint is made once per process. */
+    private readonly badCrons = new Set<string>();
+
+    /** Per Assistant: the slot its schedule is held at, and whether that has been reported. */
+    private readonly stalledSlots = new Map<
+        string,
+        { scheduledFor: string; since: number; warned: boolean }
     >();
 
     /** One pass. Returns what it did, so the caller can log and stamp the heartbeat. */
@@ -122,6 +147,8 @@ export class Watcher {
         report.continuations += await this.scanResultDelivery(handled);
         // Scan 6 — running Conversations that simply need their next Turn
         report.continuations += await this.scanRunnable(handled, enabledKeys);
+        // Scan 7 — a Schedule whose due instant has passed and has not been served
+        report.births += await this.scanScheduled(state, assistants);
 
         await this.stampHeartbeat(state);
         return report;
@@ -466,6 +493,11 @@ export class Watcher {
                 role: "user",
                 kind: "answer",
                 text: renderAnswer(question.data),
+                // Every answer carries the id of the question it answers, not only the ones that
+                // matter to something. The approval walk-back reads it, and the alternative is a
+                // scan that has to know which questions are approvals — which is the same coupling
+                // in the more fragile direction.
+                questionId,
             });
             conversation.data.waitingFor = "";
             conversation.data.currentQuestionId = "";
@@ -694,6 +726,139 @@ export class Watcher {
         return turns;
     }
 
+    // ---------------------------------------------------------------- scan 7: schedules
+
+    /**
+     * The only scan whose input is **configuration rather than the store** (ADR-0016).
+     *
+     * It reads `cron` off each enabled Assistant's `schedule` Triggers, resolves the most recent due
+     * instant, and births a Conversation for it unless one already exists. Three properties fall out
+     * of only ever evaluating the *latest* instant, rather than out of extra code here:
+     *
+     *   - **exactly once**, across a re-scan, a restart and a replayed watermark, because
+     *     `(assistantKey, scheduledFor)` is recomputed identically every time;
+     *   - **catch-up once**, because three missed slots have one latest instant between them;
+     *   - **no watermark**, which is the whole point — a mark written *after* the work is the thing
+     *     ADR-0012 exists to avoid, and a schedule that chased an insurer would chase them twice.
+     *
+     * It runs last so that its `birthsThisHour` increment is persisted by the heartbeat write that
+     * immediately follows, rather than needing a store write of its own.
+     */
+    private async scanScheduled(
+        state: Stored<RuntimeState>,
+        assistants: Stored<Assistant>[],
+    ): Promise<number> {
+        const now = new Date();
+        let births = 0;
+
+        for (const assistant of assistants) {
+            const key = assistant.data.key ?? "";
+            for (const trigger of assistant.data.triggers ?? []) {
+                if (trigger.kind !== "schedule") continue;
+                const cron = trigger.cron?.trim();
+                if (!cron) {
+                    this.noteBadCron(key, "its schedule Trigger carries no cron expression");
+                    continue;
+                }
+
+                let due: string | undefined;
+                try {
+                    due = latestDueInstantBefore(now, cron, this.deps.scheduleTimezone);
+                } catch (error) {
+                    // A configuration error on a Thing the User owns. Logged and skipped — it does
+                    // NOT disable the Assistant: nothing in this change disables an Assistant, and a
+                    // Schedule cannot run away, so there is no runaway to bound.
+                    this.noteBadCron(key, describeError(error));
+                    continue;
+                }
+                if (due === undefined) continue; // not yet due — one comparison, no query
+
+                // Already served: one comparison and one query, and no budget consulted. The budget
+                // check comes *after* this deliberately — ADR-0016 promises a served slot costs
+                // nothing, and checking first meant an exhausted hour logged a warning on every scan
+                // about a birth that was never going to happen.
+                if (await this.scheduledConversationExists(key, due)) {
+                    this.stalledSlots.delete(key);
+                    continue;
+                }
+                // The skip rule: two live Conversations for one recurring errand produce two Open
+                // Questions the User cannot tell apart. So a Schedule stalls rather than accumulates,
+                // and the stall already has the unanswered question that caused it in the inbox.
+                if (await this.anyUnfinishedScheduledConversation(key)) {
+                    this.noteStalledSchedule(key, due);
+                    continue;
+                }
+                this.stalledSlots.delete(key);
+
+                if (!this.withinBirthBudget(state)) {
+                    log.warn("birth budget for this hour is exhausted; a due schedule was not served", {
+                        assistant: key,
+                        scheduledFor: due,
+                    });
+                    return births;
+                }
+
+                await this.deps.birth({
+                    assistant,
+                    scheduledFor: due,
+                    // The wall clock here too, for the same reason the prompt uses it: this is the
+                    // line a human reads in the Conversations list. The UTC instant is one column
+                    // over, where a machine identity belongs.
+                    title: `${assistant.data.name ?? key}: scheduled ${describeInstant(due, this.deps.scheduleTimezone)}`,
+                    prompt: scheduledPrompt(due, this.deps.scheduleTimezone),
+                    idempotencyKey: `birth:${key}:${due}`,
+                });
+                births += 1;
+                state.data.birthsThisHour = (state.data.birthsThisHour ?? 0) + 1;
+                log.info("a scheduled conversation was born", { assistant: key, scheduledFor: due });
+            }
+        }
+        return births;
+    }
+
+    /**
+     * Say once that a Schedule is stalled, not once every two seconds.
+     *
+     * The stall is the designed, healthy behaviour of the skip rule, and after ADR-0018 it is the
+     * *common* case: the Accountant waits on an approval at least once per booking. Warning on every
+     * scan would be 30 lines a minute about a system working as intended, and an operator who is
+     * warned about healthy behaviour stops reading the warnings — which is the argument
+     * {@link noteFrozenFrontier} already makes about the watermark, and the shape ADR-0016 asked for
+     * when it said repeated skipping should be warned about "the way a pinned watermark is".
+     *
+     * In memory, so a restart re-arms it: a stall that survives a restart is worth hearing again.
+     */
+    private noteStalledSchedule(assistantKey: string, scheduledFor: string): void {
+        const previous = this.stalledSlots.get(assistantKey);
+        if (previous?.scheduledFor !== scheduledFor) {
+            this.stalledSlots.set(assistantKey, { scheduledFor, since: Date.now(), warned: false });
+            return;
+        }
+        if (previous.warned || Date.now() - previous.since < STALLED_SCHEDULE_WARN_AFTER_MS) return;
+        previous.warned = true;
+        log.warn(
+            `the "${assistantKey}" schedule has been held for ${Math.round((Date.now() - previous.since) / 60_000)} ` +
+                `minutes because an earlier run is unfinished; answer its Open Question to let it run again`,
+            { assistant: assistantKey, scheduledFor },
+        );
+    }
+
+    /**
+     * Say once per process that an Assistant's cron cannot be read.
+     *
+     * In memory, so a restart says it again — which is the right way round for a genuine
+     * misconfiguration, and persisting it would put a logging detail in the store.
+     */
+    private noteBadCron(assistantKey: string, reason: string): void {
+        if (this.badCrons.has(assistantKey)) return;
+        this.badCrons.add(assistantKey);
+        log.error(
+            `the "${assistantKey}" assistant has a schedule that cannot be read, so it will never ` +
+                `fire; fix the cron expression on the Assistant`,
+            { assistant: assistantKey, reason },
+        );
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private async runTurn(docRef: string): Promise<void> {
@@ -710,6 +875,43 @@ export class Watcher {
             and(
                 eq(fieldPath(SPECS.Conversation_DM, "assistantKey"), assistantKey),
                 eq(fieldPath(SPECS.Conversation_DM, "subjectThingId"), subjectThingId),
+            ),
+            1,
+        );
+        return found.length > 0;
+    }
+
+    /**
+     * Has this slot already been served? The same shape as the subject query above, which is the
+     * point of ADR-0016: a Schedule gets an identity so birth stays one query rather than two
+     * mechanisms.
+     */
+    private async scheduledConversationExists(
+        assistantKey: string,
+        scheduledFor: string,
+    ): Promise<boolean> {
+        const found = await this.deps.things.search<Conversation>(
+            SPECS.Conversation_DM,
+            and(
+                eq(fieldPath(SPECS.Conversation_DM, "assistantKey"), assistantKey),
+                eq(fieldPath(SPECS.Conversation_DM, "scheduledFor"), scheduledFor),
+            ),
+            1,
+        );
+        return found.length > 0;
+    }
+
+    /** Is an earlier slot for this Assistant still in flight? Two `or`ed statuses, one query. */
+    private async anyUnfinishedScheduledConversation(assistantKey: string): Promise<boolean> {
+        const found = await this.deps.things.search<Conversation>(
+            SPECS.Conversation_DM,
+            and(
+                eq(fieldPath(SPECS.Conversation_DM, "assistantKey"), assistantKey),
+                not(unset(fieldPath(SPECS.Conversation_DM, "scheduledFor"))),
+                or(
+                    eq(fieldPath(SPECS.Conversation_DM, "status"), "running"),
+                    eq(fieldPath(SPECS.Conversation_DM, "status"), "waiting"),
+                ),
             ),
             1,
         );
@@ -834,6 +1036,39 @@ export class Watcher {
             state.data.watermarkDocRefs = fresh.data.watermarkDocRefs;
         }
     }
+}
+
+/**
+ * The prompt a scheduled Conversation is born with.
+ *
+ * **Stable first, volatile last (#11).** The standing instruction comes first and never varies; the
+ * due instant — the first time-varying value in this system to reach a prompt at all — comes last.
+ * The rule is free to follow and only free *before* something breaks it: a prompt whose opening
+ * words change on every firing is a prompt no provider can cache and no reader can diff.
+ *
+ * The closing sentence is the whole of item 7. A scheduled Conversation that finds nothing to do
+ * needs no mechanism to stay quiet — [ADR-0015](../../../docs/adr/0015-nothing-ends-silently.md)
+ * demands noise only when something *failed*, and nothing failed — it needs to be *told* that
+ * finishing with "nothing to do" is a complete answer. Without that, the first useful schedule
+ * produces an Open Question per firing.
+ */
+export function scheduledPrompt(scheduledFor: string, timezone: string): string {
+    return [
+        `This is a scheduled run. Nobody is waiting for it.`,
+        ``,
+        `Do the standing work your instructions describe: look at how things are **now** and act on`,
+        `what you find. This is not a backlog to work through — earlier runs are done with, and if`,
+        `three were missed you are being asked once, about today.`,
+        ``,
+        `**If there is nothing to do, say so in a sentence and finish.** That is a complete and`,
+        `successful answer, and it is the usual one. Do not raise a question to report that there was`,
+        `nothing to report, and do not invent work to justify the run.`,
+        ``,
+        `If you do find something that needs a human, ask about **all of it in one question** rather`,
+        `than one question per item — until that question is answered, this schedule does not run again.`,
+        ``,
+        `Scheduled for: ${describeInstant(scheduledFor, timezone)}.`,
+    ].join("\n");
 }
 
 /**

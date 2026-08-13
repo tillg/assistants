@@ -13,6 +13,16 @@ repository, package history and security documentation.
 This is the sibling of [AGENTIC_LOOP.md](AGENTIC_LOOP.md), which surveyed Opencode, Pi and the
 Claude Agent SDK on 2026-08-09 and settled how our loop is built.
 
+> **The two findings in §5 and §6 have since been acted on, and this document is left as it was
+> written.** It records what was true of *this* system on 2026-08-12: that a Schedule Trigger was a
+> field name, and that "nothing is booked without an answer" was kept by a system prompt. Both are
+> now structural — the watcher's seventh scan and
+> [ADR-0018](../../docs/adr/0018-an-operation-may-require-an-approval.md) — and
+> [the learnings table](#what-we-should-learn) carries the current verdict for every item, including
+> the two whose verdicts *reversed* while the work was being planned. Where the prose below says
+> "ours is a field name" or "written in prose", read it as the finding that caused the change rather
+> than as a description of the system.
+
 **Read the article with a date in mind.** It describes OpenClaw as a building whose first floor is
 Mario Zechner's **Pi** toolkit. That was true from launch until **2026-05-28**, when OpenClaw
 dropped three of the four Pi packages — `pi-ai`, `pi-agent-core` and `pi-coding-agent` — and kept
@@ -143,8 +153,8 @@ mapping fails.
 | Skill (`SKILL.md`) | **Skill** | Both markdown, both progressively disclosed. Theirs are shared and installable; ours belong to exactly one Assistant ([ADR-0009](../../docs/adr/0009-skills-belong-to-one-assistant.md)) |
 | Gateway | *(no equivalent)* | The ThingStore plays the role, but it is a store, not a process |
 | Channel | *(no equivalent)* | We have one and no abstraction. See "a channel is a Connector" below |
-| Heartbeat | **Schedule** Trigger *(inert)* | **False friend.** Ours means something else entirely — see below |
-| Automation / cron | **Schedule** Trigger *(inert)* | Theirs is the real scheduler; the heartbeat is one of its jobs |
+| Heartbeat | **Schedule** Trigger | **False friend.** Ours means something else entirely — see below |
+| Automation / cron | **Schedule** Trigger | Theirs is the real scheduler; the heartbeat is one of its jobs |
 | Memory (`MEMORY.md`, SQLite index) | **Process** + the ThingStore | Different by design: they retrieve remembered text, we query authoritative Things |
 | `origin_class` on a memory chunk | *(no equivalent)* | **The gap this comparison found.** See §7 |
 | Compaction | *(not implemented)* | Same concept, we have not needed it yet |
@@ -172,9 +182,10 @@ healthcheck fails once it is stale ([ADR-0015](../../docs/adr/0015-nothing-ends-
 nothing. It exists because the escalation path shares fate with the failures it reports, so
 silence has to be *recorded* silence.
 
-Our word for their thing is a **Schedule** Trigger — and it is inert. `TriggerKind` admits
-`schedule`, `Assistant_DM` carries a `cron` field, and no watcher scan fires one. That gap is the
-subject of §6.
+Our word for their thing is a **Schedule** Trigger. It was inert when this was written — `TriggerKind`
+admitted `schedule` and `Assistant_DM` carried a `cron` field, and no watcher scan fired one. That gap
+is the subject of §6, and it has since been closed by the watcher's seventh scan; what §6 says about
+what a scheduler has to have thought about still stands, and is now what the scan implements.
 
 ### "Skill" is the same word for the opposite policy
 
@@ -358,10 +369,10 @@ clock-fired birth needs a different identity — the natural one is `(assistantK
 where `scheduledFor` is the *due instant*, not the moment the scan noticed it, so a re-scan, a
 restart and a replayed watermark all resolve to the same key.
 
-Half a dozen documents recorded that a Schedule Trigger is inert without any of them recording that
-the mechanism for making one safe did not yet exist. That is now settled in
-[ADR-0016](../../docs/adr/0016-a-schedule-fires-on-its-due-instant.md), which also takes the three policy
-decisions the mechanism forces — catch up once rather than per missed slot, skip while the previous
+Half a dozen documents recorded that a Schedule Trigger was inert without any of them recording that
+the mechanism for making one safe did not yet exist. That is settled in
+[ADR-0016](../../docs/adr/0016-a-schedule-fires-on-its-due-instant.md) and built as scan 7, which also
+takes the three policy decisions the mechanism forces — catch up once rather than per missed slot, skip while the previous
 firing is unfinished, and resolve the cron to a UTC instant before it becomes an identity, so
 daylight saving cannot make one firing look like two.
 
@@ -492,17 +503,17 @@ Ranked, with a verdict, what it costs and what it would need.
 
 | # | Learning | Verdict | Cost | Needs |
 |---|---|---|---|---|
-| 1 | An Operation may declare that it requires an **approval** before it executes — so "nothing is booked without an answer" stops being prose | **Adopt**, planned — ADR-0018 | Small; `advance()` already writes the intent there. Sharpened in planning: only the **Runtime** may raise the approval, and it is bound to the Operation *and its arguments*, or a yes to one thing authorises another | An ADR. The sharpest finding in this document |
-| 2 | A Schedule Trigger needs its own exactly-once identity — `(assistantKey, scheduledFor)`, keyed on the *due instant* | **Decided** — [ADR-0016](../../docs/adr/0016-a-schedule-fires-on-its-due-instant.md) — and planned | Small | The watcher's seventh scan, one indexed field, and `cron-parser` for the daylight-saving cases. Its skip rule turned out to subsume (5) and (8) |
+| 1 | An Operation may declare that it requires an **approval** before it executes — so "nothing is booked without an answer" stops being prose | **Built** — [ADR-0018](../../docs/adr/0018-an-operation-may-require-an-approval.md) | Small; `advance()` already wrote the intent there. Sharpened in planning: only the **Runtime** may raise the approval, and it is bound to the Operation *and its arguments*, or a yes to one thing authorises another | Done. `requiresApproval` on `bookkeeping.postTransaction`, a `canonicalArgsHash` binding, an `approval-request` Entry, and `Entry.questionId` for the walk-back. Building it forced the end-to-end fixture to gain a refusal, a question and a resume — which is the proof that what it used to test was the model's manners |
+| 2 | A Schedule Trigger needs its own exactly-once identity — `(assistantKey, scheduledFor)`, keyed on the *due instant* | **Built** — [ADR-0016](../../docs/adr/0016-a-schedule-fires-on-its-due-instant.md) | Small | Done. The watcher's seventh scan, an indexed `scheduledFor`, and `cron-parser` behind `latestDueInstantBefore`, which owns the two daylight-saving decisions. Its skip rule subsumed (5) and (8). One finding: a cron has no start date, so adding a schedule fires it immediately for the slot just past |
 | 3 | A channel is a Connector for the UserInterface, not a gateway | **Adopt** (as the design), **unbuilt** — deferred out of the first change | A Connector to build, plus a stored human credential and the first outbound traffic this system has ever had | One decision is already made, so it is not made wrongly later: a channel hooks **`raiseQuestion`**, the choke point every Open Question passes through — *not* `ui.askUser`, which misses every escalation, every Manual Connector and every approval, i.e. exactly the questions worth pushing. And it must be non-fatal: a dead channel must never fail a Conversation |
 | 4 | Enforce the single Runtime instead of asserting it | **Decided** — [ADR-0017](../../docs/adr/0017-the-runtime-claims-ownership-and-stands-down.md) | Small | An owner stamped beside the heartbeat |
 | 5 | Auto-disable a Schedule after N consecutive failures | **Reject** — subsumed by (2). *This verdict was reversed during planning* | — | Nothing to count. `status = "failed"` is set in one place, only after the User has answered more than `maxEscalations` escalations, and ADR-0015 makes `failed` mean *the User abandoned it*. Every other failure path ends `waiting`, and ADR-0016 **skips the next slot while the previous is unfinished** — so a week-long outage yields one stalled Conversation, not five firings. OpenClaw needs this because its schedule fires regardless of what the last firing did; ours cannot |
-| 6 | Record token usage on the Turn | **Adopt**, planned | Two fields; both providers already receive it | A model change. Planning found there is no `assistant` Entry on a tool-calling Turn, so the cost goes on **the first Entry the Turn wrote** — and an errored Turn records nothing, so the sum is a *lower bound* and the docs must say so |
-| 7 | A scheduled Conversation that finds nothing must be quiet by construction | **Adopt** with (2), planned | Free — a convention in the Assistant's prompt | Nothing. The quiet Conversation is also the record that the slot was served, which is how the User knows a silent schedule is alive |
+| 6 | Record token usage on the Turn | **Built** | Two fields; both providers already received it | Done. `LlmResponse.usage`, read by both providers, zeroed by the scripted one, written onto **the first Entry the Turn wrote** — there is no `assistant` Entry on a tool-calling Turn. An errored Turn records nothing, so the sum is a *lower bound*, and `CONTEXT.md`, `domain.md` and `functional.md` now say so |
+| 7 | A scheduled Conversation that finds nothing must be quiet by construction | **Built** with (2) | Free — a convention in the Assistant's prompt, as predicted | Done, and it really was a sentence: the scheduled birth prompt says that finishing with "nothing to do" is a complete answer. The quiet Conversation is the record that the slot was served, and `scheduledFor` is a column on the overview so it is one search |
 | 8 | Active hours on a Schedule, with equal start/end meaning *never* | **Reject** — subsumed by (2), same argument as (5). *Reversed during planning* | — | The skip rule already prevents accumulation, and `enabled` is already the kill switch |
 | 9 | Compaction as a **Turn-boundary step recorded as an Entry** — never a background task | **Adapt, later** | Medium | The `maxTurns`-reached path exists to hang it on |
 | 10 | Progressive disclosure of Skills — inject an index, let the model fetch the body | **Adapt, later** | Medium; needs a `skill.read` Operation | Both OpenClaw and Selma do this. Worth it past ~10 Skills on one Assistant; the most any of ours has is 3 |
-| 11 | Keep the system prompt stable-first, volatile-last, and say so | **Adopt**, planned with (2) | Free | We already are. The learning is to *keep* it when something time-varying is added — and (2)'s `scheduledFor` is the first such thing, which is why it is planned alongside |
+| 11 | Keep the system prompt stable-first, volatile-last, and say so | **Built** with (2) | Free | Done. `scheduledFor` was indeed the first time-varying value to reach a prompt, and it is the last line of it. The rule is now written in [the system architecture](../system/architecture.md) rather than only followed by accident |
 | 12 | A transcript **view** in the UserInterface | **Revisit** | This is the D-005 trade, taken deliberately | Its own change |
 | 13 | Markdown skills discovered from a folder | **Reject** | — | Skills are fields on an Assistant Thing (ADR-0009). A folder is a second authoring path |
 | 14 | A shared or installable skill library | **Reject** | — | ADR-0009 forbids it. Their hub needed a security scanner; a field needs nobody |

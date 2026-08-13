@@ -175,6 +175,51 @@ function projectTransactionGroup(group: Record<string, unknown>): Array<Record<s
 }
 
 /**
+ * How a booking reads in the approval question.
+ *
+ * This is the entire user-facing surface of *"nothing is booked without an answer"*, so it is a
+ * sentence rather than a record: amount, where the money comes from, where it goes, the date, and
+ * what it is for. A User who is shown a JSON blob learns to click yes without reading it, which is
+ * how a safety feature becomes a formality.
+ */
+function describePosting(args: Record<string, unknown>): string {
+    const splits = Array.isArray(args["splits"]) ? (args["splits"] as PostingSplit[]) : [];
+    // A model that emitted `splits` as a JSON string, or omitted it, gets the JSON fallback rather
+    // than a confident sentence about nothing. "Book a transaction with no postings?" is a safety
+    // question that describes no posting, which is worse than showing the User the raw call — the
+    // call is going to be refused by `execute` either way, and the fallback exists for exactly this.
+    if (splits.length === 0) return "";
+
+    // "€96.50 from *Payables* to *Expenses:Health*, dated …, for …" — the money and the two accounts
+    // are one phrase, so the commas fall where a reader would pause rather than after the verb.
+    const posting = (split: PostingSplit) =>
+        [
+            `${money(split.amount, split.currencyCode)} ` +
+                `from *${split.sourceAccount || "(no source)"}* ` +
+                `to *${split.destinationAccount || "(no destination)"}*`,
+            split.date ? `dated ${split.date}` : undefined,
+            split.description ? `for ${split.description}` : undefined,
+        ]
+            .filter(Boolean)
+            .join(", ");
+
+    if (splits.length === 1) return `Book ${posting(splits[0]!)}?`;
+    // The verb goes in the question and not in every bullet, so a list of postings reads as a list.
+    return [
+        `Book ${splits.length} postings${args["groupTitle"] ? ` under *${String(args["groupTitle"])}*` : ""}?`,
+        ``,
+        ...splits.map((split) => `- ${posting(split)}`),
+    ].join("\n");
+}
+
+/** `€96.50`, or `96.50 CHF` when it is not the currency the household keeps its books in. */
+function money(amount: unknown, currencyCode: unknown): string {
+    const value = String(amount ?? "?");
+    const currency = String(currencyCode ?? "EUR").toUpperCase();
+    return currency === "EUR" ? `€${value}` : `${value} ${currency}`;
+}
+
+/**
  * The current calendar month, as Firefly wants it.
  *
  * Firefly rejects `start === end` ("The start must be a date before end"), so a period always spans
@@ -615,8 +660,18 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
         name: "bookkeeping.postTransaction",
         description:
             "Book a balanced transaction into the books. Account names must already exist — call " +
-            "bookkeeping.listAccounts first. Safe to retry: booking the same thing twice is a no-op.",
+            "bookkeeping.listAccounts first. Safe to retry: booking the same thing twice is a no-op. " +
+            "The User must approve the exact posting before it happens: the first call is refused " +
+            "and asks them, and you are resumed to make the same call again once they have said yes.",
         mutating: true,
+        // The one Operation in the system that moves a number in someone's books, and therefore the
+        // one the README's "nothing is booked without an answer" is about. Until this flag existed
+        // that sentence was kept by the Accountant's system prompt and by nothing else.
+        //
+        // `bookkeeping.createAccount` deliberately does NOT carry it: it is granted to no Assistant
+        // (see ACCOUNTANT's tools), so the flag would only add a path nothing exercises.
+        requiresApproval: true,
+        describeCall: describePosting,
         parameters: {
             type: "object",
             properties: {

@@ -135,7 +135,11 @@ test.describe.serial("Surviving a restart", () => {
             text: `Answered after a restart (${runId}).`
         });
 
-        const status = await waitForConversationToContinue(store, question.conversationThingId);
+        // "Continued" means the answer was consumed — this question is no longer the one it waits on.
+        // It may well be waiting again immediately, on the approval the Runtime demands before it will
+        // book anything (ADR-0018); that is a different question, and this Conversation having reached
+        // it across a restart is the assertion that matters here.
+        const status = await waitForConversationToContinue(store, question);
         expect(["running", "waiting", "done"]).toContain(status);
 
         // The answer is what the User typed, and `AnsweredAt` stays empty — see the invoice slice.

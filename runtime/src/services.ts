@@ -104,6 +104,7 @@ export function buildRuntime(config: Config): Runtime {
         assistant: Stored<Assistant>;
         subjectThingId?: string;
         subjectModel?: string;
+        scheduledFor?: string;
         prompt: string;
         title: string;
         parentConversationId?: string;
@@ -114,6 +115,9 @@ export function buildRuntime(config: Config): Runtime {
             title: input.title,
             subjectThingId: input.subjectThingId ?? "",
             subjectModel: input.subjectModel ?? "",
+            // Exactly one of `subjectThingId` and `scheduledFor` is set, and which one says what gave
+            // birth to this Conversation (ADR-0016). Both empty is a bug; both set is a bug.
+            scheduledFor: input.scheduledFor ?? "",
             status: "running",
             waitingFor: "",
             turnCount: 0,
@@ -199,6 +203,7 @@ export function buildRuntime(config: Config): Runtime {
         things,
         driver,
         maxBirthsPerHour: config.maxBirthsPerHour,
+        scheduleTimezone: config.scheduleTimezone,
         birth,
     });
 

@@ -193,13 +193,39 @@ When asked what is outstanding, report from that call and nothing else. Group by
 totals, and name the invoices behind them if you can find them by searching \`Invoice_DM\`.
 
 If something has been outstanding a long time, say so plainly and suggest what to do about it —
-but do not send anything or move money yourself.`,
+but do not send anything or move money yourself.
+
+## Gather everything first, then ask **once**
+
+This skill runs on a schedule, and that turns batching from good manners into a correctness rule:
+
+1. Call \`bookkeeping.listOpenItems\` and look at **all** of it before doing anything.
+2. If nothing is outstanding, say so in one sentence and finish. Raise no question — a quiet run is
+   the usual outcome and a successful one.
+3. If several things are outstanding, put **all of them into a single \`ui.askUser\`**: list every
+   item with its account, its total and what you suggest doing about it, and ask once.
+
+**Never ask about one item at a time.** A question suspends this conversation until the User answers
+it, and a schedule does not run again while its previous run is unfinished. So a question about the
+first of three overdue invoices holds back the next slot — and the other two invoices — until it is
+answered. Three questions asked one at a time take three days to cover what one question covers this
+morning. With nothing outstanding this looks perfect; it misbehaves the first time it finds two
+things.`,
         },
     ],
     // Deliberately no `thing-materialised` trigger: the Receptionist calls this Assistant, and
-    // that is the only route in. Two routes to one birth would mean two Conversations, two LLM
-    // bills and two Open Questions for one invoice.
-    triggers: [{ kind: "assistant-call" }],
+    // that is the only route in for an *invoice*. Two routes to one birth would mean two
+    // Conversations, two LLM bills and two Open Questions for one invoice.
+    //
+    // The `schedule` Trigger is a different route to a different piece of work: not "deal with this
+    // invoice" but "look at what is outstanding". 07:00 local (SCHEDULE_TIMEZONE), so a chase lands
+    // before the working day rather than at midnight, where "today's" unpaid set is ambiguous. Daily
+    // rather than hourly: one Conversation a day is the honest floor for standing work, and an hourly
+    // schedule is a design mistake the births-per-hour cap exists to say so about.
+    //
+    // Note what adding this does immediately: a cron has no start date, so the first scan after
+    // bootstrap finds today's 07:00 already past and births one Conversation at once.
+    triggers: [{ kind: "assistant-call" }, { kind: "schedule", cron: "0 7 * * *" }],
     tools: [
         "thingstore.get",
         "thingstore.search",

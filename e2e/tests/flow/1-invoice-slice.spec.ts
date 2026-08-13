@@ -49,6 +49,15 @@
  *
  * The `scripted` LLM provider makes all of that deterministic — it is a recorded substitute for
  * a paid, non-deterministic third party, not a mock of anything we own.
+ *
+ * **Two questions, not one, and that is the point of ADR-0018.** The scripted Accountant asks
+ * politely before booking, as its prompt tells it to — and that ask no longer counts for anything,
+ * because a question the Assistant composed cannot be the thing that constrains the Assistant. So
+ * its first `postTransaction` is refused by the Runtime, which raises an approval of its own bound to
+ * those exact arguments, and the model calls again identically once the User has said yes.
+ *
+ * That this test had to change is the demonstration that what it used to prove was the model's good
+ * manners rather than the rule.
  */
 
 import { expect, test } from "../../fixtures";
@@ -68,8 +77,9 @@ import { eq, ThingStore, waitFor } from "../../utils/thingstore";
 
 test.describe.serial("Invoice slice", () => {
     test("should turn an arriving Document into an Open Question, an answer and a booking", async ({ getPageAs }) => {
-        // Six turns across two Assistants, a two-second scan interval, and a human in the middle.
-        test.setTimeout(AGENT_TIMEOUT_MS * 3);
+        // Eight turns across two Assistants, a two-second scan interval, and a human in the middle
+        // twice — the Assistant's own question, then the Runtime's approval.
+        test.setTimeout(AGENT_TIMEOUT_MS * 4);
 
         const store = await ThingStore.connect("admin");
         const runId = String(Date.now());
@@ -119,6 +129,40 @@ test.describe.serial("Invoice slice", () => {
         expect(answered["Confirmed"]).toBeTruthy();
         expect(String(answered["Text"] ?? "")).toContain("book it");
         expect(String(answered["AnsweredAt"] ?? "")).toBe("");
+
+        // --- and nothing is booked yet, because that yes was not an approval -------------------
+        //
+        // The Assistant chose to ask, and its own question authorises nothing (ADR-0018). The
+        // Runtime refuses the posting and asks for itself, bound to those exact arguments.
+        const approval = await waitForRaisedQuestion(store, document.thingId, AGENT_TIMEOUT_MS, [question.thingId]);
+        expect(approval.thingId).not.toBe(question.thingId);
+        expect(approval.assistantKey).toBe(ACCOUNTANT);
+        // The Runtime's own wording, and the exact arguments rendered as a sentence — not a JSON blob,
+        // which is how a safety feature becomes a thing people click yes on without reading.
+        expect(approval.prompt).toContain("Approval needed");
+        expect(approval.prompt).toContain(`€${INVOICE_AMOUNT}`);
+        expect(approval.prompt).toContain("Payables");
+        expect(approval.prompt).toContain("Expenses:Health");
+        expect(await countTransactions(INVOICE_AMOUNT, INVOICE_CURRENCY)).toBe(bookedBefore);
+
+        // The refusal is in the transcript rather than inferred from an absence, and it says the
+        // booking is not queued — because it is not, and the model has to call again.
+        const refused = await store.body(`Conversation_DM/${approval.conversationThingId}`, "Conversation");
+        const entries = (refused["Entries"] ?? []) as Array<Record<string, unknown>>;
+        const request = entries.find((entry) => entry["Kind"] === "approval-request");
+        expect(request, "the transcript records that the Runtime asked").toBeDefined();
+        expect(String(request!["ToolName"])).toBe("bookkeeping.postTransaction");
+        expect(String(request!["QuestionId"])).toBe(approval.thingId);
+        expect(String(request!["ArgsHash"] ?? "")).not.toBe("");
+        expect(entries.some((entry) => String(entry["ToolResult"] ?? "").includes("not queued"))).toBe(true);
+
+        // --- the User approves it, in the same ordinary UI ------------------------------------
+        await openQuestion.openQuestion(approval);
+        await expect(openQuestion.markdownEditor("Question")).toContainText("Approval needed");
+        await openQuestion.answer({
+            confirmed: true,
+            text: "Approved — that is the right posting."
+        });
 
         // --- the Accountant books it ----------------------------------------------------------
         await waitForConversationsDone(store, document.thingId, AGENT_TIMEOUT_MS);

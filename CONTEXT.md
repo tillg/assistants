@@ -65,11 +65,11 @@ One run of one Assistant — its prompts, exchanges and tool calls — and a Thi
 _Avoid_: session, thread, history, run
 
 **Turn**:
-One LLM response together with the execution of the tool calls it asked for. It is the unit in which a Conversation moves forward, and the unit in which cost is counted.
+One LLM response together with the execution of the tool calls it asked for. It is the unit in which a Conversation moves forward, and the unit in which cost is counted — literally: a Turn records what the model charged for it, on the first Entry that Turn wrote. With one honest limit, that a Turn which errored records nothing, so the Turns of a Conversation sum to a **lower bound** on its cost rather than to its cost.
 _Avoid_: step, iteration, cycle
 
 **Entry**:
-One appended item in a Conversation's history — a prompt, an LLM response, a tool call, a tool result, an error. A Conversation is an append-only list of Entries.
+One appended item in a Conversation's history — a prompt, an LLM response, a tool call, a tool result, an error, a request for an approval. A Conversation is an append-only list of Entries.
 _Avoid_: message, event, record
 
 **Finish Reason**:

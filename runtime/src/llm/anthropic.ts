@@ -98,6 +98,8 @@ export class AnthropicProvider implements LlmProvider {
         const payload = (await response.json()) as {
             content?: AnthropicContentBlock[];
             stop_reason?: string;
+            // Anthropic's own names: `input_tokens` / `output_tokens`, not OpenAI's.
+            usage?: { input_tokens?: number; output_tokens?: number };
         };
 
         const blocks = payload.content ?? [];
@@ -122,6 +124,14 @@ export class AnthropicProvider implements LlmProvider {
                     : payload.stop_reason === "max_tokens"
                       ? "length"
                       : "answered",
+            ...(payload.usage
+                ? {
+                      usage: {
+                          promptTokens: payload.usage.input_tokens ?? 0,
+                          completionTokens: payload.usage.output_tokens ?? 0,
+                      },
+                  }
+                : {}),
         };
     }
 }

@@ -9,9 +9,42 @@
 import { describe, expect, it } from "vitest";
 import { buildHarness, nowIso, type Harness } from "./support/harness.js";
 import { SPECS } from "../src/a12/things.js";
-import { buildMessages } from "../src/loop/advance.js";
+import { buildMessages, canonicalArgsHash } from "../src/loop/advance.js";
 import { A12RpcError } from "../src/a12/client.js";
-import type { Conversation } from "../src/domain/types.js";
+import { FireflyError } from "../src/connectors/firefly.js";
+import type { Conversation, OpenQuestion, Stored } from "../src/domain/types.js";
+
+/** The posting the approval tests approve, and the recovery test books. */
+const POSTING = {
+    groupTitle: "Dr Meyer 2026-118",
+    thingId: "invoice-1",
+    splits: [
+        {
+            type: "withdrawal",
+            date: "2026-08-01",
+            amount: "184.30",
+            description: "Dr Meyer",
+            sourceAccount: "Payables",
+            destinationAccount: "Expenses:Health",
+        },
+    ],
+};
+
+/** The one question this Conversation is waiting on. */
+async function pendingQuestion(harness: Harness, docRef: string): Promise<Stored<OpenQuestion>> {
+    const questionId = (await harness.conversation(docRef)).data.currentQuestionId;
+    expect(questionId, "the conversation is waiting on a question").toBeTruthy();
+    const found = (await harness.questions()).find((question) => question.thingId === questionId);
+    expect(found).toBeDefined();
+    return found!;
+}
+
+/** Say yes to whatever it is waiting on, and let the watcher resume it. */
+async function approve(harness: Harness, docRef: string): Promise<void> {
+    const question = await pendingQuestion(harness, docRef);
+    await harness.answer(question.thingId, { confirmed: true, answeredAt: "" });
+    await harness.watcher.scan();
+}
 
 describe("one turn", () => {
     it("finishes when the model answers without asking for tools", async () => {
@@ -172,6 +205,374 @@ describe("tool gating (ADR-0010)", () => {
     });
 });
 
+/**
+ * ADR-0018. The rule the whole system's central promise rests on, and the one the end-to-end tier
+ * could not prove: it scripts a model that chooses to ask, so it demonstrates suspend-and-resume
+ * rather than a Runtime that refuses.
+ */
+describe("an Operation that requires an approval (ADR-0018)", () => {
+    const bookingAssistant = (harness: Harness) =>
+        harness.seedAssistant({ tools: [{ operation: "bookkeeping.postTransaction" }] });
+
+    it("refuses a booking with no approval at all, and asks the User itself", async () => {
+        // The Assistant's prompt says nothing about asking, and it does not ask. Nothing reaches
+        // Firefly anyway — which is the whole point: the model is not the thing being trusted.
+        const harness = buildHarness([
+            { turn: 0, toolCalls: [{ name: "bookkeeping__postTransaction", arguments: POSTING }] },
+        ]);
+        const assistant = await bookingAssistant(harness);
+        const docRef = await harness.birth({ assistant });
+
+        const result = await harness.driver.advance(docRef);
+
+        expect(result.status).toBe("waiting");
+        expect(harness.firefly.posted).toHaveLength(0);
+
+        const conversation = await harness.conversation(docRef);
+        expect(conversation.data.waitingFor).toBe("user");
+        // A missing approval is the ordinary path, not a stuck Conversation: going through
+        // `escalate()` would mean three unapproved bookings marked it `failed`.
+        expect(conversation.data.escalationCount ?? 0).toBe(0);
+        // And it waits rather than lapsing into a booking.
+        expect(conversation.data.wakeAt).toBeFalsy();
+
+        const question = await pendingQuestion(harness, docRef);
+        expect(question.data.kind).toBe("confirm");
+        // The question reads as a sentence about this posting, not as a JSON blob.
+        expect(question.data.prompt).toContain("Approval needed");
+        expect(question.data.prompt).toContain("€184.30");
+        expect(question.data.prompt).toContain("Payables");
+        expect(question.data.prompt).toContain("Expenses:Health");
+        expect(question.data.prompt).toContain("2026-08-01");
+        expect(question.data.prompt).not.toContain("```json");
+
+        // The refusal is visible in the transcript, and says it is not queued.
+        const entries = conversation.data.entries ?? [];
+        const request = entries.find((entry) => entry.kind === "approval-request");
+        expect(request?.toolName).toBe("bookkeeping.postTransaction");
+        expect(request?.questionId).toBe(question.thingId);
+        expect(request?.argsHash).toBe(canonicalArgsHash(POSTING));
+        // No `text`, deliberately: it must not become a message between a tool call and its result.
+        expect(request?.text).toBeFalsy();
+        const pending = entries.find((entry) => entry.kind === "tool-result");
+        expect(pending?.toolResult).toMatch(/not queued/i);
+    });
+
+    it("books it once the User says yes, on the second identical call", async () => {
+        const harness = buildHarness([
+            { turn: 0, toolCalls: [{ name: "bookkeeping__postTransaction", arguments: POSTING }] },
+            { turn: 1, toolCalls: [{ name: "bookkeeping__postTransaction", arguments: POSTING }] },
+            { turn: 2, text: "Booked.", finishReason: "answered" },
+        ]);
+        const assistant = await bookingAssistant(harness);
+        const docRef = await harness.birth({ assistant });
+
+        await harness.driver.advance(docRef);
+        await approve(harness, docRef);
+
+        expect(harness.firefly.posted).toHaveLength(1);
+        expect(harness.firefly.posted[0]!.amount).toBe("184.30");
+
+        await harness.watcher.scan();
+        expect((await harness.conversation(docRef)).data.status).toBe("done");
+    });
+
+    it("does not count a question the Assistant asked for itself", async () => {
+        // The unsound first draft: a model that asks "shall I file this under Renovation?", is told
+        // yes, and then books whatever it likes would have been authorised by a yes about something
+        // else. A question the Assistant composed cannot be the thing that constrains it.
+        const harness = buildHarness([
+            {
+                turn: 0,
+                toolCalls: [
+                    {
+                        name: "ui__askUser",
+                        arguments: { kind: "confirm", prompt: "Shall I file this under Renovation?" },
+                    },
+                ],
+            },
+            { turn: 1, toolCalls: [{ name: "bookkeeping__postTransaction", arguments: POSTING }] },
+        ]);
+        const assistant = await harness.seedAssistant({
+            tools: [{ operation: "ui.askUser" }, { operation: "bookkeeping.postTransaction" }],
+        });
+        const docRef = await harness.birth({ assistant });
+
+        await harness.driver.advance(docRef);
+        const asked = await pendingQuestion(harness, docRef);
+        await harness.answer(asked.thingId, { confirmed: true, text: "Yes, Renovation." });
+        await harness.watcher.scan();
+
+        expect(harness.firefly.posted).toHaveLength(0);
+        // A second question was raised — by the Runtime this time, about the booking itself.
+        const raised = await pendingQuestion(harness, docRef);
+        expect(raised.thingId).not.toBe(asked.thingId);
+        expect(raised.data.prompt).toContain("Approval needed");
+    });
+
+    it("declines terminally on a no, and raises nothing further", async () => {
+        const harness = buildHarness([
+            { turn: 0, toolCalls: [{ name: "bookkeeping__postTransaction", arguments: POSTING }] },
+            { turn: 1, toolCalls: [{ name: "bookkeeping__postTransaction", arguments: POSTING }] },
+            { turn: 2, text: "Understood, leaving it unbooked.", finishReason: "answered" },
+        ]);
+        const assistant = await bookingAssistant(harness);
+        const docRef = await harness.birth({ assistant });
+
+        await harness.driver.advance(docRef);
+        const question = await pendingQuestion(harness, docRef);
+        await harness.answer(question.thingId, { confirmed: false, answeredAt: "" });
+        await harness.watcher.scan();
+
+        expect(harness.firefly.posted).toHaveLength(0);
+        // One question, still. Re-asking a User who has said no is how a safety feature becomes a
+        // thing people click through.
+        expect(await harness.questions()).toHaveLength(1);
+
+        const conversation = await harness.conversation(docRef);
+        const errors = (conversation.data.entries ?? []).filter(
+            (entry) => entry.kind === "tool-result" && entry.toolResult?.includes("declined"),
+        );
+        expect(errors).toHaveLength(1);
+        expect(conversation.data.status).not.toBe("waiting");
+    });
+
+    it("treats an answer with no explicit yes as a no", async () => {
+        // `isAnswered` is generous — nothing stamps `answeredAt`, so any filled answer field counts
+        // and the watcher resumes on that basis. Anything short of an explicit tick therefore has to
+        // be a no, or the Conversation would refuse and resume in a loop until maxTurns.
+        const harness = buildHarness([
+            { turn: 0, toolCalls: [{ name: "bookkeeping__postTransaction", arguments: POSTING }] },
+            { turn: 1, toolCalls: [{ name: "bookkeeping__postTransaction", arguments: POSTING }] },
+            { turn: 2, text: "Not booked.", finishReason: "answered" },
+        ]);
+        const assistant = await bookingAssistant(harness);
+        const docRef = await harness.birth({ assistant });
+
+        await harness.driver.advance(docRef);
+        const question = await pendingQuestion(harness, docRef);
+        await harness.answer(question.thingId, { text: "I need to check with the insurer first." });
+        await harness.watcher.scan();
+
+        expect(harness.firefly.posted).toHaveLength(0);
+        expect(await harness.questions()).toHaveLength(1);
+        const results = (await harness.conversation(docRef)).data.entries ?? [];
+        expect(
+            results.some(
+                (entry) =>
+                    entry.kind === "tool-result" && /answered without confirming/i.test(entry.toolResult ?? ""),
+            ),
+        ).toBe(true);
+    });
+
+    it("needs a second approval for a second identical booking", async () => {
+        // One yes must not place the same transaction twice under two idempotency keys, which is
+        // what ADR-0012 exists to prevent.
+        const harness = buildHarness([
+            { turn: 0, toolCalls: [{ name: "bookkeeping__postTransaction", arguments: POSTING }] },
+            { turn: 1, toolCalls: [{ name: "bookkeeping__postTransaction", arguments: POSTING }] },
+            { turn: 2, toolCalls: [{ name: "bookkeeping__postTransaction", arguments: POSTING }] },
+        ]);
+        const assistant = await bookingAssistant(harness);
+        const docRef = await harness.birth({ assistant });
+
+        await harness.driver.advance(docRef);
+        await approve(harness, docRef);
+        expect(harness.firefly.posted).toHaveLength(1);
+
+        // Turn 2 asks for the very same booking again, and is refused: the approval is spent.
+        await harness.watcher.scan();
+        const conversation = await harness.conversation(docRef);
+        expect(conversation.data.status).toBe("waiting");
+        expect(conversation.data.waitingFor).toBe("user");
+        const requests = (conversation.data.entries ?? []).filter(
+            (entry) => entry.kind === "approval-request",
+        );
+        expect(requests).toHaveLength(2);
+        expect(requests[0]!.questionId).not.toBe(requests[1]!.questionId);
+        expect(harness.firefly.posted).toHaveLength(1);
+    });
+
+    it("keeps the approval when the booking was refused by the books, so a retry needs no second yes", async () => {
+        // The path the first version of this got wrong. Every rejection is recorded as a tool-result
+        // for the Operation, so "any tool-result after the answer" counted a Firefly 422 — after which
+        // nothing was booked at all — as having spent the approval. The model then retried the
+        // identical call, exactly as `postTransaction`'s own description invites, and the User was
+        // asked a second time for a booking that never happened.
+        const harness = buildHarness([
+            { turn: 0, toolCalls: [{ name: "bookkeeping__postTransaction", arguments: POSTING }] },
+            { turn: 1, toolCalls: [{ name: "bookkeeping__postTransaction", arguments: POSTING }] },
+            { turn: 2, toolCalls: [{ name: "bookkeeping__postTransaction", arguments: POSTING }] },
+            { turn: 3, text: "Booked on the retry.", finishReason: "answered" },
+        ]);
+        const assistant = await bookingAssistant(harness);
+        const docRef = await harness.birth({ assistant });
+
+        // Firefly refuses the first attempt, the way it refuses an unknown account.
+        harness.firefly.failNextPost = new FireflyError("Firefly refused this posting.", 422, {
+            errors: { "transactions.0.source_id": ["Invalid account."] },
+        });
+
+        await harness.driver.advance(docRef);
+        await approve(harness, docRef);
+
+        // Nothing booked, and the model was told why.
+        expect(harness.firefly.posted).toHaveLength(0);
+        const afterRejection = await harness.conversation(docRef);
+        expect(
+            (afterRejection.data.entries ?? []).some((entry) =>
+                /Firefly refused/i.test(entry.toolResult ?? ""),
+            ),
+        ).toBe(true);
+
+        // The retry goes through on the SAME approval: one question, and the booking lands.
+        await harness.watcher.scan();
+        expect(harness.firefly.posted).toHaveLength(1);
+        expect(await harness.questions()).toHaveLength(1);
+
+        const finished = await harness.conversation(docRef);
+        expect(
+            (finished.data.entries ?? []).filter((entry) => entry.kind === "approval-request"),
+        ).toHaveLength(1);
+        // And the successful result is the one carrying the hash — that is what "spent" now means.
+        const spent = (finished.data.entries ?? []).filter(
+            (entry) => entry.kind === "tool-result" && entry.argsHash === canonicalArgsHash(POSTING),
+        );
+        expect(spent).toHaveLength(1);
+        expect(spent[0]!.toolResult).toContain("transactionId");
+    });
+
+    it("asks again rather than booking when the arguments drifted after the yes", async () => {
+        const drifted = {
+            ...POSTING,
+            splits: [{ ...POSTING.splits[0]!, amount: "185.00" }],
+        };
+        const harness = buildHarness([
+            { turn: 0, toolCalls: [{ name: "bookkeeping__postTransaction", arguments: POSTING }] },
+            { turn: 1, toolCalls: [{ name: "bookkeeping__postTransaction", arguments: drifted }] },
+        ]);
+        const assistant = await bookingAssistant(harness);
+        const docRef = await harness.birth({ assistant });
+
+        await harness.driver.advance(docRef);
+        await approve(harness, docRef);
+
+        expect(harness.firefly.posted).toHaveLength(0);
+        const raised = await pendingQuestion(harness, docRef);
+        expect(raised.data.prompt).toContain("€185.00");
+        expect(await harness.questions()).toHaveLength(2);
+    });
+
+    it("hashes two differently-ordered encodings of the same call the same", () => {
+        const first = { thingId: "i-1", splits: [{ amount: "10.00", date: "2026-01-01" }] };
+        const second = { splits: [{ date: "2026-01-01", amount: "10.00" }], thingId: "i-1" };
+        expect(canonicalArgsHash(first)).toBe(canonicalArgsHash(second));
+        // And number formatting, which the model does not keep stable either.
+        expect(canonicalArgsHash({ n: 96.5 })).toBe(canonicalArgsHash({ n: 96.5000 }));
+        // But a different call is a different call.
+        expect(canonicalArgsHash({ n: 96.5 })).not.toBe(canonicalArgsHash({ n: 96.6 }));
+    });
+
+    it("falls back to the raw call rather than describing a posting it cannot read", async () => {
+        // A model that emits `splits` as a JSON string is routine. The renderer used to answer
+        // "Book a transaction with no postings?" — a safety question describing nothing, which the
+        // User would be approving blind. The JSON fallback exists for exactly this.
+        const harness = buildHarness([
+            {
+                turn: 0,
+                toolCalls: [
+                    { name: "bookkeeping__postTransaction", arguments: { splits: "[{\"amount\":\"10\"}]" } },
+                ],
+            },
+        ]);
+        const assistant = await bookingAssistant(harness);
+        const docRef = await harness.birth({ assistant });
+
+        await harness.driver.advance(docRef);
+
+        const question = await pendingQuestion(harness, docRef);
+        expect(question.data.prompt).toContain("Approval needed");
+        expect(question.data.prompt).toContain("```json");
+        expect(question.data.prompt).not.toContain("no postings");
+        expect(harness.firefly.posted).toHaveLength(0);
+    });
+
+    it("leaves an Operation that does not require one alone", async () => {
+        const harness = buildHarness([
+            { turn: 0, toolCalls: [{ name: "bookkeeping__listAccounts", arguments: {} }] },
+            { turn: 1, text: "Here they are.", finishReason: "answered" },
+        ]);
+        const assistant = await harness.seedAssistant({
+            tools: [{ operation: "bookkeeping.listAccounts" }],
+        });
+        const docRef = await harness.birth({ assistant });
+
+        await harness.driver.advance(docRef);
+
+        expect((await harness.conversation(docRef)).data.status).toBe("running");
+        expect(await harness.questions()).toHaveLength(0);
+    });
+});
+
+describe("what a Turn cost (#6)", () => {
+    it("records usage on the assistant Entry of a text-reply Turn", async () => {
+        const harness = buildHarness([{ text: "All done.", finishReason: "answered" }]);
+        const assistant = await harness.seedAssistant();
+        const docRef = await harness.birth({ assistant });
+
+        await harness.driver.advance(docRef);
+
+        // The scripted provider reports zeroes — a recording costs nothing — and the zeroes are
+        // written, because an absent field and a zero field must not be the same thing.
+        const reply = (await harness.conversation(docRef)).data.entries!.find(
+            (entry) => entry.kind === "assistant",
+        );
+        expect(reply?.promptTokens).toBe(0);
+        expect(reply?.completionTokens).toBe(0);
+    });
+
+    it("records it on the first tool-intent of a tool-calling Turn, and only the first", async () => {
+        // A Turn that ends `wants-tools` appends no `assistant` Entry at all, so "the Turn's
+        // assistant Entry" names a row that does not exist for most Turns.
+        const harness = buildHarness([
+            {
+                turn: 0,
+                toolCalls: [
+                    { name: "thingstore__search", arguments: { model: "Party_DM" } },
+                    { name: "thingstore__search", arguments: { model: "Invoice_DM" } },
+                ],
+            },
+        ]);
+        const assistant = await harness.seedAssistant({ tools: [{ operation: "thingstore.search" }] });
+        const docRef = await harness.birth({ assistant });
+
+        await harness.driver.advance(docRef);
+
+        const intents = (await harness.conversation(docRef)).data.entries!.filter(
+            (entry) => entry.kind === "tool-intent",
+        );
+        expect(intents).toHaveLength(2);
+        expect(intents[0]!.promptTokens).toBe(0);
+        expect(intents[0]!.completionTokens).toBe(0);
+        expect(intents[1]!.promptTokens).toBeUndefined();
+        expect(intents[1]!.completionTokens).toBeUndefined();
+    });
+
+    it("records nothing for a Turn that errored", async () => {
+        // Usage exists only where a provider returned a response, so the Turns of a Conversation sum
+        // to a lower bound on its cost rather than to its cost. Chasing it onto the error paths buys
+        // precision nobody will spend.
+        const harness = buildHarness([{ finishReason: "error", text: "" }]);
+        const assistant = await harness.seedAssistant();
+        const docRef = await harness.birth({ assistant });
+
+        await harness.driver.advance(docRef);
+
+        const entries = (await harness.conversation(docRef)).data.entries ?? [];
+        expect(entries.some((entry) => entry.promptTokens !== undefined)).toBe(false);
+    });
+});
+
 describe("suspension and continuation (ADR-0004, ADR-0005)", () => {
     it("suspends on a question and holds nothing in memory", async () => {
         const harness = buildHarness([
@@ -262,28 +663,12 @@ async function crashAfterIntent(harness: Harness, docRef: string): Promise<void>
 
 describe("recovery", () => {
     it("reconciles an interrupted booking instead of re-running it", async () => {
+        // Two identical calls, because a booking now costs an approval round trip: the first is
+        // refused and asks the User, the second — after the yes — is the one that reaches Firefly.
         const harness = buildHarness([
-            {
-                turn: 0,
-                toolCalls: [
-                    {
-                        name: "bookkeeping__postTransaction",
-                        arguments: {
-                            splits: [
-                                {
-                                    type: "withdrawal",
-                                    date: "2026-08-01",
-                                    amount: "184.30",
-                                    description: "Dr Meyer",
-                                    sourceAccount: "Payables",
-                                    destinationAccount: "Expenses:Health",
-                                },
-                            ],
-                        },
-                    },
-                ],
-            },
-            { turn: 1, text: "Booked.", finishReason: "answered" },
+            { turn: 0, toolCalls: [{ name: "bookkeeping__postTransaction", arguments: POSTING }] },
+            { turn: 1, toolCalls: [{ name: "bookkeeping__postTransaction", arguments: POSTING }] },
+            { turn: 2, text: "Booked.", finishReason: "answered" },
         ]);
         const assistant = await harness.seedAssistant({
             tools: [{ operation: "bookkeeping.postTransaction" }],
@@ -291,15 +676,22 @@ describe("recovery", () => {
         const docRef = await harness.birth({ assistant });
 
         await harness.driver.advance(docRef);
+        expect(harness.firefly.posted).toHaveLength(0);
+        await approve(harness, docRef);
         expect(harness.firefly.posted).toHaveLength(1);
         const bookedKey = harness.firefly.posted[0]!.externalId;
 
         // The crash that matters: Firefly returned 200 and the process died before the result
-        // entry reached the store. Truncating the transcript at the intent is exactly that state.
+        // entry reached the store. Dropping the LAST tool-result is exactly that state — and it has
+        // to be the last one rather than all of them, because the refused first call has a
+        // (pending) result of its own that was written and must stay written.
         const crashed = await harness.conversation(docRef);
+        const lastResult = (crashed.data.entries ?? [])
+            .filter((entry) => entry.kind === "tool-result")
+            .at(-1);
         await harness.things.update(SPECS.Conversation_DM, docRef, {
             ...crashed.data,
-            entries: (crashed.data.entries ?? []).filter((entry) => entry.kind !== "tool-result"),
+            entries: (crashed.data.entries ?? []).filter((entry) => entry !== lastResult),
             status: "running",
             leaseUntil: nowIso(new Date(Date.now() - 60_000)),
         });

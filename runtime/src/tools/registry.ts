@@ -42,6 +42,23 @@ export interface ToolDefinition {
     parameters: Record<string, unknown>;
     /** True when the Operation changes state in some Authority. */
     mutating: boolean;
+    /**
+     * This Operation refuses to run without an approval for these exact arguments.
+     *
+     * The check lives on the **Operation**, not on the Assistant's grant: making it per-Assistant
+     * configuration would be the same probabilistic arrangement ADR-0010 rejected, moved one level
+     * up. An Assistant cannot talk its way past it, because it is never asked.
+     *
+     * Not for the Manual Connectors. `bank.sendMoney`, `email.send` and `document.requestText`
+     * already suspend with an Open Question the User answers by *doing the thing*; an approval there
+     * would ask them to approve doing something they are about to be asked to do themselves.
+     */
+    requiresApproval?: boolean;
+    /**
+     * How the approval question reads to the User. Falls back to the Operation name and a JSON
+     * block — which exists so the check never blocks on a missing renderer, not as an experience.
+     */
+    describeCall?(args: Record<string, unknown>): string;
     execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolOutcome>;
     /**
      * "Did this call already land, under this key?"

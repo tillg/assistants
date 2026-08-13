@@ -160,19 +160,25 @@ const body = (entry: ThingEntry, root: string): Record<string, unknown> =>
  * The link is `Conversation.currentQuestionId`, not a search over Open Questions: the question's
  * own `subjectThingId` is empty for a called Assistant, and "which question is this run's?" has
  * to be answerable without guessing at timestamps.
+ *
+ * `excluding` is what makes a *second* question findable. One booking now raises two — the one the
+ * Assistant chose to ask and the approval the Runtime demands (ADR-0018) — and they are answered one
+ * after the other, so the caller has to be able to say "not that one again".
  */
 export async function waitForRaisedQuestion(
     store: ThingStore,
     documentThingId: string,
-    timeoutMs = AGENT_TIMEOUT_MS
+    timeoutMs = AGENT_TIMEOUT_MS,
+    excluding: readonly string[] = []
 ): Promise<RaisedQuestion> {
     return waitFor(
-        `an Open Question raised for Document ${documentThingId}`,
+        `an Open Question raised for Document ${documentThingId}` +
+            (excluding.length > 0 ? ` other than ${excluding.join(", ")}` : ""),
         async () => {
             for (const conversation of await conversationsFor(store, documentThingId)) {
                 const data = body(conversation, "Conversation");
                 const questionId = String(data["CurrentQuestionId"] ?? "");
-                if (!questionId) {
+                if (!questionId || excluding.includes(questionId)) {
                     continue;
                 }
 
@@ -234,16 +240,21 @@ export async function waitForConversationsDone(
 /** Wait until a Conversation has moved past waiting on the User — the answer was consumed. */
 export async function waitForConversationToContinue(
     store: ThingStore,
-    conversationThingId: string,
+    question: RaisedQuestion,
     timeoutMs = AGENT_TIMEOUT_MS
 ): Promise<string> {
     return waitFor(
-        `Conversation ${conversationThingId} to continue past the User's answer`,
+        `Conversation ${question.conversationThingId} to continue past the answer to ${question.thingId}`,
         async () => {
-            const data = await store.body(`Conversation_DM/${conversationThingId}`, "Conversation");
+            const data = await store.body(`Conversation_DM/${question.conversationThingId}`, "Conversation");
             const status = String(data["Status"] ?? "");
-            const waitingForUser = status === "waiting" && String(data["WaitingFor"] ?? "") === "user";
-            return waitingForUser ? undefined : status;
+            // Past **this** question, not past waiting altogether. Answering the Accountant's own
+            // "book this invoice?" moves it straight onto the Runtime's approval (ADR-0018), so it is
+            // `waiting` on `user` again within one scan — and "it is no longer waiting" would be a
+            // condition this Conversation legitimately never meets. The consumed answer is what
+            // "continued" means, and `currentQuestionId` is where that is recorded.
+            const stillOnIt = String(data["CurrentQuestionId"] ?? "") === question.thingId;
+            return stillOnIt ? undefined : status;
         },
         timeoutMs,
         2_000

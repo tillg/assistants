@@ -97,6 +97,10 @@ export class ScriptedProvider implements LlmProvider {
             text: step.text ?? "",
             toolCalls,
             finishReason: step.finishReason ?? (toolCalls.length > 0 ? "wants-tools" : "answered"),
+            // Zeroes, not absence. A recording costs nothing, and that is a fact about this Turn
+            // rather than a gap in what the provider reported — the distinction the loop preserves
+            // by omitting `usage` where a real provider stayed silent.
+            usage: { promptTokens: 0, completionTokens: 0 },
         };
     }
 }

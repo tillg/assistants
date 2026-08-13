@@ -53,6 +53,18 @@ import { getByLabelWithOptionalAsterisk } from "../utils/locators";
 import { FormPage } from "./FormPage";
 import { OverviewPage } from "./OverviewPage";
 
+/**
+ * Enough of a prompt to tell two of this Conversation's questions apart, and not more.
+ *
+ * The overview truncates the prompt column, so matching the whole thing would match nothing. The
+ * first line is where both writers put the heading — *"**Book this invoice?**"*, *"**Approval
+ * needed.**"* — and markdown asterisks are dropped because the cell renders text, not markdown.
+ */
+function distinguishingText(prompt: string): string {
+    const firstLine = prompt.split("\n").find((line) => line.trim() !== "") ?? prompt;
+    return firstLine.replaceAll("*", "").trim().slice(0, 40);
+}
+
 export class OpenQuestionPage extends FormPage {
     private readonly overview: OverviewPage;
 
@@ -68,6 +80,13 @@ export class OpenQuestionPage extends FormPage {
      * found in the table — and every run's question carries the same prompt, so the only thing
      * that tells them apart is the Conversation that raised it. `conversationId` is an indexed
      * String, and the overview's search becomes a server-side `simple_search` over exactly those.
+     *
+     * **One Conversation can now own more than one row.** A booking raises two questions — the one
+     * the Assistant chose to ask and the approval the Runtime demands (ADR-0018) — and the answered
+     * one does not leave this view, because the overview's "pending" query model keys on `AnsweredAt`
+     * while the Runtime's `isAnswered` counts any filled answer field, and a User (and this suite)
+     * leaves the timestamp empty. So the conversation narrows the search and the **prompt** picks the
+     * row, using the first line of the question the Runtime or the Assistant actually wrote.
      */
     async openQuestion(question: RaisedQuestion) {
         await this.gotoHome();
@@ -75,8 +94,13 @@ export class OpenQuestionPage extends FormPage {
 
         await this.overview.search(question.conversationThingId);
 
-        const rows = this.page.getByTestId(TestID.TABLE_BODY_ROW);
-        await expect(rows, `searching for conversation ${question.conversationThingId}`).toHaveCount(1);
+        const all = this.page.getByTestId(TestID.TABLE_BODY_ROW);
+        await expect(all, `searching for conversation ${question.conversationThingId}`).not.toHaveCount(0);
+        const rows = all.filter({ hasText: distinguishingText(question.prompt) });
+        await expect(
+            rows,
+            `one row for conversation ${question.conversationThingId} whose prompt starts "${distinguishingText(question.prompt)}"`
+        ).toHaveCount(1);
         await rows.first().click();
         await this.finishedLoading();
 

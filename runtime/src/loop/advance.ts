@@ -15,6 +15,7 @@
  *      rather than doing it again. A result log cannot answer that question; an intent log can.
  */
 
+import { createHash } from "node:crypto";
 import { log, describeError, describeForModel } from "../log.js";
 import { nowIso, parseIso, SPECS, ThingRepository } from "../a12/things.js";
 import type {
@@ -25,12 +26,13 @@ import type {
     OpenQuestion,
     Stored,
 } from "../domain/types.js";
-import { TransientLlmError, type LlmMessage, type LlmProvider } from "../llm/provider.js";
+import { TransientLlmError, type LlmMessage, type LlmProvider, type LlmUsage } from "../llm/provider.js";
 import {
     operationFromLlm,
     ToolRegistry,
     toolNameForLlm,
     type ToolContext,
+    type ToolDefinition,
     type ToolOutcome,
 } from "../tools/registry.js";
 
@@ -70,9 +72,192 @@ const CONVERSATION = SPECS.Conversation_DM;
  */
 const TURN_GRANT_ON_ESCALATION = 5;
 
+/**
+ * What the model is told when its call was refused for want of an approval.
+ *
+ * The generic pending wording — *"Suspended; the answer will arrive as a later message"* — would
+ * tell the model its booking is on its way. It is not: nothing is queued, and the call has to be
+ * made again once the answer arrives.
+ */
+const REFUSED_PENDING_APPROVAL =
+    "Refused pending approval, not queued. Nothing was booked and nothing is waiting to be. The " +
+    "User has been asked to approve this exact call; when they answer you will be resumed, and you " +
+    "must make the same call again — with the same arguments, or you will be asked again.";
+
 export function nextSeq(conversation: Conversation): number {
     const entries = conversation.entries ?? [];
     return entries.reduce((max, entry) => Math.max(max, entry.seq ?? 0), 0) + 1;
+}
+
+/**
+ * A stable fingerprint of the arguments a call was made with.
+ *
+ * The arguments arrive as the model produced them, so neither key order nor number formatting is
+ * stable — and the approval is bound to the arguments, so the binding has to survive both. Keys are
+ * sorted at every depth; array order is kept, because it is meaningful (the splits of a posting).
+ * Numbers need no special handling: `JSON.stringify(96.50)` is already `96.5`.
+ *
+ * A model that re-issues the call with *different* arguments after a yes therefore misses its
+ * approval and is asked again. That is the accepted failure mode: visible and safe, never a wrong
+ * booking.
+ */
+export function canonicalArgsHash(args: Record<string, unknown>): string {
+    return createHash("sha256").update(canonicalJson(args)).digest("hex");
+}
+
+function canonicalJson(value: unknown): string {
+    if (value === null || typeof value !== "object") return JSON.stringify(value ?? null);
+    if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+    const entries = Object.entries(value as Record<string, unknown>)
+        // An absent key and a key set to `undefined` are the same call.
+        .filter(([, inner]) => inner !== undefined)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([key, inner]) => `${JSON.stringify(key)}:${canonicalJson(inner)}`).join(",")}}`;
+}
+
+/**
+ * Is there an approval in this Conversation for this Operation with these arguments?
+ *
+ * The walk-back is over two structured Entry kinds and one Open Question read by id. **The prose is
+ * never parsed**: substring-matching a model-facing string is exactly the failure mode the
+ * comparison document names as a thing never to start doing.
+ *
+ * The five states, and why each is distinct:
+ *
+ *   - `missing`  — nothing was ever asked for this pair, or what was asked has been deleted by hand.
+ *                  Ask, and suspend.
+ *   - `waiting`  — asked and not yet answered. Suspend on the question that already exists; asking a
+ *                  second time would put two rows on the User's list for one decision.
+ *   - `declined` — answered, and not with an explicit yes. Terminal for this pair: the Assistant is
+ *                  told plainly and is not asked again, because re-asking a User who has said no is
+ *                  how a safety feature becomes a thing people click through.
+ *   - `consumed` — the yes was already spent by an earlier call. Two identical bookings need two
+ *                  approvals, or one yes places the same transaction twice under two idempotency
+ *                  keys (ADR-0012).
+ *   - `valid`    — execute.
+ */
+export type ApprovalState =
+    | { state: "missing" }
+    | { state: "waiting"; questionId: string }
+    | { state: "declined"; questionId: string; reason: string }
+    | { state: "consumed"; questionId: string }
+    | { state: "valid"; questionId: string };
+
+export async function findApproval(
+    conversation: Conversation,
+    operation: string,
+    argsHash: string,
+    loadQuestion: (questionId: string) => Promise<OpenQuestion | undefined>,
+): Promise<ApprovalState> {
+    const entries = conversation.entries ?? [];
+    const request = approvalRequestsFor(conversation, operation, argsHash).at(-1);
+    if (!request) return { state: "missing" };
+
+    const questionId = request.questionId ?? "";
+    const question = await loadQuestion(questionId);
+    // Deleted by hand. Waiting on a question that no longer exists would wait forever, and the
+    // watcher's own answered scan takes the same view of a vanished question.
+    if (!question) return { state: "missing" };
+
+    if (question.confirmed !== true) {
+        // `isAnswered()` is deliberately generous — any answer field filled in counts, because
+        // nothing stamps `answeredAt` — so a User who typed a sentence and left the tri-state
+        // Boolean alone has answered, and the watcher will resume this Conversation on that basis.
+        // Anything that is not an explicit yes is therefore a no. Treating it as "still waiting"
+        // would loop until `maxTurns`; treating it as a fresh ask would re-ask a question that has
+        // been answered.
+        //
+        // Not `isAnswered` itself: importing it from the watcher would close a module cycle
+        // (watcher → advance → watcher), and this is a rule about approvals rather than about
+        // answers in general.
+        if (question.confirmed === false) {
+            return { state: "declined", questionId, reason: "The User declined this booking." };
+        }
+        if (question.text?.trim() || question.choice?.trim() || question.answeredAt) {
+            return {
+                state: "declined",
+                questionId,
+                reason:
+                    "The User answered without confirming, which is not an approval. Nothing was " +
+                    "booked. If you still believe it should be, say so and let them decide.",
+            };
+        }
+        return { state: "waiting", questionId };
+    }
+
+    // Answered in the store, but the watcher has not appended the answer yet — possible on a
+    // recovery path. Suspend; the answered scan will append it and resume this Conversation.
+    const answer = entries.find((entry) => entry.kind === "answer" && entry.questionId === questionId);
+    if (!answer) return { state: "waiting", questionId };
+
+    // **Spent means executed, not merely attempted.** The tool-result that carries this `argsHash` is
+    // written only where the Operation ran and returned a value ({@link stampSpentApproval}), so a
+    // refusal and a rejection do not consume anything.
+    //
+    // The looser rule — *any* tool-result for this Operation after the answer — is what the change's
+    // architecture prescribed, and it is wrong on the most ordinary path there is: Firefly refuses a
+    // posting with a 422, the model retries the identical call as `postTransaction`'s own description
+    // invites it to ("Safe to retry"), and the User is asked a second time for a booking that has
+    // never happened. That is the question-per-retry this whole mechanism exists to bound.
+    const spent = entries.some(
+        (entry) =>
+            entry.kind === "tool-result" &&
+            entry.toolName === operation &&
+            entry.argsHash === argsHash &&
+            (entry.seq ?? 0) > (answer.seq ?? 0),
+    );
+    return spent ? { state: "consumed", questionId } : { state: "valid", questionId };
+}
+
+/**
+ * Record that an approval was spent, on the result of the call that spent it.
+ *
+ * Called only when the Operation required an approval, the approval was valid, and the call returned
+ * a **value** — so two identical bookings still need two approvals (ADR-0012), while a booking that
+ * was refused or rejected leaves its approval intact.
+ */
+export function stampSpentApproval(result: Entry, argsHash: string): void {
+    result.argsHash = argsHash;
+}
+
+function approvalRequestsFor(
+    conversation: Conversation,
+    operation: string,
+    argsHash: string,
+): Entry[] {
+    return (conversation.entries ?? []).filter(
+        (entry) =>
+            entry.kind === "approval-request" &&
+            entry.toolName === operation &&
+            entry.argsHash === argsHash,
+    );
+}
+
+/**
+ * How the approval question reads.
+ *
+ * The fallback exists so the check never blocks on a missing renderer; it is not the intended
+ * experience. A JSON blob in the inbox is how a safety feature becomes a thing the User clicks yes
+ * on without reading.
+ */
+export function renderApprovalPrompt(tool: ToolDefinition, args: Record<string, unknown>): string {
+    const described = tool.describeCall?.(args)?.trim();
+    const body = described
+        ? described
+        : [
+              `Approve calling **${tool.name}** with these arguments?`,
+              ``,
+              "```json",
+              JSON.stringify(args, null, 2),
+              "```",
+          ].join("\n");
+    return [
+        `**Approval needed.**`,
+        ``,
+        body,
+        ``,
+        `Confirm to let it go ahead. Nothing happens unless you do.`,
+    ].join("\n");
 }
 
 export function appendEntry(conversation: Conversation, entry: Omit<Entry, "seq" | "at">): Entry {
@@ -330,7 +515,11 @@ export class LoopDriver {
         }
 
         if (response.finishReason !== "wants-tools") {
-            appendEntry(conversation, { role: "assistant", kind: "assistant", text: response.text });
+            // The Turn's cost goes on the first Entry it wrote, which for a text reply is this one.
+            recordUsage(
+                appendEntry(conversation, { role: "assistant", kind: "assistant", text: response.text }),
+                response.usage,
+            );
             conversation.status = "done";
             conversation.finishReason = response.finishReason as FinishReason;
             conversation.result = response.text;
@@ -346,6 +535,13 @@ export class LoopDriver {
 
         // --- tool calls -------------------------------------------------------------------
         const granted = this.deps.registry.grantedTo(assistant.data);
+        /**
+         * A Turn that ends `wants-tools` appends no `assistant` Entry at all — only one
+         * `tool-intent` per call — so "the Turn's assistant Entry" names a row that does not exist
+         * for most Turns. The cost goes on the first Entry the Turn wrote, which here is the first
+         * intent, and it is set before the write that the intent-before-execution rule already does.
+         */
+        let usageRecorded = false;
 
         for (const call of response.toolCalls) {
             const tool =
@@ -362,7 +558,7 @@ export class LoopDriver {
             const idempotencyKey = `${stored.thingId}:${seq}`;
 
             // The intent is written BEFORE the operation runs, so recovery can ask what landed.
-            appendEntry(conversation, {
+            const intent = appendEntry(conversation, {
                 role: "assistant",
                 kind: "tool-intent",
                 text: response.text,
@@ -370,6 +566,10 @@ export class LoopDriver {
                 toolArgs: JSON.stringify(call.arguments),
                 idempotencyKey,
             });
+            if (!usageRecorded) {
+                recordUsage(intent, response.usage);
+                usageRecorded = true;
+            }
             await this.write(stored);
 
             if (!tool) {
@@ -389,20 +589,32 @@ export class LoopDriver {
 
             const context: ToolContext = { conversation: stored, assistant, idempotencyKey };
             let outcome: ToolOutcome;
-            try {
-                outcome = await tool.execute(call.arguments, context);
-            } catch (error) {
-                // Recoverable by the model: it sees the error as a tool result and self-corrects.
-                // Which requires the message to say what was wrong — so the model gets the
-                // Authority's own reason, and the operator gets the stack in the log. Putting the
-                // stack in the transcript instead gave the model nothing to correct against, cost
-                // tokens on every failure, and leaked host paths into the prompt.
-                log.error("a tool call threw", {
-                    conversationId: stored.thingId,
-                    tool: operation,
-                    error: describeError(error),
-                });
-                outcome = { kind: "error", message: describeForModel(error) };
+            // The approval check goes HERE — after the intent is written, before the Operation runs.
+            // That position is not incidental: the intent is already in the transcript, so a refusal
+            // is visible in the Conversation rather than inferred from its absence, and it is the
+            // same place a `pending` outcome is handled, so the refusal path is the existing path.
+            const argsHash = tool.requiresApproval ? canonicalArgsHash(call.arguments) : undefined;
+            const refusal = argsHash
+                ? await this.gateOnApproval(stored, assistant, tool, call.arguments, argsHash)
+                : undefined;
+            if (refusal) {
+                outcome = refusal;
+            } else {
+                try {
+                    outcome = await tool.execute(call.arguments, context);
+                } catch (error) {
+                    // Recoverable by the model: it sees the error as a tool result and self-corrects.
+                    // Which requires the message to say what was wrong — so the model gets the
+                    // Authority's own reason, and the operator gets the stack in the log. Putting the
+                    // stack in the transcript instead gave the model nothing to correct against, cost
+                    // tokens on every failure, and leaked host paths into the prompt.
+                    log.error("a tool call threw", {
+                        conversationId: stored.thingId,
+                        tool: operation,
+                        error: describeError(error),
+                    });
+                    outcome = { kind: "error", message: describeForModel(error) };
+                }
             }
 
             if (outcome.kind === "pending") {
@@ -425,7 +637,7 @@ export class LoopDriver {
                 return this.suspend(stored, operation, outcome, 1);
             }
 
-            appendEntry(conversation, {
+            const result = appendEntry(conversation, {
                 role: "tool",
                 kind: "tool-result",
                 toolName: operation,
@@ -435,12 +647,127 @@ export class LoopDriver {
                         : JSON.stringify(outcome.value ?? null),
                 idempotencyKey,
             });
+            // The approval is spent by a call that ran and returned a value, and by nothing else.
+            if (argsHash && !refusal && outcome.kind === "value") {
+                stampSpentApproval(result, argsHash);
+            }
         }
 
         conversation.leaseUntil = "";
         conversation.status = "running";
         await this.write(stored);
         return { status: "running", turnsRun: 1 };
+    }
+
+    /**
+     * The refusal, or `undefined` when the call may go ahead.
+     *
+     * The model does not have to know this rule: an Assistant whose prompt forgot to ask still
+     * cannot book — it simply gets asked on the model's behalf and is resumed with the answer.
+     *
+     * Note what this does *not* do: it never goes through `escalate()`. A missing approval is the
+     * ordinary path, not a stuck Conversation, and `escalate()` would increment `escalationCount` —
+     * so three unapproved bookings would mark the Conversation `failed`. It also sets no `wakeAt`,
+     * following `ui.askUser`: an unanswered approval waits, it does not lapse into a booking.
+     */
+    private async gateOnApproval(
+        stored: Stored<Conversation>,
+        assistant: Stored<Assistant>,
+        tool: ToolDefinition,
+        args: Record<string, unknown>,
+        argsHash: string,
+    ): Promise<ToolOutcome | undefined> {
+        const approval = await findApproval(stored.data, tool.name, argsHash, (questionId) =>
+            this.loadQuestion(questionId),
+        );
+
+        switch (approval.state) {
+            case "valid":
+                return undefined;
+            case "declined":
+                // Terminal for this pair, and an ordinary tool error the model can self-correct
+                // against. NOT `pending`: a second question would be raised on every retry, capped
+                // only by `maxTurns`.
+                log.info("an operation requiring approval was declined", {
+                    conversationId: stored.thingId,
+                    tool: tool.name,
+                });
+                return { kind: "error", message: approval.reason };
+            case "waiting":
+                return {
+                    kind: "pending",
+                    waitingFor: "user",
+                    questionId: approval.questionId,
+                    note: REFUSED_PENDING_APPROVAL,
+                };
+            case "missing":
+            case "consumed": {
+                const questionId = await this.raiseApproval(stored, assistant, tool, args, argsHash);
+                log.info("an operation requiring approval was refused and the User was asked", {
+                    conversationId: stored.thingId,
+                    tool: tool.name,
+                    questionId,
+                    // Which of the two it was matters when reading a log: a consumed approval means
+                    // the model asked to do the same thing twice.
+                    because: approval.state,
+                });
+                return {
+                    kind: "pending",
+                    waitingFor: "user",
+                    questionId,
+                    note: REFUSED_PENDING_APPROVAL,
+                };
+            }
+        }
+    }
+
+    /**
+     * Ask the User to approve one Operation with one set of arguments, and record that we did.
+     *
+     * The question is raised before the Entry is appended, so a crash in between leaves an Open
+     * Question with no record of it. That is why the idempotency key is derived from the arguments
+     * and the attempt number rather than from the entry sequence: the retry computes the same key,
+     * `create` finds the question already there, and the orphan is adopted rather than duplicated.
+     */
+    private async raiseApproval(
+        stored: Stored<Conversation>,
+        assistant: Stored<Assistant>,
+        tool: ToolDefinition,
+        args: Record<string, unknown>,
+        argsHash: string,
+    ): Promise<string> {
+        const conversation = stored.data;
+        const attempt = approvalRequestsFor(conversation, tool.name, argsHash).length + 1;
+        const questionId = await this.deps.raiseQuestion({
+            conversation: stored,
+            assistantKey: assistant.data.key ?? "",
+            kind: "confirm",
+            prompt: renderApprovalPrompt(tool, args),
+            // Short enough for the store's 100-character `exact_match` ceiling; the (Operation,
+            // argsHash) pair is matched by the walk-back, so the key only has to separate attempts.
+            idempotencyKey: `approval:${stored.thingId}:${argsHash.slice(0, 16)}:${attempt}`,
+        });
+        appendEntry(conversation, {
+            role: "system",
+            kind: "approval-request",
+            toolName: tool.name,
+            argsHash,
+            questionId,
+        });
+        return questionId;
+    }
+
+    private async loadQuestion(questionId: string): Promise<OpenQuestion | undefined> {
+        if (!questionId) return undefined;
+        try {
+            const found = await this.deps.things.get<OpenQuestion>(
+                SPECS.OpenQuestion_DM,
+                `OpenQuestion_DM/${questionId}`,
+            );
+            return found.data;
+        } catch {
+            return undefined;
+        }
     }
 
     /**
@@ -500,13 +827,19 @@ export class LoopDriver {
         });
 
         const settle = (verdict: ToolOutcome, text: string): ToolOutcome => {
-            appendEntry(conversation, {
+            const result = appendEntry(conversation, {
                 role: "tool",
                 kind: "tool-result",
                 toolName: operation,
                 toolResult: text,
                 idempotencyKey: key,
             });
+            // A reconciled call that DID land spent its approval, exactly as an ordinary one does.
+            // Without this a crash between the booking and its result would leave the approval
+            // looking unspent, and one yes could place the same transaction twice.
+            if (tool?.requiresApproval && verdict.kind === "value") {
+                stampSpentApproval(result, canonicalArgsHash(safeParse(intent.toolArgs)));
+            }
             return verdict;
         };
 
@@ -678,6 +1011,20 @@ export class LoopDriver {
 
 export function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Stamp what the model charged onto the Entry the Turn wrote first.
+ *
+ * Nothing when the provider reported nothing — a Turn killed by a thrown `TransientLlmError`, or one
+ * ending `finishReason: "error"`, which escalates without appending an assistant Entry at all. The
+ * consequence is stated rather than papered over: the Turns of a Conversation sum to a **lower
+ * bound** on its cost, not to its cost.
+ */
+function recordUsage(entry: Entry, usage: LlmUsage | undefined): void {
+    if (!usage) return;
+    entry.promptTokens = usage.promptTokens;
+    entry.completionTokens = usage.completionTokens;
 }
 
 export type { OpenQuestion };

@@ -1,5 +1,11 @@
 [
   {
+    "assistant": "accountant",
+    "whenContains": "This is a scheduled run.",
+    "text": "I checked what is outstanding. Nothing is unpaid and nothing is waiting to be claimed, so there is nothing to do.",
+    "finishReason": "answered"
+  },
+  {
     "assistant": "receptionist",
     "turn": 0,
     "text": "This looks like a private medical invoice. Recording it as an Invoice Thing.",
@@ -58,7 +64,7 @@
   {
     "assistant": "accountant",
     "turn": 1,
-    "text": "I have the chart of accounts. Asking the User to approve the booking.",
+    "text": "I have the chart of accounts. Asking the User what they want done.",
     "toolCalls": [
       {
         "name": "ui__askUser",
@@ -95,6 +101,29 @@
   {
     "assistant": "accountant",
     "turn": 3,
+    "text": "The User has approved the exact posting now, so I am making the same call again.",
+    "toolCalls": [
+      {
+        "name": "bookkeeping__postTransaction",
+        "arguments": {
+          "groupTitle": "Praxis Dr. Meyer 2026-118",
+          "splits": [
+            {
+              "type": "withdrawal",
+              "date": "2026-08-01",
+              "amount": "96.50",
+              "description": "Consultation and dressing change, 24 July",
+              "sourceAccount": "Payables",
+              "destinationAccount": "Expenses:Health"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "assistant": "accountant",
+    "turn": 4,
     "text": "Booked. 96.50 EUR is recorded against Expenses:Health and shows as owed on Payables. Nothing has been paid yet.",
     "finishReason": "answered"
   },

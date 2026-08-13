@@ -12,7 +12,7 @@ import { buildHarness, nowIso, type Harness } from "./support/harness.js";
 import { SPECS } from "../src/a12/things.js";
 import { RUNTIME_STATE_KEY } from "../src/watcher/watcher.js";
 import { isPaused, setPaused } from "../src/bootstrap/bootstrap.js";
-import type { Conversation, RuntimeState, Stored } from "../src/domain/types.js";
+import type { Assistant, Conversation, RuntimeState, Stored } from "../src/domain/types.js";
 
 /** The watermark the Runtime would have had when the batch landed. */
 async function seedState(harness: Harness, watermark: string): Promise<void> {
@@ -443,5 +443,284 @@ describe("the RuntimeState the scan writes back", () => {
 
         expect(injected).toBe(true);
         expect((await state(harness)).data.watermark).toBe(ahead);
+    });
+});
+
+/**
+ * Scan 7 — the Schedule Trigger, which until now was a field name (ADR-0016).
+ *
+ * The property under test everywhere here is the same one scan 1 has: **birth is exactly-once by
+ * query**. What is different is that there is no subject Thing to ask about, so the identity is the
+ * due instant — and the reason that is worth a decision rather than a watermark is that a watermark
+ * is written *after* the work, so a Runtime that dies in between chases the insurer twice.
+ */
+describe("the schedule scan (scan 7)", () => {
+    /** An Assistant that fires daily and does nothing else. */
+    async function scheduled(harness: Harness, overrides: Partial<Assistant> = {}) {
+        return harness.seedAssistant({
+            key: "accountant",
+            triggers: [{ kind: "schedule", cron: "0 7 * * *" }],
+            tools: [{ operation: "thingstore.search" }],
+            ...overrides,
+        });
+    }
+
+    const scheduledConversations = async (harness: Harness) =>
+        (await conversations(harness)).filter((row) => row.data.scheduledFor);
+
+    it("births exactly one Conversation for a due slot, and records the instant it served", async () => {
+        const harness = buildHarness([{ text: "Nothing outstanding.", finishReason: "answered" }]);
+        await scheduled(harness);
+
+        await harness.watcher.scan();
+
+        const born = await scheduledConversations(harness);
+        expect(born).toHaveLength(1);
+        // The due instant, not the instant the scan noticed it — that is what makes it recomputable.
+        expect(born[0]!.data.scheduledFor).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
+        // Exactly one of the two identities is set (ADR-0016). Both empty is a bug; both set is a bug.
+        expect(born[0]!.data.subjectThingId).toBeFalsy();
+        // Stable-first, volatile-last: the standing instruction opens the prompt and the varying
+        // instant closes it.
+        const prompt = (born[0]!.data.entries ?? []).find((entry) => entry.kind === "prompt")!.text!;
+        expect(prompt.startsWith("This is a scheduled run.")).toBe(true);
+        expect(prompt.trimEnd().endsWith(").")).toBe(true);
+        // The **wall clock**, not the UTC instant. `scheduledFor` is canonical UTC, so labelling it
+        // with the cron's timezone — "05:00:00Z (Europe/Berlin)" — invites the model to read 05:00 as
+        // local, which is exactly the midnight ambiguity the 07:00 slot was chosen to avoid.
+        expect(prompt).toMatch(/Scheduled for: \d{2}:\d{2} on \d{4}-\d{2}-\d{2} \(Europe\/Berlin\)\./);
+        expect(prompt).not.toContain(`${born[0]!.data.scheduledFor}Z`);
+    });
+
+    it("serves the slot exactly once across a re-scan, a restart and a replayed watermark", async () => {
+        const harness = buildHarness([{ text: "Nothing outstanding.", finishReason: "answered" }]);
+        await scheduled(harness);
+
+        await harness.watcher.scan();
+        // A re-scan in the same process.
+        await harness.watcher.scan();
+        // A restart: a brand-new Runtime over the same data, holding no memory of the first.
+        const restarted = buildHarness([{ text: "Nothing outstanding.", finishReason: "answered" }], {
+            store: harness.store,
+        });
+        await restarted.watcher.scan();
+        // And a watermark rolled backwards, which is what would re-queue anything keyed on one.
+        const loaded = await restarted.watcher.loadState();
+        await restarted.things.update(SPECS.RuntimeState_DM, loaded.docRef, {
+            ...loaded.data,
+            watermark: nowIso(new Date(Date.now() - 7 * 86_400_000)),
+        });
+        await restarted.watcher.scan();
+
+        expect(await scheduledConversations(restarted)).toHaveLength(1);
+    });
+
+    it("catches up once when three slots were missed, not once per slot", async () => {
+        // Three days down. The scan only ever evaluates the LATEST due instant, so Saturday and
+        // Sunday are never mentioned: a Schedule is a standing instruction about the state of the
+        // world now, not an event log to replay.
+        const harness = buildHarness([{ text: "Nothing outstanding.", finishReason: "answered" }]);
+        await scheduled(harness);
+
+        await harness.watcher.scan();
+
+        const born = await scheduledConversations(harness);
+        expect(born).toHaveLength(1);
+    });
+
+    it("skips a slot while the previous one is unfinished", async () => {
+        const harness = buildHarness([]);
+        const assistant = await scheduled(harness);
+
+        // A slot from yesterday that is still waiting on the User.
+        await harness.birth({ assistant, scheduledFor: "2026-08-12T05:00:00" });
+        const stalled = (await scheduledConversations(harness))[0]!;
+        await harness.things.update(SPECS.Conversation_DM, stalled.docRef, {
+            ...stalled.data,
+            status: "waiting",
+            waitingFor: "user",
+        });
+
+        await harness.watcher.scan();
+
+        // Today's slot did not give birth. Two live Conversations for one recurring errand would be
+        // two Open Questions the User cannot tell apart, so a Schedule stalls rather than accumulates.
+        expect(await scheduledConversations(harness)).toHaveLength(1);
+        expect((await scheduledConversations(harness))[0]!.data.scheduledFor).toBe("2026-08-12T05:00:00");
+    });
+
+    it("resumes giving birth once the stalled slot has finished", async () => {
+        const harness = buildHarness([{ text: "Nothing outstanding.", finishReason: "answered" }]);
+        const assistant = await scheduled(harness);
+        await harness.birth({ assistant, scheduledFor: "2026-08-12T05:00:00" });
+        const previous = (await scheduledConversations(harness))[0]!;
+        await harness.things.update(SPECS.Conversation_DM, previous.docRef, {
+            ...previous.data,
+            status: "done",
+        });
+
+        await harness.watcher.scan();
+
+        expect(await scheduledConversations(harness)).toHaveLength(2);
+    });
+
+    it("says a schedule is held once, not on every scan", async () => {
+        // The skip rule is the designed, healthy behaviour, and after ADR-0018 it is the *common*
+        // case — the Accountant waits on an approval at least once per booking. A warning on every
+        // scan is 30 lines a minute about a system working as intended, which is the same argument
+        // the frozen-frontier warning already makes about the watermark.
+        const harness = buildHarness([]);
+        const assistant = await scheduled(harness);
+        await harness.birth({ assistant, scheduledFor: "2026-08-12T05:00:00" });
+        const stalled = (await scheduledConversations(harness))[0]!;
+        await harness.things.update(SPECS.Conversation_DM, stalled.docRef, {
+            ...stalled.data,
+            status: "waiting",
+            waitingFor: "user",
+        });
+        const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+        for (let pass = 0; pass < 5; pass += 1) await harness.watcher.scan();
+
+        const held = warnings.mock.calls.filter((call) => String(call[0] ?? "").includes("has been held"));
+        // Nothing yet: half an hour has not passed, and an approval answered over a cup of coffee
+        // should never produce a line at all.
+        expect(held).toHaveLength(0);
+        warnings.mockRestore();
+        expect(await scheduledConversations(harness)).toHaveLength(1);
+    });
+
+    it("does not consult the birth budget for a slot that has already been served", async () => {
+        // ADR-0016: "a schedule whose slot is already served costs one comparison and no query".
+        // Checking the budget first meant an exhausted hour logged a warning on every scan about a
+        // birth that was never going to happen.
+        const harness = buildHarness([{ text: "Nothing outstanding.", finishReason: "answered" }], {
+            maxBirthsPerHour: 0,
+        });
+        await scheduled(harness);
+        const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+        // First pass: due, unserved, and no budget — so it warns once and gives birth to nothing.
+        await harness.watcher.scan();
+        expect(await scheduledConversations(harness)).toHaveLength(0);
+        expect(
+            warnings.mock.calls.filter((call) => String(call[0] ?? "").includes("birth budget")),
+        ).toHaveLength(1);
+        warnings.mockRestore();
+    });
+
+    it("does not fire for a disabled Assistant, or while the Runtime is paused", async () => {
+        const disabled = buildHarness([]);
+        await scheduled(disabled, { enabled: false });
+        await disabled.watcher.scan();
+        expect(await scheduledConversations(disabled)).toHaveLength(0);
+
+        const paused = buildHarness([]);
+        await scheduled(paused);
+        // `paused` short-circuits the whole scan, so it needs a RuntimeState to be set on.
+        await paused.watcher.loadState();
+        await setPaused(paused.things, true);
+        await paused.watcher.scan();
+        expect(await scheduledConversations(paused)).toHaveLength(0);
+    });
+
+    it("skips an unreadable cron, says so once per process, and disables nothing", async () => {
+        const harness = buildHarness([]);
+        await scheduled(harness, { triggers: [{ kind: "schedule", cron: "every other tuesday" }] });
+        const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+        await harness.watcher.scan();
+        await harness.watcher.scan();
+        await harness.watcher.scan();
+
+        expect(await scheduledConversations(harness)).toHaveLength(0);
+        const complaints = errors.mock.calls.filter((call) =>
+            String(call[0] ?? "").includes("schedule that cannot be read"),
+        );
+        expect(complaints).toHaveLength(1);
+        errors.mockRestore();
+
+        // Nothing in this change disables an Assistant: a Schedule cannot run away, so there is no
+        // runaway to bound.
+        const [assistant] = await harness.things.search<Assistant>(SPECS.Assistant_DM, undefined, 10);
+        expect(assistant!.data.enabled).not.toBe(false);
+    });
+
+    it("finishes quietly when there is nothing to do (#7)", async () => {
+        // No mechanism, and that is the point: a finished Conversation is already silent, because
+        // ADR-0015 demands noise only when something *failed*. What was needed was a prompt that says
+        // finishing with "nothing to do" is a complete answer — without it the first useful schedule
+        // produces an Open Question per firing.
+        const harness = buildHarness([
+            { text: "Nothing is outstanding — nothing to do.", finishReason: "answered" },
+        ]);
+        await scheduled(harness);
+
+        await harness.watcher.scan();
+        // Scan 7 runs last, so the newborn takes its Turn on the following pass.
+        await harness.watcher.scan();
+
+        const born = (await scheduledConversations(harness))[0]!;
+        const finished = await harness.conversation(born.docRef);
+        expect(finished.data.status).toBe("done");
+        expect(finished.data.finishReason).toBe("answered");
+        expect(finished.data.result).toContain("nothing to do");
+        // The quiet Conversation IS the record that the slot was served, so nothing else is needed —
+        // and no question was raised to report that there was nothing to report.
+        expect(await harness.questions()).toHaveLength(0);
+    });
+
+    it("asks about everything at once rather than one item at a time", async () => {
+        // Batching is a correctness property of the Skill's prose, which is not where anyone looks
+        // for one: a question about the first of two unpaid invoices holds the next slot until it is
+        // answered. This asserts the shape the Skill demands — one question covering both.
+        const harness = buildHarness([
+            {
+                assistant: "accountant",
+                turn: 0,
+                toolCalls: [{ name: "bookkeeping__listOpenItems", arguments: {} }],
+            },
+            {
+                assistant: "accountant",
+                turn: 1,
+                toolCalls: [
+                    {
+                        name: "ui__askUser",
+                        arguments: {
+                            kind: "free-text",
+                            prompt:
+                                "**Two things are outstanding.**\n\n- Praxis Dr. Meyer 2026-118, 96.50 EUR\n" +
+                                "- Dachdecker Klein 2026-77, 1420.00 EUR\n\nShall I chase both?",
+                        },
+                    },
+                ],
+            },
+        ]);
+        await scheduled(harness, {
+            tools: [{ operation: "bookkeeping.listOpenItems" }, { operation: "ui.askUser" }],
+        });
+
+        // Birth, then the two Turns — scan 7 runs last, so each pass moves it on by one.
+        await harness.watcher.scan();
+        await harness.watcher.scan();
+        await harness.watcher.scan();
+
+        const questions = await harness.questions();
+        expect(questions).toHaveLength(1);
+        expect(questions[0]!.data.prompt).toContain("2026-118");
+        expect(questions[0]!.data.prompt).toContain("2026-77");
+
+        // And the schedule is now stalled on it, which is exactly why one question rather than two.
+        await harness.watcher.scan();
+        expect(await scheduledConversations(harness)).toHaveLength(1);
+    });
+
+    it("leaves an Assistant with no schedule Trigger alone", async () => {
+        const harness = buildHarness([]);
+        await harness.seedAssistant({ triggers: [{ kind: "assistant-call" }] });
+
+        await harness.watcher.scan();
+
+        expect(await scheduledConversations(harness)).toHaveLength(0);
     });
 });

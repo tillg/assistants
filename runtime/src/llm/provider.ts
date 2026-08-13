@@ -22,12 +22,25 @@ export interface LlmToolCall {
 
 export type LlmFinishReason = "answered" | "wants-tools" | "length" | "error";
 
+/**
+ * What the model charged for one call.
+ *
+ * Absent when no response came back at all — a thrown {@link TransientLlmError}, or a request that
+ * never reached the provider. That absence is why a Conversation's Turns sum to a **lower bound** on
+ * its cost rather than to its cost, and it is deliberately not chased onto the error paths.
+ */
+export interface LlmUsage {
+    promptTokens: number;
+    completionTokens: number;
+}
+
 export interface LlmResponse {
     text: string;
     toolCalls: LlmToolCall[];
     finishReason: LlmFinishReason;
     /** Present when finishReason is "error"; the loop decides whether it is transient. */
     error?: { message: string; transient: boolean };
+    usage?: LlmUsage;
 }
 
 export interface LlmMessage {

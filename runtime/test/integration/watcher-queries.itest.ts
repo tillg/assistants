@@ -48,7 +48,7 @@ import {
 
 const C = SPECS.Conversation_DM;
 
-/** Every shape the six scans and their helpers send, named after the scan that sends it. */
+/** Every shape the seven scans and their helpers send, named after the scan that sends it. */
 const SCAN_QUERIES: Array<{ name: string; spec: ModelSpec; constraint?: Constraint }> = [
     { name: "scan 1 · enabled assistants (unconstrained)", spec: SPECS.Assistant_DM },
     ...TRIGGER_ELIGIBLE_MODELS.map((model) => {
@@ -103,6 +103,28 @@ const SCAN_QUERIES: Array<{ name: string; spec: ModelSpec; constraint?: Constrai
         constraint: and(
             eq(fieldPath(C, "status"), "running"),
             unset(fieldPath(C, "leaseUntil")),
+        ),
+    },
+    {
+        name: "scan 7 · a scheduled slot already served (assistant, scheduledFor)",
+        spec: C,
+        // The one that could not be caught by a unit test: `scheduledFor` is a brand-new indexed
+        // field, and the whole of scan 7's exactly-once guarantee is this `exact_match` matching a
+        // canonical UTC instant. An unindexed field, or one the re-index missed, answers nothing —
+        // and "nothing" is indistinguishable from "not yet served", so the schedule would fire on
+        // every scan for ever.
+        constraint: and(
+            eq(fieldPath(C, "assistantKey"), "accountant"),
+            eq(fieldPath(C, "scheduledFor"), "2026-01-01T05:00:00"),
+        ),
+    },
+    {
+        name: "scan 7 · an earlier slot still unfinished (the skip rule)",
+        spec: C,
+        constraint: and(
+            eq(fieldPath(C, "assistantKey"), "accountant"),
+            not(unset(fieldPath(C, "scheduledFor"))),
+            or(eq(fieldPath(C, "status"), "running"), eq(fieldPath(C, "status"), "waiting")),
         ),
     },
     {
@@ -279,6 +301,63 @@ describe.skipIf(!THING_STORE_UP)("watcher queries against the live ThingStore", 
                 created.docRef,
             );
         }
+    });
+
+    it("finds a scheduled Conversation by its due instant — scan 7's whole exactly-once guarantee", async () => {
+        // `exact_match` on `scheduledFor` is the *only* thing standing between a daily schedule and
+        // one Conversation every two seconds. The unit suite proves the arithmetic against a fake
+        // that was taught to match; a fake cannot vouch for the field being indexed, for the
+        // re-index having run, or for the store comparing a canonical UTC instant the way a plain
+        // string comparison would. Zero rows here would be indistinguishable from "not yet served".
+        // The row it seeds outlives the test, deliberately: `Trash` refuses to delete a Conversation
+        // at all, because deleting a Runtime-owned document is how a suite strands one. It is inert —
+        // scan 7 iterates over *Assistants* and no Assistant has this key, and it is `done`, so no
+        // other scan matches it either.
+        const key = unique("scan7-served");
+        const due = "2031-03-29T01:30:00";
+        const created = await things.create(SPECS.Conversation_DM, {
+            assistantKey: "itest-scheduled",
+            title: "itest scan 7",
+            scheduledFor: due,
+            status: "done",
+            turnCount: 1,
+            createdAt: LONG_AGO,
+            idempotencyKey: key,
+        });
+        trash.add(created.docRef);
+
+        const served = await things.search(
+            C,
+            and(eq(fieldPath(C, "assistantKey"), "itest-scheduled"), eq(fieldPath(C, "scheduledFor"), due)),
+            5,
+        );
+        expect(served.map((row) => row.docRef), "the served slot was not found by its due instant").toContain(
+            created.docRef,
+        );
+
+        // And a neighbouring instant must NOT match, or every slot would look served.
+        const neighbour = await things.search(
+            C,
+            and(
+                eq(fieldPath(C, "assistantKey"), "itest-scheduled"),
+                eq(fieldPath(C, "scheduledFor"), "2031-03-30T01:30:00"),
+            ),
+            5,
+        );
+        expect(neighbour.map((row) => row.docRef)).not.toContain(created.docRef);
+
+        // The skip rule's query reads it back too: this one is `done`, so it must not count as
+        // unfinished — otherwise the schedule would stall on its own successful run.
+        const unfinished = await things.search(
+            C,
+            and(
+                eq(fieldPath(C, "assistantKey"), "itest-scheduled"),
+                not(unset(fieldPath(C, "scheduledFor"))),
+                or(eq(fieldPath(C, "status"), "running"), eq(fieldPath(C, "status"), "waiting")),
+            ),
+            5,
+        );
+        expect(unfinished.map((row) => row.docRef)).not.toContain(created.docRef);
     });
 
     describe("the order the materialised scan depends on", () => {

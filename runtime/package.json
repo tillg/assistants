@@ -19,6 +19,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
+    "cron-parser": "5.8.1",
     "undici": "^7.10.0"
   },
   "devDependencies": {

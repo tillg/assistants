@@ -118,6 +118,22 @@
         "width": 1,
         "elementRef": "f_waitingFor",
         "sortable": true
+      },
+      {
+        "id": "col_scheduledFor",
+        "label": [
+          {
+            "locale": "en",
+            "text": "Scheduled for"
+          },
+          {
+            "locale": "de",
+            "text": "Geplant für"
+          }
+        ],
+        "width": 1,
+        "elementRef": "f_scheduledFor",
+        "sortable": true
       }
     ],
     "rowActionGroup": {

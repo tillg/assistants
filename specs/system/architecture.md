@@ -2,7 +2,7 @@
 
 The domain this realises is in [domain.md](domain.md); the vocabulary is in
 [CONTEXT.md](../../CONTEXT.md). [README.md](../../README.md) is the operator's view — how to run
-it, and what every `just` recipe does — and is not repeated here. The seventeen decisions with
+it, and what every `just` recipe does — and is not repeated here. The eighteen decisions with
 their alternatives and reversal costs are in [docs/adr/](../../docs/adr/), and the running record
 of decisions taken while building is [DECISIONS.md](../../DECISIONS.md).
 
@@ -109,7 +109,7 @@ every Gradle task the template provides.
 │   ├── src/a12/              JSON-RPC client + typed Thing repository
 │   ├── src/llm/              provider interface + openai / anthropic / scripted
 │   ├── src/loop/             advance() — one Conversation, one Turn
-│   ├── src/watcher/          the six scans
+│   ├── src/watcher/          the seven scans
 │   ├── src/tools/            the registry and the seventeen Operations
 │   ├── src/connectors/       firefly
 │   ├── src/bootstrap/        seeds the two Assistants and the RuntimeState singleton
@@ -199,7 +199,7 @@ Two halves, roughly 6,900 lines of TypeScript.
 ```mermaid
 flowchart TB
     subgraph RT["Runtime"]
-        W["Trigger Watcher<br/>watcher.ts<br/>six scans, every 2s"]
+        W["Trigger Watcher<br/>watcher.ts<br/>seven scans, every 2s"]
         L["Loop Driver<br/>advance.ts<br/>one Conversation, one Turn"]
         TR["Tool registry<br/>registry.ts + tools.ts<br/>17 Operations, per-Assistant filtering"]
         C["A12 client + Thing repository<br/>a12/client.ts, a12/things.ts"]
@@ -235,16 +235,20 @@ advance(conversationId):
         key = conv.id + ':' + nextSeq(conv)
         append(conv, intent(call, key))
         write(conv)                           # ← INTENT IS WRITTEN BEFORE EXECUTION
-        result = tools.execute(call, conv, key)
+        hash    = canonicalArgsHash(call.args) if call.tool.requiresApproval else none
+        refusal = gateOnApproval(conv, call, hash) if hash else none
+        result  = refusal or tools.execute(call, conv, key)   # ← APPROVED BEFORE IT RUNS
         if result.pending:
             conv.status = 'waiting'; conv.waitingFor = result.waitingFor
             conv.wakeAt = result.wakeAt
             write(conv); return               # the process now holds nothing
-        append(conv, toolResult(call, result))
+        entry = append(conv, toolResult(call, result))
+        if hash and not refusal and result.kind == 'value':
+            entry.argsHash = hash             # the approval is spent by a call that RAN
     write(conv)
 ```
 
-Three properties are load-bearing:
+Four properties are load-bearing:
 
 1. **One call, one Turn.** `advance` never loops internally. Continuing is re-entry through the
    same door birth uses.
@@ -253,6 +257,81 @@ Three properties are load-bearing:
    return in seconds and block inside the Turn; here the Operations are human-paced by design.
 3. **The Conversation is an intent log, not a result log** (ADR-0012). The intent, including its
    idempotency key, is written *before* the Operation runs.
+4. **The approval gate sits between the two.** Its position is not incidental: after the intent, so
+   a refusal is visible in the transcript rather than inferred from an absence; before execution, so
+   there is nothing to undo. See below.
+
+Where a Turn's cost is recorded is a consequence of this shape. A Turn that ends `wants-tools`
+appends no `assistant` Entry at all — only one `tool-intent` per call — so "the Turn's assistant
+Entry" names a row that does not exist for most Turns. The rule is therefore **the first Entry the
+Turn wrote**: the `assistant` entry for a text reply, the first `tool-intent` otherwise.
+
+#### Approvals (ADR-0018)
+
+An Operation may declare `requiresApproval`, and the Runtime refuses to run it without an answered
+confirmation that **the Runtime itself** raised, for that Operation, with those exact arguments, in
+that Conversation. `bookkeeping.postTransaction` is the only Operation that declares it today. The
+domain rules are in [domain.md](domain.md); what belongs here is the mechanism, which is three small
+additions and one walk-back.
+
+The arguments arrive as the model produced them, so neither key order nor number formatting is
+stable. `canonicalArgsHash` hashes a canonical form — keys sorted, numbers normalised — and that
+hash is what the approval is bound to. Nothing forces the model to re-issue *identical* arguments
+after the yes, so a drifted call misses its approval and the User is asked again: visible and safe,
+never a wrong booking.
+
+Recognising an approval in the transcript needs something machine-readable, because **the prose is
+never parsed** — substring-matching a model-facing string is a failure mode
+[the comparison document](../research/ASSISTANTS_VS_OPENCLAW.md) names as one never to start. So
+`Entry` gains `questionId`, set by scan 2 on every `answer` entry it appends and read only by
+approvals, and a `kind: "approval-request"` Entry carries `toolName`, `argsHash` and `questionId`.
+That entry deliberately carries **no `text`**: `buildMessages` maps an unknown kind with a `text` to
+a *user* message, which between a tool call and its result is a shape Anthropic rejects outright.
+It is machine-readable only, and the model learns of the refusal from the pending tool-result.
+
+`findApproval` then walks back over those two kinds and reads one Open Question by id:
+
+```
+find the last approval-request for (toolName, argsHash)
+  → no such request                                          → refuse, and raise one
+  → its answer entry is absent                               → refuse, still waiting
+  → its question is not confirmed: true                      → decline, terminal
+  → a tool-result carrying this argsHash follows the answer   → refuse, consumed — raise a fresh one
+  → otherwise                                                → execute
+```
+
+Three details in that predicate are each a bug that was either avoided or found and fixed:
+
+- **Spent means executed, not attempted.** The `argsHash` is stamped onto the *tool-result* too, and
+  only where the Operation ran and returned a value — including on the reconciliation path, so a
+  booking that turns out to have landed still spends its approval and two identical bookings still
+  need two approvals (ADR-0012). Keying consumption on "a tool-result for this Operation" instead
+  would let a Firefly 422, after which nothing was booked, consume the approval — and the retry that
+  `postTransaction`'s own description invites would ask the User a second time for a booking that
+  never happened.
+- **Anything short of an explicit `true` is a no.** `isAnswered` is deliberately generous, so a User
+  who types a sentence and leaves the tri-state Boolean unset has *answered* and the Conversation
+  resumes. Treating that as "still waiting" would loop until `maxTurns`; treating it as a fresh
+  refusal would re-ask, which the domain rules forbid. The model is told which it was, so a User who
+  meant yes and forgot the tick can see why nothing happened.
+- **The refusal uses `raiseQuestion`, never `escalate()`.** A missing approval is the ordinary path,
+  not a stuck Conversation; going through `escalate()` would increment `escalationCount` and three
+  unapproved bookings would mark the Conversation `failed`. It returns `pending` waiting on the User
+  with **no `wakeAt`** — an unanswered approval waits, it does not lapse into a booking — and the
+  note tells the model *refused pending approval, not queued*, because the generic suspension
+  wording would tell it the booking is on its way.
+
+The question's idempotency key is `approval:<conversationId>:<argsHash[0:16]>:<attempt>` rather than
+the entry's sequence number: the question is created *before* the `approval-request` Entry recording
+it, so a crash in between leaves an orphan, and a sequence-derived key would mint a second question
+on the retry while the first sat unanswered forever. Derived from the arguments, the retry computes
+the same key and `create` adopts the orphan.
+
+How the question reads is `describeCall` on the Operation, because this question is the entire
+user-facing surface of *"nothing is booked without an answer"*. The Runtime adds the **Approval
+needed.** framing; an Operation without a renderer falls back to a fenced JSON block, which exists so
+the check never blocks on a missing renderer and is not the intended experience — a JSON blob in the
+inbox is how a safety feature becomes a thing the User clicks yes on without reading.
 
 #### The trigger watcher
 
@@ -266,6 +345,7 @@ A scan every two seconds. It does nothing at all while `RuntimeState.paused` is 
 | 4 | Conversations `running` with `leaseUntil` in the past | recover per the intent log, continue |
 | 5 | Conversations `done` with a `parentConversationId` and no `resultDeliveredAt` | deliver to the parent, stamp, continue |
 | 6 | Conversations `running` that simply owe their next Turn | continue |
+| 7 | Enabled Assistants whose `schedule` Trigger's latest due instant has no Conversation on `(assistantKey, scheduledFor)` | birth |
 
 Scan 1's exactly-once guarantee is two indexed `exact_match`es on `(assistantKey,
 subjectThingId)`. It subsumes — but does not replace — the rule that nothing is birthed from a
@@ -279,8 +359,31 @@ matching the scan. This also disposes of the User re-editing an answered questio
 result, and of an answer whose `seq` is behind the Conversation's position — three cases, one
 shape: append it as an entry and change nothing.
 
-**A `schedule` Trigger has no scan.** `TriggerKind` admits `schedule` and `Assistant_DM` carries
-`cron`, but nothing fires one. This is a known gap, not a hidden one.
+**Scan 7 is the only scan whose input is configuration rather than the store** ([ADR-0016](../../docs/adr/0016-a-schedule-fires-on-its-due-instant.md)).
+It reads `cron` off each enabled Assistant's `schedule` Triggers, resolves the **latest** due instant
+in `SCHEDULE_TIMEZONE`, and births a Conversation carrying it as `scheduledFor` unless one already
+exists. Only ever evaluating the latest instant is what makes three properties fall out of the
+mechanism rather than out of code here: exactly-once across a re-scan, a restart and a replayed
+watermark; catch-up **once** rather than once per missed slot; and no watermark at all — a mark
+written *after* the work is what ADR-0012 exists to avoid, and a schedule that chased an insurer
+would chase them twice.
+
+A slot is **skipped entirely while an earlier one for the same Assistant is unfinished**, so a
+Schedule stalls rather than accumulates. That is also why nothing here disables an Assistant: there
+is no runaway to bound, and a stall already has the unanswered Open Question that caused it sitting
+in the User's inbox. Repeated skipping is a log warning, the way a pinned watermark is.
+
+Daylight saving is the only genuinely hard part, and it is `latestDueInstantBefore` in
+`runtime/src/watcher/schedule.ts` that owns it: `cron-parser` does the arithmetic, and the wrapper
+decides that the autumn wall-clock slot which happens twice is **one** slot (collapsed onto its first
+occurrence, so the second recomputes to a `scheduledFor` already served) while the spring slot that
+does not exist simply never appears. An unparseable `cron` is a configuration error on a Thing the
+User owns: it is logged once per Assistant per process and the Trigger is skipped.
+
+**Stable-first, volatile-last.** `scheduledFor` is the first time-varying value in this system to
+reach a prompt, and the rule that was true by accident is now written down: the standing half of a
+prompt comes first, anything that changes per Conversation comes last. Free, and only free before
+something breaks it.
 
 #### Idempotency and recovery
 
@@ -318,7 +421,14 @@ compose healthcheck fails once it is stale (ADR-0015).
 #### Tools
 
 Seventeen Operations. The registry filters the schemas offered to the LLM by the Assistant's
-declared `tools[]`, so an undeclared Operation is invisible rather than merely refused.
+declared `tools[]`, so an undeclared Operation is invisible rather than merely refused. A
+`ToolDefinition` also declares whether it is `mutating`, whether it `requiresApproval`, and — if it
+does — how the approval question reads, through `describeCall(args)`.
+
+**The Manual Connectors do not require approvals, and must not.** `bank.sendMoney`, `email.send` and
+`document.requestText` already suspend with an Open Question, because the User *performs* them by
+hand. An approval there would ask the User to approve doing something they are about to be asked to
+do themselves.
 
 | Operation | System | Kind |
 |---|---|---|
@@ -326,7 +436,7 @@ declared `tools[]`, so an undeclared Operation is invisible rather than merely r
 | `ui.askUser` | UserInterface | internal, **pending** — writes an `OpenQuestion` |
 | `assistant.call:<key>` | — | **pending** (ADR-0007), `awaitMode: wait \| chase \| detach` |
 | `bookkeeping.listAccounts` / `.getBalance` / `.listOpenItems` / `.getBudgetReport` / `.listTransactions` | Firefly III | Connector, read-only |
-| `bookkeeping.postTransaction` | Firefly III | Connector, keyed |
+| `bookkeeping.postTransaction` | Firefly III | Connector, keyed; **requires an approval** (ADR-0018) |
 | `bookkeeping.createAccount` | Firefly III | Connector; **granted to no Assistant** |
 | `document.requestText` | — | **Manual Connector** |
 | `email.send` / `email.fetch` / `bank.sendMoney` | Email, Bank | **Manual Connector** |
@@ -335,7 +445,7 @@ What each seeded Assistant is granted:
 
 | | Receptionist | Accountant |
 |---|---|---|
-| Trigger | `thing-materialised` on `Document_DM` | `assistant-call` only |
+| Trigger | `thing-materialised` on `Document_DM` | `assistant-call`, and a `schedule` — `0 7 * * *` |
 | ThingStore | `get`, `search`, `create`, `update` | `get`, `search`, `update` |
 | `ui.askUser` | ✓ | ✓ |
 | Bookkeeping | — | all six reads and `postTransaction`; **not** `createAccount` |
@@ -358,6 +468,13 @@ interface LlmProvider {
 variable on the compose service**, not only by a constructor argument — that is what lets the
 end-to-end tier drive the *real* Runtime, ThingStore, Firefly and UI deterministically and for
 free. `scripted` is the default (D-002).
+
+`LlmResponse` carries an optional `usage: { promptTokens, completionTokens }`. Both real providers
+already received it from their APIs and dropped it; they now return it, and `ScriptedProvider`
+returns zeroes rather than nothing, so an absent field and a free Turn stay distinguishable. The
+Runtime writes it onto the first Entry the Turn wrote, before the write that Entry needed anyway — no
+extra store write, no running total on the Conversation, and nothing aggregates it. The transcript is
+where you read it, which is the same argument as not building a second store for anything else.
 
 ### Bookkeeping connector (`runtime/src/connectors/firefly.ts`, `compose/firefly/`)
 

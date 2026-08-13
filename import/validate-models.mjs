@@ -59,6 +59,10 @@ const WATCHER_FIELDS = {
     Conversation_DM: [
         "f_assistantKey",
         "f_subjectThingId",
+        // Scan 7's entire exactly-once guarantee is one `exact_match` on this field. Unindexed, it
+        // answers nothing — and "nothing" is indistinguishable from "this slot has not been served",
+        // so a daily schedule would give birth on every scan until the hourly cap stopped it.
+        "f_scheduledFor",
         "f_status",
         "f_waitingFor",
         "f_wakeAt",

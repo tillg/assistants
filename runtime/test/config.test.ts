@@ -44,4 +44,20 @@ describe("configuration", () => {
             delete process.env["THINGSTORE_PASSWORD"];
         }
     });
+
+    it("reads schedules in one configured timezone, defaulting to the household's own", () => {
+        // Not a secret, so a default belongs in the code — but it is load-bearing twice a year
+        // (ADR-0016), so it is worth an assertion that says which default was chosen deliberately.
+        process.env["THINGSTORE_PASSWORD"] = "supplied-by-the-caller";
+        try {
+            expect(withoutEnv("SCHEDULE_TIMEZONE", () => loadConfig()).scheduleTimezone).toBe(
+                "Europe/Berlin",
+            );
+            process.env["SCHEDULE_TIMEZONE"] = "UTC";
+            expect(loadConfig().scheduleTimezone).toBe("UTC");
+        } finally {
+            delete process.env["THINGSTORE_PASSWORD"];
+            delete process.env["SCHEDULE_TIMEZONE"];
+        }
+    });
 });

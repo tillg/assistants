@@ -20,7 +20,13 @@ export interface Harness {
     watcher: Watcher;
     firefly: FakeFirefly;
     seedAssistant(overrides?: Partial<Assistant>): Promise<Stored<Assistant>>;
-    birth(input: { assistant: Stored<Assistant>; prompt?: string; subjectThingId?: string; subjectModel?: string }): Promise<string>;
+    birth(input: {
+        assistant: Stored<Assistant>;
+        prompt?: string;
+        subjectThingId?: string;
+        subjectModel?: string;
+        scheduledFor?: string;
+    }): Promise<string>;
     conversation(docRef: string): Promise<Stored<Conversation>>;
     questions(): Promise<Stored<OpenQuestion>[]>;
     answer(questionId: string, answer: Partial<OpenQuestion>): Promise<void>;
@@ -96,9 +102,18 @@ export class FakeFirefly {
 
 export function buildHarness(
     steps: ScriptedStep[],
-    options: { maxBirthsPerHour?: number } = {},
+    options: {
+        maxBirthsPerHour?: number;
+        scheduleTimezone?: string;
+        /**
+         * Reuse an existing store, which is how a **restart** is simulated: a second Runtime over
+         * the same data, holding none of the first one's in-memory state. That is the interesting
+         * case for anything claiming to be exactly-once.
+         */
+        store?: MemoryStore;
+    } = {},
 ): Harness {
-    const store = new MemoryStore();
+    const store = options.store ?? new MemoryStore();
     const things = new ThingRepository(store as unknown as A12Client);
     const firefly = new FakeFirefly();
     const registry = new ToolRegistry();
@@ -131,6 +146,7 @@ export function buildHarness(
         assistant: Stored<Assistant>;
         subjectThingId?: string;
         subjectModel?: string;
+        scheduledFor?: string;
         prompt: string;
         title: string;
         parentConversationId?: string;
@@ -141,6 +157,7 @@ export function buildHarness(
             title: input.title,
             subjectThingId: input.subjectThingId ?? "",
             subjectModel: input.subjectModel ?? "",
+            scheduledFor: input.scheduledFor ?? "",
             status: "running",
             waitingFor: "",
             turnCount: 0,
@@ -206,6 +223,7 @@ export function buildHarness(
         things,
         driver,
         maxBirthsPerHour: options.maxBirthsPerHour ?? 100,
+        scheduleTimezone: options.scheduleTimezone ?? "Europe/Berlin",
         birth: birthConversation,
     });
 
@@ -239,6 +257,7 @@ export function buildHarness(
                 title: "test",
                 subjectThingId: input.subjectThingId,
                 subjectModel: input.subjectModel,
+                scheduledFor: input.scheduledFor,
                 idempotencyKey: `test:${Math.random()}`,
             }),
         conversation: (docRef) => things.get<Conversation>(SPECS.Conversation_DM, docRef),

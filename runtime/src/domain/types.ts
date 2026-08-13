@@ -153,7 +153,18 @@ export type EntryKind =
     | "answer"
     | "timeout"
     | "error"
-    | "note";
+    | "note"
+    /**
+     * The Runtime asked the User to approve one Operation with one set of arguments.
+     *
+     * The only Entry kind written by the Runtime rather than derived from the model or the User, and
+     * the only one that carries **no `text`**: `buildMessages` turns an unrecognised kind with a
+     * `text` into a user message, which between a `tool-intent` and its `tool-result` would put a
+     * user turn where both providers require the tool result. It is a machine record, read only by
+     * the approval walk-back; the words the User sees live on the Open Question, which is their
+     * Authority (ADR-0006).
+     */
+    | "approval-request";
 
 export interface Entry {
     seq?: number;
@@ -165,6 +176,19 @@ export interface Entry {
     toolArgs?: string;
     toolResult?: string;
     idempotencyKey?: string;
+    /**
+     * The Open Question this Entry is about.
+     *
+     * Set on every `answer` Entry by the watcher's answered scan, and on every `approval-request`.
+     * Only approvals read it — but every answer carries it, because the alternative is a scan that
+     * has to know which questions matter.
+     */
+    questionId?: string;
+    /** On an `approval-request`: {@link canonicalArgsHash} of the call the approval is bound to. */
+    argsHash?: string;
+    /** What the model charged for the Turn that wrote this Entry. Zero from a scripted provider. */
+    promptTokens?: number;
+    completionTokens?: number;
 }
 
 export interface Conversation extends MachineFields {
@@ -172,6 +196,14 @@ export interface Conversation extends MachineFields {
     title?: string;
     subjectThingId?: string;
     subjectModel?: string;
+    /**
+     * The due instant this Conversation was born to serve, as a canonical UTC ISO-8601 string.
+     *
+     * Set only by the schedule scan, and indexed: "did Monday's chase run?" is one query against
+     * the Conversations list rather than a `lastScheduledRunAt` held in a second place (ADR-0006).
+     * A String rather than a DateTime because the scan matches it with `exact_match`.
+     */
+    scheduledFor?: string;
     status?: ConversationStatus;
     waitingFor?: WaitingFor | "";
     finishReason?: FinishReason | "";

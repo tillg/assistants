@@ -117,13 +117,19 @@ surveyed has; one Authority per fact; tool permission the agent's own process ca
 and a published security programme — including a threat model that rates its own worst case
 *Critical*.
 
-**The two findings, and both are about us.** Our exactly-once birth is a query a Schedule Trigger
-cannot ask, because a clock-fired birth has no subject Thing — settled since in
-[ADR-0016](docs/adr/0016-a-schedule-fires-on-its-due-instant.md). And our promise that *nothing is
-booked without an answer* is a sentence in a system prompt rather than a refusal in the Runtime;
-`bookkeeping.postTransaction` is callable on any Turn, and ADR-0012 only stops the *second*
-booking. That one is planned, not fixed — see
-[`specs/changes/openclaw-learnings/`](specs/changes/openclaw-learnings/).
+**The two findings, and both are about us — and both are now built.** Our exactly-once birth was a
+query a Schedule Trigger could not ask, because a clock-fired birth has no subject Thing: settled by
+[ADR-0016](docs/adr/0016-a-schedule-fires-on-its-due-instant.md) and built as the watcher's seventh
+scan, keyed on `(assistantKey, scheduledFor)`. And our promise that *nothing is booked without an
+answer* was a sentence in a system prompt rather than a refusal in the Runtime — now
+[ADR-0018](docs/adr/0018-an-operation-may-require-an-approval.md): the Runtime refuses
+`bookkeeping.postTransaction` unless it has itself asked about that exact posting and been told yes.
+
+**The more valuable half turned out to be the two learnings that were dropped.** Auto-disabling a
+failing Schedule and active hours were both adopted from OpenClaw and both **reversed** while the
+work was being planned: ADR-0016's rule that a slot is skipped while the previous one is unfinished
+means our schedule cannot run away, so there is nothing for a failure threshold to count. See
+[`specs/changes/openclaw-learnings/proposal.md`](specs/changes/openclaw-learnings/proposal.md).
 
 **A caveat this paper insists on.** The c't article describes OpenClaw as built on Mario Zechner's
 Pi toolkit. That was true until 2026-05-28, when three of the four Pi packages were dropped. Any

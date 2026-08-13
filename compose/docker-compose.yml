@@ -416,6 +416,9 @@ services:
       LLM_SCRIPT_FILE: /run/fixtures/llm-script.json
 
       SCAN_INTERVAL_MS: ${SCAN_INTERVAL_MS:-2000}
+      # Every Schedule Trigger's cron is read in this timezone and resolved to a UTC instant before
+      # that instant becomes the schedule's identity (ADR-0016).
+      SCHEDULE_TIMEZONE: ${SCHEDULE_TIMEZONE:-Europe/Berlin}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - firefly_token:/run/firefly:ro

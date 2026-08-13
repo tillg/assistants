@@ -86,9 +86,24 @@ find the last approval-request for (toolName, argsHash)
   → no such request                                       → refuse, and raise one
   → its answer entry is absent                            → refuse (still waiting)
   → its question has confirmed: false                     → decline (terminal, see below)
-  → a tool-result for this Operation follows the answer    → refuse, consumed
+  → a tool-result carrying this argsHash follows the answer → refuse, consumed
   → otherwise                                             → execute
 ```
+
+**Corrected while building.** This predicate first read *"a tool-result for this Operation follows
+the answer → consumed"*, and that is wrong on the most ordinary path there is. Every refusal and
+every rejection is recorded as a `tool-result` for the Operation, so a Firefly 422 — after which
+nothing whatsoever was booked — consumed the approval, and a model retrying the identical call as
+`postTransaction`'s own description invites it to ("Safe to retry") got the User asked a second time.
+That is the question-per-retry the mechanism exists to bound.
+
+**Spent means executed, not attempted.** The `argsHash` is therefore written onto the *tool-result*
+as well, and only where the Operation ran and returned a **value** — including on the reconciliation
+path, where a call that turns out to have landed spends its approval exactly as an ordinary one does.
+A refusal and a rejection leave the approval intact; a booking that succeeded consumes it, so two
+identical bookings still need two approvals ([ADR-0012](../../../docs/adr/0012-a-conversation-is-an-intent-log.md)).
+Reading a structured field is also what keeps the promise that **the prose is never parsed** — the
+alternative was sniffing the result text for `Error:`.
 
 **Rejected: structured answer fields on `Entry`** (`confirmed`, `choice`). It would save one read and
 put a copy of a fact next to its Authority, which is

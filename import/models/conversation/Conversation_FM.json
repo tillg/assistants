@@ -207,6 +207,19 @@
                         "readonly": true
                       }
                     ]
+                  },
+                  {
+                    "type": "Row",
+                    "id": "row_7",
+                    "name": "r7",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_scheduledFor",
+                        "elementRef": "f_scheduledFor",
+                        "readonly": true
+                      }
+                    ]
                   }
                 ],
                 "verticalAlignment": "BOTTOM"
@@ -403,6 +416,34 @@
                     "width": 3,
                     "sortable": false,
                     "elementRef": "f_entry_toolResult"
+                  },
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "col_entry_questionId",
+                    "width": 1,
+                    "sortable": false,
+                    "elementRef": "f_entry_questionId"
+                  },
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "col_entry_argsHash",
+                    "width": 1,
+                    "sortable": false,
+                    "elementRef": "f_entry_argsHash"
+                  },
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "col_entry_promptTokens",
+                    "width": 1,
+                    "sortable": false,
+                    "elementRef": "f_entry_promptTokens"
+                  },
+                  {
+                    "type": "FieldBasedRepeatOverviewColumn",
+                    "id": "col_entry_completionTokens",
+                    "width": 1,
+                    "sortable": false,
+                    "elementRef": "f_entry_completionTokens"
                   }
                 ],
                 "groupRef": "f_entries",
@@ -497,6 +538,22 @@
         },
         {
           "elementRef": "f_entry_idempotencyKey",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_entry_questionId",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_entry_argsHash",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_entry_promptTokens",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_entry_completionTokens",
           "readonly": true
         }
       ]

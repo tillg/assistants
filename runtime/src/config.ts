@@ -66,6 +66,14 @@ export interface Config {
     readonly maxEscalations: number;
     readonly llmMaxAttempts: number;
     readonly uiBaseUrl: string;
+    /**
+     * The timezone every Schedule Trigger's `cron` is read in (ADR-0016).
+     *
+     * A household means local time by "every Monday at nine", and one setting for the whole system
+     * rather than one per Assistant: a household lives in one place, and a per-Assistant timezone
+     * would be a field nobody sets correctly and everybody has to reason about.
+     */
+    readonly scheduleTimezone: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -107,6 +115,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         maxEscalations: number("MAX_ESCALATIONS", 3),
         llmMaxAttempts: number("LLM_MAX_ATTEMPTS", 3),
         uiBaseUrl: optional("UI_BASE_URL", "http://localhost:8081"),
+        // The household this system was written for is in Germany — every model is bilingual and the
+        // invoices are GOÄ. UTC would have been the neutral choice and would have put the
+        // daylight-saving cases ADR-0016 exists for out of reach in practice.
+        scheduleTimezone: optional("SCHEDULE_TIMEZONE", "Europe/Berlin"),
     };
 }
 

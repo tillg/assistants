@@ -20,6 +20,12 @@ interface OpenAiChoice {
     finish_reason: string;
 }
 
+/** `usage` has always been on the response; it was read and dropped until item 6. */
+interface OpenAiUsage {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+}
+
 export class OpenAiProvider implements LlmProvider {
     readonly name = "openai";
 
@@ -80,7 +86,7 @@ export class OpenAiProvider implements LlmProvider {
             return { text: "", toolCalls: [], finishReason: "error", error: { message, transient: false } };
         }
 
-        const payload = (await response.json()) as { choices?: OpenAiChoice[] };
+        const payload = (await response.json()) as { choices?: OpenAiChoice[]; usage?: OpenAiUsage };
         const choice = payload.choices?.[0];
         if (!choice) {
             throw new TransientLlmError("LLM returned no choices");
@@ -101,6 +107,16 @@ export class OpenAiProvider implements LlmProvider {
                     : choice.finish_reason === "length"
                       ? "length"
                       : "answered",
+            // Omitted rather than zeroed when the gateway did not report it: a zero would be a claim
+            // that this Turn was free, and an OpenAI-compatible gateway is not obliged to answer.
+            ...(payload.usage
+                ? {
+                      usage: {
+                          promptTokens: payload.usage.prompt_tokens ?? 0,
+                          completionTokens: payload.usage.completion_tokens ?? 0,
+                      },
+                  }
+                : {}),
         };
     }
 }

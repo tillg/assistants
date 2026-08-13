@@ -20,7 +20,10 @@ calls the **Accountant**. The Accountant reads the chart of accounts out of **Bo
 proposes a posting, and raises an **Open Question**: *book €96.50 to Expenses:Health?* The
 **Conversation** stops there. The User answers it in the web application — hours or days later,
 across as many restarts as you like — and only then does the transaction land in the real books.
-Nothing is booked without an answer.
+Nothing is booked without an answer, and that is structural rather than aspirational: the Runtime
+refuses `bookkeeping.postTransaction` outright unless it has itself asked the User about that exact
+posting and been told yes ([ADR-0018](docs/adr/0018-an-operation-may-require-an-approval.md)). It
+costs a round trip on every first booking, which is the price of the sentence being true.
 
 The system is built on [A12](docs/adr/0001-a12-as-the-platform.md): Things are A12 documents
 governed by A12 models, the ThingStore is an A12 Data Service, and the **UserInterface** is an A12
@@ -128,7 +131,12 @@ sequenceDiagram
     UI->>TS: the answer is saved on the Open Question
     RT->>TS: scan → answered
     RT->>A: continue the same Conversation
-    A->>BK: postTransaction (keyed, idempotent)
+    A->>RT: postTransaction
+    Note over RT: Refused: the Assistant's own question<br/>authorises nothing (ADR-0018).
+    RT->>TS: the Runtime raises its own approval question
+    U->>UI: approves this exact posting
+    RT->>A: scan → answered, continue again
+    A->>BK: postTransaction (keyed, idempotent, approved)
     A->>TS: append a step to the Process
 ```
 
@@ -210,6 +218,19 @@ export LLM_BASE_URL=https://api.openai.com/v1   # optional; any OpenAI-compatibl
 `LLM_PROVIDER=anthropic` selects the Anthropic Messages API implementation instead. The choice is
 a compose-level environment variable rather than a constructor argument, on purpose
 ([D-002](DECISIONS.md)).
+
+### Schedules and the timezone they are read in
+
+`SCHEDULE_TIMEZONE` in `.env` (default `Europe/Berlin`) is the timezone every Assistant's `cron` is
+read in, because a household means local time by "every Monday at nine". One setting for the whole
+system: a household lives in one place.
+
+It earns its keep twice a year. A `30 2 * * *` slot happens **twice** on the October morning the
+clocks go back and **not at all** on the March morning they go forward, so the Runtime resolves the
+cron to a UTC instant *before* that instant becomes the schedule's identity — the doubled hour
+collapses to one firing, and the missing hour to none
+([ADR-0016](docs/adr/0016-a-schedule-fires-on-its-due-instant.md)). Setting it to `UTC` is legal and
+makes both of those cases unreachable.
 
 ## Commands
 
@@ -303,9 +324,10 @@ Assistant's prompts editable in the ordinary UI, as [ADR-0003](docs/adr/0003-ass
 requires. See [MARKDOWN_FIELDS.md](specs/research/MARKDOWN_FIELDS.md).
 
 **Runtime** (`runtime/`) — TypeScript on Node 24, in two halves. The **Trigger Watcher** scans the
-ThingStore every two seconds, in six passes: things that materialised, questions that were
-answered, `wakeAt` deadlines that passed, leases that expired, child results not yet delivered, and
-Conversations with a Turn owing. The **Loop Driver** is one function, `advance(conversationId)`,
+ThingStore every two seconds, in seven passes: things that materialised, questions that were
+answered, `wakeAt` deadlines that passed, leases that expired, child results not yet delivered,
+Conversations with a Turn owing, and schedules whose due instant has come round. The **Loop Driver**
+is one function, `advance(conversationId)`,
 that takes one Conversation exactly one Turn forward and returns holding nothing. Seventeen Tools are
 registered — ThingStore reads and writes, `ui.askUser`, `assistant.call`, six `bookkeeping.*`
 operations against Firefly, and four Manual Connector operations. It authenticates as a dedicated
@@ -353,7 +375,7 @@ A12 has no optimistic locking, so every document has exactly one writer at any i
 | `Invoice` | ThingStore *(document facts only)* | The extracted invoice: issuer, number, dates, amounts, subject. **No `paid` field and no `bookkeepingRef`** | User and Runtime |
 | `Process` | ThingStore | The routing slip — a title, a status and an append-only list of steps. Passive; nothing executes it | User and Runtime |
 | `Assistant` | ThingStore | An Assistant's definition: key, system prompt, skills, triggers and the Tools it may use | **User only** — the Runtime reads it, and the ThingStore refuses it write access ([D-007a](DECISIONS.md)) |
-| `Conversation` | ThingStore | One run of one Assistant: status, what it is waiting for, turn count, and an append-only list of entries | **Runtime only** — the form is read-only |
+| `Conversation` | ThingStore | One run of one Assistant: status, what it is waiting for, turn count, and an append-only list of entries. Either a subject Thing or a `scheduledFor` instant gave birth to it — exactly one of the two | **Runtime only** — the form is read-only |
 | `OpenQuestion` | ThingStore | A question put to the User — `free-text`, `confirm`, `choice` or `perform` — and the User's answer to it | Runtime writes it once at creation, then **the User only** |
 | `RuntimeState` | ThingStore | A singleton: the watcher's watermark, the pause flag, the births-per-hour counter, the heartbeat | **Runtime only** |
 
@@ -467,9 +489,17 @@ This is one running vertical slice, not a finished system. What is honestly miss
 - **Parties have no proper Authority.** CONTEXT.md assigns people to an address book. There is no
   address book External System, so the ThingStore holds them provisionally — a small, recorded
   violation of ADR-0006's spirit, to be reversed the day a connector exists.
-- **A `schedule` Trigger does nothing.** `Assistant_DM` carries a `cron` field and `TriggerKind`
-  admits `schedule`, but no watcher scan fires one. Only `thing-materialised` and `assistant-call`
-  are live.
+- **A schedule stalls until its question is answered.** A slot is skipped entirely while the previous
+  one is unfinished ([ADR-0016](docs/adr/0016-a-schedule-fires-on-its-due-instant.md)), so one
+  unanswered question holds every later firing. Deliberate — two live Conversations for one recurring
+  errand would be two questions you cannot tell apart — and warned about in the log rather than
+  answered with a second question. It also means a scheduled Skill has to gather everything and ask
+  once; the Accountant's does.
+- **A schedule added now fires now.** A cron expression has no start date, so the latest due instant
+  is always in the past: adding one this afternoon runs it for this morning's slot on the next scan.
+- **Nothing adds up what a Conversation cost.** Each Turn records what the model charged for it, on
+  the first Entry that Turn wrote, and that is all — no dashboard and no second store. A Turn that
+  errored records nothing, so the Turns of a Conversation sum to a *lower bound* on its cost.
 
 ## Repository layout
 
@@ -483,7 +513,7 @@ This is one running vertical slice, not a finished system. What is honestly miss
 │   ├── src/a12/              JSON-RPC client for the ThingStore
 │   ├── src/llm/              provider interface + openai / anthropic / scripted
 │   ├── src/loop/             advance() — one Conversation, one Turn
-│   ├── src/watcher/          the six scans
+│   ├── src/watcher/          the seven scans
 │   ├── src/tools/            the Tool registry and the seventeen Operations
 │   ├── src/connectors/       firefly
 │   ├── src/bootstrap/        seeds the two Assistants and the RuntimeState singleton
@@ -503,7 +533,7 @@ This is one running vertical slice, not a finished system. What is honestly miss
 │   ├── system/               the system as it stands: domain, architecture, functional
 │   ├── research/             the research papers, and the sources they were read from
 │   └── changes/              proposal, domain, architecture and plan, per change in flight
-├── docs/                     adr/ — seventeen architecture decision records; logo/ — design explorations
+├── docs/                     adr/ — eighteen architecture decision records; logo/ — design explorations
 ├── assets/                   the logo and its derived files
 ├── buildSrc/, quality/       Gradle build logic and the Checkstyle configuration
 └── licenses/                 licence texts for the third-party notices
