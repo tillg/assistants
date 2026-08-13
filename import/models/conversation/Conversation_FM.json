@@ -99,6 +99,8 @@
             "layout": {
               "lg": "12"
             },
+            "collapsible": true,
+            "initiallyCollapsed": true,
             "screenElements": [
               {
                 "type": "ControlGrid",
@@ -349,106 +351,20 @@
             },
             "screenElements": [
               {
-                "type": "InlineRepeat",
-                "id": "inlinerepeat-5f1a4",
-                "name": "inline-repeat-Entries",
-                "repeatOverviewColumn": [
+                "type": "CustomScreenElement",
+                "id": "custom_transcript",
+                "name": "ConversationTranscript",
+                "height": 640,
+                "annotations": [
                   {
-                    "type": "FieldBasedRepeatOverviewColumn",
-                    "id": "fieldbasedrepeatoverviewcolumn-a1b2c",
-                    "width": 1,
-                    "sortable": false,
-                    "filterable": false,
-                    "preferredSorting": "ASC",
-                    "elementRef": "f_entry_seq"
+                    "name": "widget",
+                    "value": "conversation-transcript"
                   },
                   {
-                    "type": "FieldBasedRepeatOverviewColumn",
-                    "id": "fieldbasedrepeatoverviewcolumn-b2c3d",
-                    "width": 1,
-                    "sortable": false,
-                    "filterable": false,
-                    "preferredSorting": "ASC",
-                    "elementRef": "f_entry_at"
-                  },
-                  {
-                    "type": "FieldBasedRepeatOverviewColumn",
-                    "id": "fieldbasedrepeatoverviewcolumn-c3d4e",
-                    "width": 1,
-                    "sortable": false,
-                    "filterable": false,
-                    "preferredSorting": "ASC",
-                    "elementRef": "f_entry_role"
-                  },
-                  {
-                    "type": "FieldBasedRepeatOverviewColumn",
-                    "id": "fieldbasedrepeatoverviewcolumn-d4e5f",
-                    "width": 1,
-                    "sortable": false,
-                    "filterable": false,
-                    "preferredSorting": "ASC",
-                    "elementRef": "f_entry_kind"
-                  },
-                  {
-                    "type": "FieldBasedRepeatOverviewColumn",
-                    "id": "col_entry_text",
-                    "width": 3,
-                    "sortable": false,
-                    "elementRef": "f_entry_text"
-                  },
-                  {
-                    "type": "FieldBasedRepeatOverviewColumn",
-                    "id": "col_entry_toolName",
-                    "width": 1,
-                    "sortable": false,
-                    "elementRef": "f_entry_toolName"
-                  },
-                  {
-                    "type": "FieldBasedRepeatOverviewColumn",
-                    "id": "col_entry_toolArgs",
-                    "width": 2,
-                    "sortable": false,
-                    "elementRef": "f_entry_toolArgs"
-                  },
-                  {
-                    "type": "FieldBasedRepeatOverviewColumn",
-                    "id": "col_entry_toolResult",
-                    "width": 3,
-                    "sortable": false,
-                    "elementRef": "f_entry_toolResult"
-                  },
-                  {
-                    "type": "FieldBasedRepeatOverviewColumn",
-                    "id": "col_entry_questionId",
-                    "width": 1,
-                    "sortable": false,
-                    "elementRef": "f_entry_questionId"
-                  },
-                  {
-                    "type": "FieldBasedRepeatOverviewColumn",
-                    "id": "col_entry_argsHash",
-                    "width": 1,
-                    "sortable": false,
-                    "elementRef": "f_entry_argsHash"
-                  },
-                  {
-                    "type": "FieldBasedRepeatOverviewColumn",
-                    "id": "col_entry_promptTokens",
-                    "width": 1,
-                    "sortable": false,
-                    "elementRef": "f_entry_promptTokens"
-                  },
-                  {
-                    "type": "FieldBasedRepeatOverviewColumn",
-                    "id": "col_entry_completionTokens",
-                    "width": 1,
-                    "sortable": false,
-                    "elementRef": "f_entry_completionTokens"
+                    "name": "exposes",
+                    "value": "f_entries"
                   }
-                ],
-                "groupRef": "f_entries",
-                "enableAdd": false,
-                "enableRemove": false
+                ]
               }
             ]
           }
@@ -500,61 +416,6 @@
               ]
             }
           }
-        },
-        {
-          "elementRef": "f_entry_seq",
-          "readonly": true
-        },
-        {
-          "elementRef": "f_entry_at",
-          "readonly": true
-        },
-        {
-          "elementRef": "f_entry_role",
-          "readonly": true
-        },
-        {
-          "elementRef": "f_entry_kind",
-          "readonly": true
-        },
-        {
-          "elementRef": "f_entry_text",
-          "exposition": "AREA",
-          "readonly": true
-        },
-        {
-          "elementRef": "f_entry_toolName",
-          "readonly": true
-        },
-        {
-          "elementRef": "f_entry_toolArgs",
-          "exposition": "AREA",
-          "readonly": true
-        },
-        {
-          "elementRef": "f_entry_toolResult",
-          "exposition": "AREA",
-          "readonly": true
-        },
-        {
-          "elementRef": "f_entry_idempotencyKey",
-          "readonly": true
-        },
-        {
-          "elementRef": "f_entry_questionId",
-          "readonly": true
-        },
-        {
-          "elementRef": "f_entry_argsHash",
-          "readonly": true
-        },
-        {
-          "elementRef": "f_entry_promptTokens",
-          "readonly": true
-        },
-        {
-          "elementRef": "f_entry_completionTokens",
-          "readonly": true
         }
       ]
     },

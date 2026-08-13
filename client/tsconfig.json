@@ -50,7 +50,11 @@
       "webpack-env",
       // Augments styled-components' DefaultTheme with the A12 widget theme, so `theme.colors` &c.
       // are typed inside styled-component template literals.
-      "@com.mgmtp.a12.widgets/widgets-core/types/styled-components"
+      "@com.mgmtp.a12.widgets/widgets-core/types/styled-components",
+      // Testing Library's DOM matchers, so `toBeInTheDocument()` &c. typecheck in the component
+      // tests. `vitest.setup.ts` registers them at run time; this is the same augmentation, at
+      // compile time, and it is inert outside a test.
+      "@testing-library/jest-dom/vitest"
     ],
     "verbatimModuleSyntax": true
   },

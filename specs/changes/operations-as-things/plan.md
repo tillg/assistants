@@ -175,17 +175,17 @@ Atomic, and before any new code leans on either vocabulary. A half-rename is wha
   system's own definition), and extend both descriptions.
 - [x] Update the `ASSISTANT_WRITE` comments in `import/auth/roles.yaml`: the right now covers
   `Assistant_DM` and `Operation_DM`, and the name is narrower than the job.
-- [ ] Restart the stack (or reload the rules with `RELOAD_AUTH_RULES`) and confirm the definitions
+- [x] Restart the stack (or reload the rules with `RELOAD_AUTH_RULES`) and confirm the definitions
   are actually in force before writing the test — an auth change that did not load is a test that
   passes for the wrong reason.
-- [ ] **The load-bearing test**: an integration test authenticating as the `runtime` identity, calling
+- [x] **The load-bearing test**: an integration test authenticating as the `runtime` identity, calling
   `MODIFY_DOCUMENT` on an existing Operation Thing, asserting `-32059`; and the same call as the
   `human` identity succeeding. Add the mirror for `ADD_DOCUMENT`.
-- [ ] Test that the Runtime can still **read** `Operation_DM` as `runtime` — the guard must withhold
+- [x] Test that the Runtime can still **read** `Operation_DM` as `runtime` — the guard must withhold
   writes without breaking the hot path. Note that this is the store's read right, which is a different
   thing from `READABLE_MODELS`: the latter governs what an *Assistant* may ask for through
   `thingstore.get` / `.search`, and it excludes `Operation_DM` while the Runtime's own read does not.
-- [ ] `just test-integration` — green.
+- [x] `just test-integration` — green.
 
 ## H — The web application
 

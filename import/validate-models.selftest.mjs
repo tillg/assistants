@@ -138,7 +138,7 @@ const CASES = [
         expect: /exposes|not a group/i,
         break: (dir) =>
             edit(dir, "conversation/Conversation_FM.json", (model) => {
-                replaceInlineRepeat(model, "f_entries", transcriptElement("f_entriez"));
+                exposesAnnotation(model).value = "f_entriez";
             }),
     },
 ];
@@ -154,13 +154,12 @@ const CASES = [
 const SILENT_CASES = [
     {
         name: "a CustomScreenElement exposing a group covers the fields under it",
-        why: "replacing the Entries InlineRepeat would otherwise produce twelve ADR-0008 warnings for fields that are on the screen",
-        forbid: /f_entry_\w+ .*is not referenced/,
-        break: (dir) =>
-            edit(dir, "conversation/Conversation_FM.json", (model) => {
-                replaceInlineRepeat(model, "f_entries", transcriptElement("f_entries"));
-                dropFieldConfiguration(model, /^f_entry_/);
-            }),
+        why: "Conversation_FM's Entries have no Control and no repeat left; without the rule twelve ADR-0008 warnings would appear for fields that are more visible than before",
+        forbid: /f_entr(y_\w+|ies) .*is not referenced/,
+        // Nothing to break: the shipped `Conversation_FM` *is* this fixture since the transcript
+        // replaced its InlineRepeat, and the control above cannot make this assertion — warnings do
+        // not change the exit code, which is the whole reason this second list exists.
+        break: () => {},
     },
     {
         name: "a CustomScreenElement carrying no `exposes` is legal and silent",
@@ -187,40 +186,22 @@ function transcriptElement(group) {
     };
 }
 
-/**
- * Drop `fieldConfiguration.field[]` entries whose `elementRef` matches.
- *
- * Needed because the ADR-0008 check counts an `elementRef` **anywhere** in `content`, and
- * `fieldConfiguration` is part of `content`. `Conversation_FM` lists all thirteen Entry fields
- * there, so merely swapping the `InlineRepeat` out leaves them all still "referenced" and the case
- * proves nothing. Phase C removes those entries for the same reason it removes the repeat: there is
- * no Control left for them to configure.
- */
-function dropFieldConfiguration(model, pattern) {
-    const field = model.content?.fieldConfiguration?.field;
-    if (!Array.isArray(field)) throw new Error("no fieldConfiguration.field — the fixture has moved");
-    model.content.fieldConfiguration.field = field.filter((entry) => !pattern.test(entry.elementRef ?? ""));
-}
-
-/** Swap the `InlineRepeat` bound to `groupRef` for `replacement`, wherever it sits. */
-function replaceInlineRepeat(model, groupRef, replacement) {
-    let done = false;
+/** The `exposes` annotation of a form's one `CustomScreenElement`, wherever it sits. */
+function exposesAnnotation(model) {
+    let found;
     const visit = (node) => {
         if (Array.isArray(node)) {
-            for (let index = 0; index < node.length; index += 1) {
-                if (!done && node[index]?.type === "InlineRepeat" && node[index]?.groupRef === groupRef) {
-                    node[index] = replacement;
-                    done = true;
-                    return;
-                }
-                visit(node[index]);
-            }
+            for (const item of node) visit(item);
         } else if (node && typeof node === "object") {
+            if (node.type === "CustomScreenElement") {
+                found ??= (node.annotations ?? []).find((annotation) => annotation.name === "exposes");
+            }
             for (const value of Object.values(node)) visit(value);
         }
     };
     visit(model.content);
-    if (!done) throw new Error(`no InlineRepeat on ${groupRef} — the fixture has moved`);
+    if (!found) throw new Error("no CustomScreenElement annotated exposes — the fixture has moved");
+    return found;
 }
 
 function run(dir) {

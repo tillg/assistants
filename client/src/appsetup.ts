@@ -50,10 +50,12 @@ import { DefaultElementLibrary } from "@com.mgmtp.a12.contentengine/contentengin
 
 import { MarkdownTextArea } from "./components/markdown-editor/control/MarkdownTextArea";
 import { createModelElementBridge } from "./components/ModelElementBridge";
+import { CustomScreenElements } from "./components/CustomScreenElements";
 import { registerModulesOnSetModelGraphMiddleware, unregisterModulesOnLogoutMiddleware } from "./modules";
 import { isProduction } from "./config";
 import { enableReduxDevTools } from "./config/devtools";
 import { LoadModelGraphSaga } from "./sagas/loadModelGraph";
+import { OpenForeignFormSaga } from "./sagas/openForeignForm";
 import { enginesViewMap } from "./app/EnginesViewMap";
 import { stabilizeModifications } from "./app/stabilizeModifications";
 import { CustomApplicationFrameLayout } from "./app/LayoutProvider";
@@ -94,7 +96,13 @@ export function setup() {
                 formModelMap: {
                     ...DefaultFormModelMap,
                     ...RelationshipFormModelMap,
-                    Control: { component: createModelElementBridge(RelationshipFormModelMap.Control.component) }
+                    Control: { component: createModelElementBridge(RelationshipFormModelMap.Control.component) },
+                    // A `CustomScreenElement` is `Annotated` itself, so no bridge is needed: the
+                    // dispatcher reads the `widget` annotation straight off its own model element.
+                    // Overriding the relationship map's entry wholesale is correct here — it falls
+                    // through to a platform placeholder when there is no CDD binding, and this
+                    // application has no CDM models.
+                    CustomScreenElement: { component: CustomScreenElements }
                 },
                 widgetMap: {
                     ...DefaultFormEngineWidgetMap,
@@ -149,7 +157,7 @@ export function setup() {
     const applicationFeatures = combineFeatures(
         viewAndLayoutFeatures,
         addAdditionalMiddlewares(registerModulesOnSetModelGraphMiddleware, unregisterModulesOnLogoutMiddleware),
-        addCustomSagas(LoadModelGraphSaga)
+        addCustomSagas(LoadModelGraphSaga, OpenForeignFormSaga)
     );
 
     const configured = stabilizeModifications(

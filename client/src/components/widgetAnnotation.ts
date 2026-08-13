@@ -2,8 +2,8 @@ import type { Annotation } from "@com.mgmtp.a12.base/base-model-api";
 
 export const WIDGET_ANNOTATION_NAME = "widget";
 
-/** The `widget` annotation values for which the project provides a custom control. */
-export type WidgetAnnotationValue = "markdown-editor";
+/** The `widget` annotation values for which the project provides a custom control or screen element. */
+export type WidgetAnnotationValue = "markdown-editor" | "conversation-transcript";
 
 /** True if a model element's annotations request the given widget (`widget: <value>`). */
 export function hasWidgetAnnotation(
