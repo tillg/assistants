@@ -32,7 +32,10 @@ const INTENTIONALLY_UNEXPOSED = new Set([
     "f_createdByConversationId",
     "f_updatedAt",
     "f_createdAt",
-    // Runtime bookkeeping the User has no use for.
+    // Runtime bookkeeping the User has no use for — except `f_maxTurns`, which the Conversation
+    // Header does show, as the denominator of `turn 4/20`. It stays on this list because the list
+    // is about **Controls**, and the Header is not one; but the sentence above stopped being true
+    // of it the day the Header started reading it.
     "f_leaseUntil",
     "f_maxTurns",
     "f_escalationCount",
@@ -237,7 +240,15 @@ for (const [id, { model }] of models) {
             });
         }
         if (node.type === "Group" && node.id) {
-            fields.set(node.id, { name: node.name, group: true, indexed: false, isMarkdown: false });
+            // The group's own fields, recorded because a `CustomScreenElement` annotated
+            // `exposes: <groupId>` covers every one of them for the ADR-0008 check below. Without
+            // this relation the rule could only mark the group itself, and the twelve Entry fields
+            // under `f_entries` would still each warn.
+            const children = new Set();
+            walk(node.Group ?? {}, (inner) => {
+                if (inner.type === "Field" && inner.id) children.add(inner.id);
+            });
+            fields.set(node.id, { name: node.name, group: true, children, indexed: false, isMarkdown: false });
         }
     });
     dmFields.set(id, fields);
@@ -415,6 +426,32 @@ for (const [id, { file, model }] of models) {
                 errors.push(`${where}: ${ref} has the markdown-editor widget annotation but ${dm} does not set lineBreaksPermitted — the kernel will reject newlines`);
             }
         }
+
+        // A `CustomScreenElement` renders a group with custom code rather than an `InlineRepeat`,
+        // so the group's fields are on the screen without any `elementRef` naming them. `exposes`
+        // is how the form says which group that is, and it has exactly two readers: this check,
+        // and a human reading the model file.
+        //
+        // The annotation is OPTIONAL. An element that renders *another document's* data carries
+        // `widget` alone — `OpenQuestion_FM`'s transcript shows a Conversation's Entries, and
+        // `OpenQuestion_DM` has no such group — so silence here is legal and means "this element
+        // makes no coverage claim". What is not legal is naming a group that does not exist: a
+        // typo would otherwise silently cover nothing, which is worse than the warning it replaced.
+        walk(model.content ?? {}, (node) => {
+            if (node.type !== "CustomScreenElement") return;
+            const exposes = (node.annotations ?? []).find((a) => a.name === "exposes")?.value;
+            if (!exposes) return;
+            const group = fields.get(exposes);
+            if (!group?.group) {
+                errors.push(
+                    `${where}: CustomScreenElement "${node.id}" is annotated exposes "${exposes}", ` +
+                        `which is not a group of ${dm} — the coverage claim is false`,
+                );
+                return;
+            }
+            referenced.add(exposes);
+            for (const child of group.children ?? []) referenced.add(child);
+        });
 
         // ADR-0008, the hard direction: DM fields no form model references.
         for (const [fieldId, field] of fields) {

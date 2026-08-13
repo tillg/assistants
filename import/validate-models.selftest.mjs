@@ -132,7 +132,96 @@ const CASES = [
                 delete fieldById(model, "f_amountGross").Field.requirednessConfig;
             }),
     },
+    {
+        name: "a CustomScreenElement whose `exposes` names no such group",
+        why: "the annotation is a coverage claim; a typo would silently cover nothing, which is worse than the warning it replaced",
+        expect: /exposes|not a group/i,
+        break: (dir) =>
+            edit(dir, "conversation/Conversation_FM.json", (model) => {
+                replaceInlineRepeat(model, "f_entries", transcriptElement("f_entriez"));
+            }),
+    },
 ];
+
+/**
+ * Cases about what the validator must **not** say.
+ *
+ * `CASES` above all assert a non-zero exit, which is the only thing a warning cannot produce — so a
+ * rule whose whole purpose is to *silence* a warning cannot be tested there. These run the same
+ * mutate-and-run machinery and assert the opposite: exit 0, and a forbidden pattern absent from the
+ * output. `run()` already returned both halves; nothing used the second one until now.
+ */
+const SILENT_CASES = [
+    {
+        name: "a CustomScreenElement exposing a group covers the fields under it",
+        why: "replacing the Entries InlineRepeat would otherwise produce twelve ADR-0008 warnings for fields that are on the screen",
+        forbid: /f_entry_\w+ .*is not referenced/,
+        break: (dir) =>
+            edit(dir, "conversation/Conversation_FM.json", (model) => {
+                replaceInlineRepeat(model, "f_entries", transcriptElement("f_entries"));
+                dropFieldConfiguration(model, /^f_entry_/);
+            }),
+    },
+    {
+        name: "a CustomScreenElement carrying no `exposes` is legal and silent",
+        why: "OpenQuestion_FM's transcript renders another document's Entries, so it makes no coverage claim about its own DM",
+        forbid: /CustomScreenElement/,
+        break: (dir) =>
+            edit(dir, "openquestion/OpenQuestion_FM.json", (model) => {
+                model.content.screens[0].screenElements.push(transcriptElement(undefined));
+            }),
+    },
+];
+
+/** The element this change puts on both forms; `exposes` omitted when `group` is undefined. */
+function transcriptElement(group) {
+    return {
+        type: "CustomScreenElement",
+        id: "cse_transcript",
+        name: "ConversationTranscript",
+        annotations: [
+            { name: "widget", value: "conversation-transcript" },
+            ...(group === undefined ? [] : [{ name: "exposes", value: group }]),
+        ],
+        height: 600,
+    };
+}
+
+/**
+ * Drop `fieldConfiguration.field[]` entries whose `elementRef` matches.
+ *
+ * Needed because the ADR-0008 check counts an `elementRef` **anywhere** in `content`, and
+ * `fieldConfiguration` is part of `content`. `Conversation_FM` lists all thirteen Entry fields
+ * there, so merely swapping the `InlineRepeat` out leaves them all still "referenced" and the case
+ * proves nothing. Phase C removes those entries for the same reason it removes the repeat: there is
+ * no Control left for them to configure.
+ */
+function dropFieldConfiguration(model, pattern) {
+    const field = model.content?.fieldConfiguration?.field;
+    if (!Array.isArray(field)) throw new Error("no fieldConfiguration.field — the fixture has moved");
+    model.content.fieldConfiguration.field = field.filter((entry) => !pattern.test(entry.elementRef ?? ""));
+}
+
+/** Swap the `InlineRepeat` bound to `groupRef` for `replacement`, wherever it sits. */
+function replaceInlineRepeat(model, groupRef, replacement) {
+    let done = false;
+    const visit = (node) => {
+        if (Array.isArray(node)) {
+            for (let index = 0; index < node.length; index += 1) {
+                if (!done && node[index]?.type === "InlineRepeat" && node[index]?.groupRef === groupRef) {
+                    node[index] = replacement;
+                    done = true;
+                    return;
+                }
+                visit(node[index]);
+            }
+        } else if (node && typeof node === "object") {
+            for (const value of Object.values(node)) visit(value);
+        }
+    };
+    visit(model.content);
+    if (!done) throw new Error(`no InlineRepeat on ${groupRef} — the fixture has moved`);
+}
 
 function run(dir) {
     const result = spawnSync(process.execPath, [VALIDATOR], {
@@ -182,5 +271,26 @@ for (const testCase of CASES) {
     }
 }
 
-console.log(`\n${CASES.length + 1} validator checks exercised — ${failures} not enforced`);
+for (const testCase of SILENT_CASES) {
+    const { code, output } = withCopy((dir) => {
+        testCase.break(dir);
+        return run(dir);
+    });
+    if (code !== 0) {
+        failures += 1;
+        console.error(`FAIL  ${testCase.name}\n      the validator rejected it (exit ${code}). ${testCase.why}\n${output}`);
+    } else if (testCase.forbid.test(output)) {
+        failures += 1;
+        console.error(
+            `FAIL  ${testCase.name}\n      accepted, but it still said something matching ` +
+                `${testCase.forbid}. ${testCase.why}\n${output}`,
+        );
+    } else {
+        console.log(`ok    ${testCase.name}`);
+    }
+}
+
+console.log(
+    `\n${CASES.length + SILENT_CASES.length + 1} validator checks exercised — ${failures} not enforced`,
+);
 process.exit(failures > 0 ? 1 : 0);

@@ -1071,3 +1071,70 @@ mode. I saw it on a new document because the catalogue was empty until phase F. 
 re-checked against a seeded Operation in phase H; if `readonly` on the Control also fails to bind
 there, `CONVENTIONS.md`'s note needs widening from "EnumerationType" to "any field", which is a
 change to a document other people rely on and so is not being made on one data point.
+
+## D-031 — The UI change's ADR is renumbered 0021
+
+*Decided 2026-08-14 01:05 CEST.*
+
+`specs/changes/ui-for-conversation-and-question/plan.md`'s phase F asked for
+`docs/adr/0019-a-question-is-answered-in-its-conversation.md`. That artefact was written before
+`operations-as-things` landed, and that change has since taken **0019** (*An Operation is a Thing*)
+and **0020** (*"Tool" is the provider's word*). Renumbered to **0021** in the plan. Two ADRs sharing
+a number is worse than a gap in the sequence, and `scripts/check-docs.mjs` counts the directory and
+checks the count-word in README against it.
+
+## D-032 — The transcript fixture carries zero token counts
+
+*Decided 2026-08-14 01:10 CEST.*
+
+The UI change's phase B says to capture the transcript fixture *"from a running stack, not by hand"*.
+Done — `client/src/test/fixtures/conversation.json` is Conversation
+`7681648a-85dc-4680-95c0-a357a962a4e9`, thirteen Entries covering `prompt`, two `tool-intent` /
+`tool-result` pairs, an `askUser` intent, two `answer`s, an `approval-request` and a closing
+`assistant`.
+
+Its five token-bearing Entries all read `0/0`, because this stack runs the **scripted** LLM provider
+— which `domain/types.ts` already documents (*"Zero from a scripted provider"*). So the fixture
+cannot carry the plan's *"the fixture's tokens sum to the expected figure"* case in any interesting
+way.
+
+**Decided**: keep the real document as the fixture, and let `cost.test.ts` build its own small Entry
+arrays for the arithmetic. A pure summing function should not need a captured document to test its
+arithmetic, and the fixture's job is to be *real* — which is exactly what makes it useless for
+asserting a non-zero total. The fixture still carries the two cases that matter for it: Entries
+without usage contribute nothing, and a Conversation with no Entries yields zero rather than `NaN`.
+
+## D-033 — ⚠ The ADR-0008 coverage check counts `fieldConfiguration`, so it is weaker than advertised
+
+*Found 2026-08-14 01:35 CEST, implementing the UI change's `exposes` validator rule.*
+
+`specs/changes/ui-for-conversation-and-question/plan.md` predicts that replacing `Conversation_FM`'s
+Entries `InlineRepeat` with a `CustomScreenElement` would produce *"12 warnings … for the Entry
+fields"*, and that the `exposes` annotation is what suppresses them. I built the rule, then tested
+the claim by removing the repeat **without** any `exposes` annotation.
+
+**No warnings appeared.** The reason: `validate-models.mjs` collects `referenced` by walking
+`model.content` for any `elementRef` or `groupRef` — and `content.fieldConfiguration` is part of
+`content`. `Conversation_FM` lists all thirteen Entry fields there (presentation overrides), so every
+one of them already counts as referenced regardless of whether any Control renders it.
+
+Two consequences, and I have acted on the first only:
+
+1. **The selftest case had to be strengthened or it proved nothing.** The "a `CustomScreenElement`
+   exposing a group covers the fields under it" case now also strips the `f_entry_*` entries from
+   `fieldConfiguration` — which is what phase C will really do, since with the repeat gone there is
+   no Control left for them to configure. With that, the case fails without the rule and passes with
+   it, which I verified by disabling the rule and re-running. So does the typo case.
+
+2. **The check itself is looser than ADR-0008 implies, and I have not changed it.** A field mentioned
+   only in `fieldConfiguration` is not on the screen — `fieldConfiguration` configures a Control that
+   may not exist — yet the check treats it as exposed. Tightening this to count only `Control` /
+   `InlineRepeat` references is a one-line change with an unknown blast radius across nine form
+   models, and it is not what either change asked for. **Recommend doing it as its own change**, with
+   the warnings it surfaces triaged rather than bulk-suppressed. Flagging rather than fixing, because
+   a validator that suddenly warns about thirty fields in the middle of two other changes is how a
+   useful check gets switched off.
+
+The `exposes` rule is worth having either way: its **error** half — an annotation naming a group the
+bound Document Model does not have — is load-bearing today and catches a typo that would otherwise
+claim coverage of nothing.

@@ -275,8 +275,11 @@ that is not a real one.
   `expression`, no `elementRef`, and cannot be sortable — record the second column type, what it is for,
   and that anything its expression touches must be `indexed`. Add the `CustomScreenElement` +
   `widget` / `exposes` convention for form models in the same pass.
-- [ ] `docs/adr/0019-a-question-is-answered-in-its-conversation.md`, in the house form: context, the
+- [ ] `docs/adr/0021-a-question-is-answered-in-its-conversation.md`, in the house form: context, the
   decision, the alternative rejected (answering inside the Transcript) and why, consequences.
+  **Numbered 0021, not 0019**: this artefact was written before `operations-as-things` landed, and that
+  change took 0019 (*An Operation is a Thing*) and 0020 (*"Tool" is the provider's word*). Two ADRs
+  sharing a number is worse than a gap, and `scripts/check-docs.mjs` counts the directory.
 - [ ] `CONTEXT.md`: add **Transcript**, **Conversation Header**, **Speaker** and **Blocked** to the
   glossary if the terms are used outside this change's own documents — and only then.
 - [ ] Record the dormant models: `specs/system/functional.md` should say that the Open Questions
