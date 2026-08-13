@@ -2,6 +2,7 @@ import type { FormModel, FormModelMap } from "@com.mgmtp.a12.formengine/formengi
 import { LoggerFactory } from "@com.mgmtp.a12.utils/utils-logging";
 
 import { ConversationTranscript } from "./conversation/ConversationTranscript";
+import { QuestionContext } from "./conversation/QuestionContext";
 import { WIDGET_ANNOTATION_NAME, getAnnotationValue } from "./widgetAnnotation";
 
 /**
@@ -27,19 +28,32 @@ export function CustomScreenElements({
     config
 }: FormModelMap.FormModelComponentProps<FormModel.CustomScreenElement>) {
     const widget = getAnnotationValue(modelElement.annotations, WIDGET_ANNOTATION_NAME);
+    const document = config.renderOptions.state.data.document;
 
     switch (widget) {
         case "conversation-transcript":
-            return (
-                <ConversationTranscript
-                    document={config.renderOptions.state.data.document}
-                    height={modelElement.height}
-                />
+            // One widget value, two forms. The Conversation form holds the thread itself; the Answer
+            // Surface holds an Open Question that *names* one, and reading it is seam 4's other half.
+            // Which it is, is a fact about the document, so nothing has to be modelled twice.
+            //
+            // The test is for an Open Question rather than against a Conversation on purpose: a document
+            // the engine has not filled in yet is neither, and it belongs on the branch that shows an
+            // empty thread, not on the one that reports a conversation it could not find.
+            return isOpenQuestion(document) ? (
+                <QuestionContext document={document} height={modelElement.height} />
+            ) : (
+                <ConversationTranscript document={document} height={modelElement.height} />
             );
         default:
             report(modelElement.id, widget);
             return null;
     }
+}
+
+/** A JSONDocument is keyed by its root group's name, which is the Document Model's own. */
+function isOpenQuestion(document: unknown): boolean {
+    const root = (document as { OpenQuestion?: unknown } | null | undefined)?.OpenQuestion;
+    return typeof root === "object" && root !== null;
 }
 
 function report(id: string, widget: string | undefined): void {

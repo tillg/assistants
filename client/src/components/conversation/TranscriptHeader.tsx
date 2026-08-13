@@ -63,7 +63,8 @@ export function isBlocked(head: ConversationHead): boolean {
     return head.waitingFor === "user";
 }
 
-const Band = styled.header`
+/** Exported because the question form pins the same band over the OpenQuestion's own two facts. */
+export const Band = styled.header`
     position: sticky;
     top: 0;
     z-index: 1;
@@ -77,7 +78,8 @@ const Band = styled.header`
     color: ${({ theme }) => theme.colors.text.color};
 `;
 
-const Who = styled.div`
+/** Exported with the band, for the same reason. */
+export const Who = styled.div`
     display: flex;
     gap: 0.4rem;
     align-items: baseline;

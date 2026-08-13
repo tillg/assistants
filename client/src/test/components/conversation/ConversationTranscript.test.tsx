@@ -1,15 +1,41 @@
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+
+import { LoggerFactory } from "@com.mgmtp.a12.utils/utils-logging";
 
 import { ConversationTranscript } from "../../../components/conversation/ConversationTranscript";
 import fixture from "../../fixtures/conversation.json";
 
-import { Frame } from "./harness";
+import { Frame, serveDocuments } from "./harness";
 
 /** A Conversation document with just the Entries a case is about. */
 function conversationWith(entries: readonly object[]): object {
     return { Conversation: { AssistantKey: "accountant", Title: "Accountant", Entries: entries } };
 }
+
+/** A blocked Conversation: two Entries, and the id of the question it is waiting on. */
+const BLOCKED = {
+    Conversation: {
+        AssistantKey: "accountant",
+        Title: "Invoice 2026-118",
+        Status: "waiting",
+        WaitingFor: "user",
+        CurrentQuestionId: "45e95914",
+        Entries: [
+            { Seq: 1, At: "2026-07-23T15:09:00", Role: "assistant", Kind: "assistant", Text: "Checking." },
+            { Seq: 2, At: "2026-07-23T15:09:04", Role: "system", Kind: "approval-request" }
+        ]
+    }
+};
+
+/** The question `BLOCKED` is waiting on, as the store returns it. */
+const QUESTION = {
+    OpenQuestion: {
+        Kind: "approval",
+        Prompt: "**Approval needed.** Book invoice 2026-118 to 6815?",
+        Options: [{ OptionValue: "yes", OptionLabel: "Book it" }]
+    }
+};
 
 function renderTranscript(document: object) {
     return render(
@@ -20,6 +46,14 @@ function renderTranscript(document: object) {
 }
 
 describe("ConversationTranscript", () => {
+    beforeEach(() => {
+        vi.spyOn(LoggerFactory.getLogger("PT/useThingById"), "warn").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
     it("renders the fixture's thirteen Entries as six Bubbles and four Receipts", () => {
         renderTranscript(fixture);
 
@@ -90,5 +124,56 @@ describe("ConversationTranscript", () => {
         );
 
         expect(screen.getByTestId("conversation-transcript")).toHaveStyle({ height: "640px", overflowY: "auto" });
+    });
+
+    it("ends in the Pending Question Bubble, carrying words the Entries do not have", async () => {
+        serveDocuments({ "OpenQuestion_DM/45e95914": QUESTION });
+
+        renderTranscript(BLOCKED);
+
+        await waitFor(() => expect(screen.getByTestId("pending-question")).toBeInTheDocument());
+        const pending = screen.getByTestId("pending-question");
+        // The `approval-request` Entry carries no text at all; these words come from the question.
+        expect(pending).toHaveTextContent("Book invoice 2026-118 to 6815?");
+        expect(pending).toHaveTextContent("Book it");
+        expect(screen.getByTestId("pending-question-answer")).toBeInTheDocument();
+
+        const last = screen.getAllByTestId("transcript-bubble").at(-1)!;
+        expect(last.compareDocumentPosition(pending) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("shows no such Bubble when nothing is pending, and asks for nothing", () => {
+        const server = serveDocuments({ "OpenQuestion_DM/45e95914": QUESTION });
+
+        renderTranscript(fixture);
+
+        expect(screen.queryByTestId("pending-question")).toBeNull();
+        expect(screen.queryByTestId("transcript-message")).toBeNull();
+        expect(server.asked).toHaveLength(0);
+    });
+
+    it("leaves the thread standing when the pending question cannot be read", async () => {
+        serveDocuments({});
+
+        renderTranscript(BLOCKED);
+
+        await waitFor(() => expect(screen.getByTestId("transcript-message")).toBeInTheDocument());
+        expect(screen.getAllByTestId("transcript-message")).toHaveLength(1);
+        expect(screen.getAllByTestId("transcript-bubble")).toHaveLength(2);
+        expect(screen.getByTestId("transcript-header")).toBeInTheDocument();
+    });
+
+    it("shows no Bubble on the Answer Surface, where the answer controls are that Bubble", async () => {
+        const server = serveDocuments({ "OpenQuestion_DM/45e95914": QUESTION });
+
+        render(
+            <Frame>
+                <ConversationTranscript document={BLOCKED} showPendingQuestion={false} />
+            </Frame>
+        );
+
+        await waitFor(() => expect(screen.getAllByTestId("transcript-bubble")).toHaveLength(2));
+        expect(screen.queryByTestId("pending-question")).toBeNull();
+        expect(server.asked).toHaveLength(0);
     });
 });

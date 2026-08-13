@@ -135,6 +135,40 @@
         "screenElements": [
           {
             "type": "Section",
+            "id": "section_conversation",
+            "name": "SectionConversation",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Conversation"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Konversation"
+                  }
+                ]
+              }
+            },
+            "screenElements": [
+              {
+                "type": "CustomScreenElement",
+                "id": "custom_transcript",
+                "name": "ConversationTranscript",
+                "height": 480,
+                "annotations": [
+                  {
+                    "name": "widget",
+                    "value": "conversation-transcript"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "Section",
             "id": "section_question",
             "name": "SectionQuestion",
             "title": {
@@ -152,6 +186,59 @@
                 ]
               }
             },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_prompt",
+                "name": "GridPrompt",
+                "layout": {
+                  "lg": "12"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_3",
+                    "name": "r3",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_prompt",
+                        "elementRef": "f_prompt",
+                        "readonly": true,
+                        "annotations": [
+                          {
+                            "name": "widget",
+                            "value": "markdown-editor"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "Section",
+            "id": "section_details",
+            "name": "SectionDetails",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Details"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Details"
+                  }
+                ]
+              }
+            },
+            "collapsible": true,
+            "initiallyCollapsed": true,
             "screenElements": [
               {
                 "type": "ControlGrid",
@@ -201,35 +288,6 @@
                   }
                 ],
                 "verticalAlignment": "BOTTOM"
-              },
-              {
-                "type": "ControlGrid",
-                "id": "grid_prompt",
-                "name": "GridPrompt",
-                "layout": {
-                  "lg": "12"
-                },
-                "row": [
-                  {
-                    "type": "Row",
-                    "id": "row_3",
-                    "name": "r3",
-                    "cell": [
-                      {
-                        "type": "Control",
-                        "id": "ctrl_prompt",
-                        "elementRef": "f_prompt",
-                        "readonly": true,
-                        "annotations": [
-                          {
-                            "name": "widget",
-                            "value": "markdown-editor"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                ]
               }
             ]
           },

@@ -2,8 +2,9 @@ import { Fragment, useMemo } from "react";
 import styled from "styled-components";
 
 import { Bubble } from "./Bubble";
+import { PendingQuestion } from "./PendingQuestion";
 import { Receipt } from "./Receipt";
-import { TranscriptHeader } from "./TranscriptHeader";
+import { TranscriptHeader, readConversation } from "./TranscriptHeader";
 import { clusterEntries, readEntries } from "./entries";
 
 /**
@@ -18,7 +19,8 @@ import { clusterEntries, readEntries } from "./entries";
  * It reads the document the form engine already holds, and holds nothing itself.
  */
 
-const Box = styled.section<{ $height?: number }>`
+/** Exported because the question form's degraded state is the same box with nothing in it. */
+export const TranscriptBox = styled.section<{ $height?: number }>`
     display: flex;
     flex-direction: column;
     height: ${({ $height }) => ($height === undefined ? "32rem" : `${$height}px`)};
@@ -44,14 +46,21 @@ export interface ConversationTranscriptProps {
     readonly document: unknown;
     /** The modelled height of the box, in pixels. */
     readonly height?: number;
+    /**
+     * Whether a pending question ends the thread. It does on the Conversation form, and it does not on
+     * the Answer Surface, where the answer controls beneath the Transcript *are* that Bubble.
+     */
+    readonly showPendingQuestion?: boolean;
 }
 
-export function ConversationTranscript({ document, height }: ConversationTranscriptProps) {
+export function ConversationTranscript({ document, height, showPendingQuestion = true }: ConversationTranscriptProps) {
     const entries = useMemo(() => readEntries(document), [document]);
     const clusters = useMemo(() => clusterEntries(entries), [entries]);
+    const { currentQuestionId } = readConversation(document);
+    const pending = showPendingQuestion && currentQuestionId !== "";
 
     return (
-        <Box $height={height} data-testid="conversation-transcript">
+        <TranscriptBox $height={height} data-testid="conversation-transcript">
             <TranscriptHeader document={document} entries={entries} />
             <Thread>
                 {clusters.map((cluster) => (
@@ -69,7 +78,8 @@ export function ConversationTranscript({ document, height }: ConversationTranscr
                         )}
                     </Fragment>
                 ))}
+                {pending && <PendingQuestion questionId={currentQuestionId} />}
             </Thread>
-        </Box>
+        </TranscriptBox>
     );
 }

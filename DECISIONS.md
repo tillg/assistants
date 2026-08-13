@@ -1394,3 +1394,31 @@ and the fallback is not needed. The header reads:
 
 which is every fact the Header was specified to carry. `≥ 0` is correct here and not a bug: this
 stack runs the scripted provider, which records no tokens.
+
+## D-044 — UI phase D decisions
+
+*Decided 2026-08-14 02:30 CEST.*
+
+- **`useThingById` is a plain effect, not a saga.** `dataservices-access` exports
+  `Dispatcher.rpc(language, [request])` — a promise API that reaches
+  `ConnectorLocator.getInstance().getServerConnector()` internally and needs nothing from the store.
+  A saga would have bought a channel, an action and a slice of state no reducer wants.
+  `loadModelGraph.ts` is a saga because it is triggered by `UaaActions.loggedIn`; this is triggered
+  by a mount. Phase A was supposed to settle this by spiking and never ran.
+- **One widget value serves two document types.** Nothing in the artefacts says how
+  `conversation-transcript` behaves on a form bound to `OpenQuestion_DM`. The dispatcher branches on
+  the **document's root group** — an `OpenQuestion` root goes to `QuestionContext`, anything else to
+  `ConversationTranscript` — rather than introducing a second annotation value. A `question-context`
+  value is a two-line change if you would rather model it explicitly.
+- **The element sits above *Question* on `OpenQuestion_FM`.** plan.md says "above `section_answer`";
+  architecture.md's table puts it above *Question*. First satisfies both, so first it is.
+  `height: 480` rather than the Conversation form's `640`, since it shares the screen with the prompt
+  and the answer controls — a number no artefact settles.
+- **Loading renders nothing.** No artefact specifies a loading state, and a spinner that flashes on
+  every mount is worse than nothing for a read this fast.
+- **`Dispatcher.rpc`'s `language` is hardcoded `"en"`.** It reaches only the `Accept-Language`
+  header, and `GET_DOCUMENT` takes a docRef and nothing else. Wiring it to the application locale
+  would give the hook a store dependency it otherwise does not have — and the application's
+  localisation is being removed in a separate change anyway.
+- **`vitest.setup.ts` gained a no-op `ResizeObserver` stub.** jsdom has none and the rich-text editor
+  asks for one on mount. A test-environment gap, not a product change.
