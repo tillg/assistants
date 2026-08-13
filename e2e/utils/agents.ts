@@ -181,6 +181,37 @@ export async function waitForRaisedQuestion(
     );
 }
 
+/**
+ * Wait until some Conversation in this Document's tree records a tool result containing `contains`.
+ *
+ * A call the Runtime refuses leaves an Entry, not an absence — that is the point of writing the
+ * intent before running anything — so the transcript is the only place a test can see *why* an
+ * Operation did nothing. Same tree, same poll and same interval as everything else here: the
+ * Conversation is found through the Document that gave birth to it, never by guessing.
+ */
+export async function waitForToolResult(
+    store: ThingStore,
+    documentThingId: string,
+    contains: string,
+    timeoutMs = AGENT_TIMEOUT_MS
+): Promise<Record<string, unknown>> {
+    return waitFor(
+        `a tool result containing "${contains}" in some Conversation about Document ${documentThingId}`,
+        async () => {
+            for (const conversation of await conversationsFor(store, documentThingId)) {
+                const entries = (body(conversation, "Conversation")["Entries"] ?? []) as Array<Record<string, unknown>>;
+                const hit = entries.find((entry) => String(entry["ToolResult"] ?? "").includes(contains));
+                if (hit) {
+                    return hit;
+                }
+            }
+            return undefined;
+        },
+        timeoutMs,
+        2_000
+    );
+}
+
 /** Is this Open Question still unanswered and still the one its Conversation waits on? */
 export async function questionIsPending(store: ThingStore, question: RaisedQuestion): Promise<boolean> {
     const [asked, conversation] = await Promise.all([

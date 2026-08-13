@@ -66,6 +66,31 @@ export class FormPage extends BasePage {
         return this.page.locator(`[id="${id}"]`);
     }
 
+    /**
+     * Can the User change the control behind this label?
+     *
+     * `readonly: true` in a form model does not take the control away: the widgets keep the input,
+     * the label and the `for` that binds them, and mark the input itself — `readOnly` on a text
+     * field or an autocomplete, `disabled` on a select. So the honest question is not "is there an
+     * input?" but "would the browser accept a change to it?", which is exactly what Playwright's
+     * editable check answers, whichever of the two the widget chose.
+     *
+     * The label's `for` is the way in for the same reason {@link inputFor} uses it for
+     * autocompletes: their accessible name becomes whatever they currently hold, so a role-and-name
+     * lookup stops finding the very controls a read-only assertion is usually about.
+     */
+    async isFieldEditable(label: string, locator: Locator = this.form): Promise<boolean> {
+        const labels = locator.locator("label").filter({ hasText: new RegExp(`^${label}\\s*\\*?$`) });
+        if ((await labels.count()) === 0) {
+            throw new Error(`No label '${label}' in this form`);
+        }
+        const id = await labels.first().getAttribute("for");
+        if (!id) {
+            return false;
+        }
+        return this.page.locator(`[id="${id}"]`).first().isEditable();
+    }
+
     async assertFieldValue(testData: TestData, locator: Locator = this.form) {
         if (testData.type === DataType.File) {
             throw new Error(`Data type File not implemented`);

@@ -23,6 +23,7 @@ const MODULES: readonly string[] = [
     "Processes",
     "Parties",
     "Assistants",
+    "Operations",
     // Conversations and Runtime were `fixme` while the cause was unknown: both form models were
     // missing `content.subHeaderBox`, which the form engine's own gate requires (BUG-15). The
     // apparent intermittency was this spec, not the models — see the wait below.

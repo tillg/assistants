@@ -1297,3 +1297,100 @@ not weakened.
 no business touching, and it is easy to revert. **The six stale Conversations are still in the
 store** and the tier cannot delete them; they are inert (the Assistant key matches no Assistant) but
 they are there.
+
+## D-040 — UI phase C decisions
+
+*Decided 2026-08-14 01:25 CEST.*
+
+- **`client/tsconfig.json` gained `"@testing-library/jest-dom/vitest"` in `types`.** The matchers were
+  registered at *run time* by `vitest.setup.ts` but had never been type-checked, so every
+  `toBeInTheDocument()` was a latent TS2339 — invisible only because no test had ever used one. This
+  is the one configuration change the change needed, and it is a pre-existing gap rather than a new
+  requirement.
+- **⚠ The transcript stays inside `SectionEntries`**, still titled *Entries* / *Einträge*, and
+  therefore still sits **below** *Result* and *Last error*. plan.md says "keep the Result and Last
+  error sections and their order", which reads as *do not disturb them* rather than *the thread goes
+  last*. **This is the one phase C decision I am least sure of** — a reader opening a Conversation
+  arguably wants the thread first, and the section title *Entries* now names a data-grid that is no
+  longer there. Both are one-line changes; flagged for the browser check rather than guessed at.
+- **`OpenForeignFormAction` is a `type`, not an `interface`.** Only a type alias gets the implicit
+  index signature that makes it assignable to redux's `UnknownAction` at the `dispatch()` call site.
+  A non-obvious constraint worth not rediscovering.
+- **The token footnote is suppressed at zero.** Every Turn in this stack records `0/0` (scripted
+  provider), and rendering *"0 + 0 tokens"* under every bubble is noise. The Header's total still
+  reads `≥ N tokens recorded` unconditionally, because the `≥` is the point.
+- **`CustomScreenElements` warns once per unknown widget value**, through `LoggerFactory` rather than
+  `console` (`no-console` is an error in this repo), and renders `null`. A modelled placeholder no
+  developer has filled in must not break a form.
+- **RTL needed no accommodation.** I had briefed the agent to expect first-run friction — React 19.2
+  + RTL 16.3 + jsdom + styled-components, never exercised in this repo. There was none: the smoke
+  probe passed first try and every component test passed on first write. Worth recording because the
+  risk was real and the budget for it was not needed.
+
+## D-041 — ⚠ `collapsible` on a `MultiColumnSection` is declared and never read
+
+*Found in the browser and fixed 2026-08-14 02:15 CEST.*
+
+plan.md's phase C says: *"Set `collapsible: true, initiallyCollapsed: true` on `Conversation_FM`'s
+`ConversationHeader` **MultiColumnSection**."* That was done, the model carried both flags, the
+converted output carried both flags — and the section rendered fully expanded.
+
+The typings are the trap. `FormModel.MultiColumnSection` **declares** `collapsible` and
+`initiallyCollapsed`, identically to `Section`, so a model carrying them type-checks and validates.
+But the renderer only reads them in one place:
+
+```
+formengine-core/lib/view/internal/components/form-engine/layout/section.js   → 5 occurrences
+formengine-core/lib/view/internal/components/form-engine/layout/multi-column-section.js → 0
+```
+
+`multi-column-section.js` never mentions `collapsible`. The flags are silently ignored.
+
+**Decided**: convert `ConversationHeader` from `MultiColumnSection` to `Section` and drop its
+`layout`. This is safe because the outer layout was only `{"lg": "12"}` — full width — and the actual
+`4-4-4` column layout lives on the inner `ControlGrid`, which is untouched. Verified in the browser:
+the section now renders collapsed, as `› Conversation`, with all thirteen Controls one click away.
+
+**Worth generalising**: a `MultiColumnSection` that wants collapsing must become a `Section` wrapping
+a `ControlGrid`. That belongs in `CONVENTIONS.md`, and phase F adds it.
+
+## D-042 — ⚠ The transcript leads, and the section is renamed
+
+*Decided 2026-08-14 02:20 CEST, on the evidence of the browser check.*
+
+Phase C left the transcript inside `SectionEntries`, still titled *Entries* / *Einträge*, and
+therefore **below** *Result* and *Last error*. Opening a running Conversation showed what that costs:
+a large empty *Result* box occupying the top of the pane, with the thread — the thing the change
+exists to produce — pushed under it and below the fold.
+
+**Decided**, two changes:
+- the section moves directly under the header, so **the thread leads**;
+- it is retitled **Transcript** / **Verlauf**, because *Entries* named the data grid that is no
+  longer there.
+
+**On the instruction it appears to bend**: plan.md says *"Keep the Result and Last error sections and
+their order."* Those two keep their sections and keep their order relative to each other; only the
+transcript moved past them. I read the sentence as *do not disturb them*, not *the thread goes last*
+— and phase C's own checklist ends with *"It has to look like a thread … if either fails, this is the
+phase to fix it, not a later one"*, which is an instruction to judge it on screen. Both changes are
+one line each and trivially reversible if you disagree.
+
+## D-043 — The pinned header works, which phase A never established
+
+*Verified 2026-08-14 02:18 CEST.*
+
+plan.md called the sticky header *"the one step that decides whether the Header design holds"* and
+told phase A to settle it by spiking, with a documented fallback if `position: sticky` would not
+stick inside the form engine's container. **Phase A's spikes were never run** — the change was
+implemented straight from the artefacts — so this was still open when the code landed.
+
+Measured on the built article: with the transcript box scrolled to its bottom, the header sits **1px
+from the box top**, `position: sticky`, `top: 0px`, and content scrolls beneath it. The design holds
+and the fallback is not needed. The header reads:
+
+```
+🤖 accountant · Accountant (called by receptionist) · called by 6156e9a7 · 🛑 waiting for you · turn 2/20 · ≥ 0 tokens recorded
+```
+
+which is every fact the Header was specified to carry. `≥ 0` is correct here and not a bug: this
+stack runs the scripted provider, which records no tokens.

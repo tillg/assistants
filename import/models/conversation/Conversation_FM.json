@@ -78,7 +78,7 @@
         "name": "Screen1",
         "screenElements": [
           {
-            "type": "MultiColumnSection",
+            "type": "Section",
             "id": "multicolumnsection-1a4f8",
             "name": "ConversationHeader",
             "title": {
@@ -95,9 +95,6 @@
                   }
                 ]
               }
-            },
-            "layout": {
-              "lg": "12"
             },
             "collapsible": true,
             "initiallyCollapsed": true,
@@ -230,6 +227,44 @@
           },
           {
             "type": "Section",
+            "id": "section-4e0f3",
+            "name": "SectionEntries",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Transcript"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Verlauf"
+                  }
+                ]
+              }
+            },
+            "screenElements": [
+              {
+                "type": "CustomScreenElement",
+                "id": "custom_transcript",
+                "name": "ConversationTranscript",
+                "height": 640,
+                "annotations": [
+                  {
+                    "name": "widget",
+                    "value": "conversation-transcript"
+                  },
+                  {
+                    "name": "exposes",
+                    "value": "f_entries"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "Section",
             "id": "section-2b7c1",
             "name": "SectionResult",
             "title": {
@@ -325,44 +360,6 @@
                         ]
                       }
                     ]
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "type": "Section",
-            "id": "section-4e0f3",
-            "name": "SectionEntries",
-            "title": {
-              "type": "Multilingual",
-              "multilingualText": {
-                "text": [
-                  {
-                    "locale": "en",
-                    "text": "Entries"
-                  },
-                  {
-                    "locale": "de",
-                    "text": "Einträge"
-                  }
-                ]
-              }
-            },
-            "screenElements": [
-              {
-                "type": "CustomScreenElement",
-                "id": "custom_transcript",
-                "name": "ConversationTranscript",
-                "height": 640,
-                "annotations": [
-                  {
-                    "name": "widget",
-                    "value": "conversation-transcript"
-                  },
-                  {
-                    "name": "exposes",
-                    "value": "f_entries"
                   }
                 ]
               }
