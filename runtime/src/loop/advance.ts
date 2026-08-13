@@ -1076,19 +1076,8 @@ function unresolvedCallMessage(
         dropped.find((candidate) => toolNameForLlm(candidate.key) === wireName) ??
         dropped.find((candidate) => candidate.key === operation);
     const named = `"${drop?.key ?? operation}"`;
-    const reason = !drop
-        ? `${named} is not granted to you.`
-        : drop.reason === "disabled"
-          ? `${named} is switched off. The User has disabled it, so nothing was done; ask them if you need it.`
-          : drop.reason === "unimplemented"
-            ? `${named} is no longer implemented, so there is nothing to call.`
-            : drop.reason === "absent"
-              ? `${named} is granted to you, but no such Operation exists in this system.`
-              : drop.reason === "unparseable"
-                ? `${named} is misconfigured: its parameters are not valid JSON, so it cannot be called.`
-                : drop.reason === "self-call"
-                  ? `${named} would call yourself, which is not permitted.`
-                  : `${named} is not a wildcard: name the Assistant you mean, as "assistant.call:<key>".`;
+    // Never granted at all is the only case where "you do not have it" is the whole truth.
+    const reason = drop ? DROP_REASONS[drop.reason](named) : `${named} is not granted to you.`;
     const available = granted.map((candidate) => candidate.name);
     return `Error: ${reason} ${
         available.length > 0
@@ -1096,6 +1085,22 @@ function unresolvedCallMessage(
             : "You have no Operations available at all."
     }`;
 }
+
+/**
+ * One sentence per drop reason. A `Record` over the union rather than a chain of ifs, so a seventh
+ * reason cannot be added without deciding what the model is told about it.
+ */
+const DROP_REASONS: Record<DroppedGrant["reason"], (named: string) => string> = {
+    disabled: (named) =>
+        `${named} is switched off. The User has disabled it, so nothing was done; ask them if you need it.`,
+    unimplemented: (named) => `${named} is no longer implemented, so there is nothing to call.`,
+    absent: (named) => `${named} is granted to you, but no such Operation exists in this system.`,
+    unparseable: (named) =>
+        `${named} is misconfigured: its parameters are not valid JSON, so it cannot be called.`,
+    "self-call": (named) => `${named} would call yourself, which is not permitted.`,
+    "bare-call": (named) =>
+        `${named} is not a wildcard: name the Assistant you mean, as "assistant.call:<key>".`,
+};
 
 export function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));

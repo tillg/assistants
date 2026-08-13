@@ -1066,11 +1066,17 @@ where they still carry an `exposition` (`f_description`, `f_notes`, `f_parameter
 respects the "each `elementRef` at most once" rule, since `f_parameters` needs both and now gets its
 `readonly` from one place and its `AREA` from the other.
 
-**Still to confirm**: whether the fieldConfiguration form ever worked, or only fails in *create*
-mode. I saw it on a new document because the catalogue was empty until phase F. The assertion is
-re-checked against a seeded Operation in phase H; if `readonly` on the Control also fails to bind
-there, `CONVENTIONS.md`'s note needs widening from "EnumerationType" to "any field", which is a
-change to a document other people rely on and so is not being made on one data point.
+**Confirmed 2026-08-14 02:05 CEST**, against a seeded Operation (`bookkeeping.getBudgetReport`)
+after bootstrap and a model re-import: `Key`, `System` and `Kind` render greyed-out and
+non-editable, while `Name` and `Enabled` stay editable — exactly the intended split. So `readonly`
+on the **Control** binds, and `readonly` in `fieldConfiguration` does not, on a plain `StringType`
+and not only on an `EnumerationType`.
+
+`CONVENTIONS.md`'s note is therefore narrower than the truth. I have **not** widened it: the claim
+now rests on two observations of the same field type in the same form, and the note is a document
+other models were authored against. Widening it from "has no effect on an `EnumerationType`" to
+"has no effect, full stop" wants one more data point on a different field type — worth doing, worth
+doing deliberately.
 
 ## D-031 — The UI change's ADR is renumbered 0021
 
@@ -1168,3 +1174,77 @@ User can do it (D-007: the Runtime holds no `DOCUMENT_DELETE`)."*
 JSON-RPC API directly, since `Operation_DM` is writable by any identity holding `ASSISTANT_WRITE`.
 The resolution would still be arbitrary. A `document_unique_constraint` on `Operation.Key` is the
 real answer and is a Model-level change nobody asked for in this change — worth its own commit.
+
+## D-035 — Phase E and F decisions the artefacts left open
+
+*Decided 2026-08-14 01:20–01:40 CEST.*
+
+- **The watcher reports "unhealthy" by leaving the heartbeat unstamped.** architecture.md says an
+  empty catalogue must "report unhealthy" without saying by what mechanism. The existing `paused`
+  early return sets the precedent and `health.ts` already reads `heartbeatAt`, so no new signal was
+  invented. `report.errors` is incremented alongside.
+- **The missing-catalogue error is logged once per outage, not once per scan**, following the
+  existing `noteBadCron` / `noteFrozenFrontier` pattern. The heartbeat is the continuous signal; a
+  line every two seconds is how a log stops being read.
+- **The catalogue read sits after the disabled / max-turns guards**, so a Conversation that was never
+  going to run costs no query.
+- **The `absent` wording departs from architecture.md's failure-mode table.** That table says an
+  absent grant means the model is told *"it is not granted"*, which is false: the grant is right
+  there in the Assistant's definition — the *Operation* is what is missing. The message reads
+  *"`X` is granted to you, but no such Operation exists in this system"*, and *"is not granted to
+  you"* is reserved for a call that was never granted at all.
+- **Drop reasons are matched by wire name.** `operationFromLlm` maps `__`→`.` unconditionally, so
+  `assistant__call__accountant` reverses to `assistant.call.accountant` and matches no grant. The
+  lookup compares in the direction the mapping is total.
+- **`bootstrap()` takes the Implementations as a parameter** rather than constructing them. The seeds
+  live inside `buildOperations(deps)` and architecture.md wants them there ("a seed in a second file
+  is a seed that drifts from its `execute`"). The alternative was fake dependencies inside bootstrap;
+  the parameter keeps `bootstrap()` free of Firefly and config, and `cli.ts` — the composition root —
+  is the only place that wires seed-only stubs.
+
+## D-036 — UI phase B decisions
+
+*Decided 2026-08-14 01:45 CEST.*
+
+- **`kernel-md-facade` has a documented accessor, and it is not used.**
+  `DocumentServiceFactory().getDocumentService().getAssignedObject(document, path)` works — verified
+  against the real fixture. Rejected anyway: it pulls ~3 MB of `kernel-core-runtime-ts` into the
+  bundle to read one array, and each Entry's own eleven fields must be read by name regardless, so it
+  would have covered 1 access in 14 — inconsistent rather than safer, with an index-1-vs-0 trap
+  attached. `entries.ts`'s module comment records this at the call site. The swap is one function if
+  you disagree.
+- **`ui.askUser`'s orphaned `tool-result` renders as a result-only Receipt.** Its `tool-intent` is
+  Assistant speech and opens no Receipt, so the result has nothing to pair with. The artefacts do not
+  say what becomes of it; dropping it silently would violate *"must degrade, never disappear"*.
+- **domain.md contradicts itself on collapsing** — the **Machinery** vocabulary entry says Machinery
+  renders collapsed; the Speaker table marks only `system` and `prompt` collapsed. The **table** was
+  followed, since it is the normative one. One line in domain.md fixes it either way.
+- **The separator format was unified.** domain.md's diagram uses two (`— Thu 23 Jul at 15:09 —` and
+  `— Yesterday 14:40 —`); the implementation renders `Today/Yesterday at HH:mm` plus the absolute
+  form.
+- **The fixture is a *called* Assistant's Conversation**, so it carries no `system`, `note`,
+  `timeout` or `error` Entry and no subject link. Those Speaker rows are tested synthetically. If a
+  second fixture is ever captured, capture a **top-level** Conversation with a subject.
+
+## D-037 — Counts corrected that were already wrong before this change
+
+*Found 2026-08-14 01:50 CEST, phase I.*
+
+Three of these predate `operations-as-things` and were found only because every number was recounted
+from the filesystem rather than carried over:
+
+| Where | Said | Actually |
+|---|---|---|
+| `specs/system/architecture.md` — Models | seven `_OM`s | **eight** before this change, nine after |
+| `specs/system/architecture.md` — grant matrix | Accountant gets "all six reads" | **five** |
+| `README.md` — Runtime | "six `bookkeeping.*` operations" | **seven** |
+
+`README.md` also gained a **fourth** entry under *Status and limitations* beyond the three the plan
+named — that a description improved in code does not reach a running system, which is the visible
+cost of bootstrap's asymmetry rule and belongs beside the other three.
+
+**Left deliberately stale**: README's e2e limitation still says *"a row opened in each of the eight
+modules"*, and `specs/research/ASSISTANTS_VS_OPENCLAW.md` still describes `grantedTo(assistant)`
+reading `tools[]`. The first becomes nine in the e2e phase; the second raises a question this session
+should not answer alone — **are research documents dated snapshots or living documents?** They read
+as snapshots of an argument made at a point in time, which is an argument for leaving them.

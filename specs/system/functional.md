@@ -79,9 +79,9 @@ an edit, change the seed in `runtime/src/bootstrap/assistants.ts`.
 ### Reading and editing the catalogue of Operations
 
 The **Operations** module is the answer to *"what can my Assistants actually do?"* — a question that
-used to require reading TypeScript. It lists every Operation the Runtime knows how to perform, one
-row each: its key, the System it belongs to, its kind, whether it is switched on, whether it needs
-your approval, and whether it changes anything out there.
+used to require reading TypeScript. It lists every Operation the system has, one row each: its key,
+the System it belongs to, its kind, whether it is switched on, whether it needs your approval, and
+whether it changes anything out there.
 
 Opening one shows the whole of it, and which half of it is yours is the interesting part of the
 form. The fields that are facts about the code are rendered read-only; the fields that are decisions
@@ -113,7 +113,9 @@ setting, since it cannot edit the catalogue but can compose a persuasive sentenc
 
 What you cannot do is invent an Operation. The catalogue describes Operations; the code performs
 them, and the two are joined by the key. An Operation with no Implementation registered under its
-key is not offered to anybody and says so (ADR-0019).
+key is not offered to anybody and says so (ADR-0019). The overview accordingly has no **Add**
+button: a row created by hand would carry no idempotency key, so the next `just bootstrap` would
+create a second Thing under the same key rather than recognising the one you made.
 
 Editing the catalogue never gives birth to a Conversation, and `just bootstrap` will not undo what
 you decided: it re-applies only the fields the code owns — `System`, `Kind`, `Parameters`,
@@ -157,6 +159,8 @@ What to expect from one, because none of it is obvious:
 
 - `just pause` sets `RuntimeState.paused` and the watcher does nothing at all until `just resume`.
 - Setting an Assistant's `enabled` to `false` stops its births **and** its continuations.
+- Unticking an Operation's `Enabled` withdraws that one capability from every Assistant at once —
+  the switch between "stop everything" and "stop this Assistant" that used to require a deploy.
 - A births-per-hour cap bounds a runaway even if nobody is watching.
 
 ### The books
@@ -256,6 +260,7 @@ is stale, and `just ps` shows it.
 | An attachment | Uploaded on the Document form | Stored in the A12 Content Store |
 | An **answer** | Saving an Open Question form | The only interaction the whole slice requires |
 | An **Assistant definition** | Editing the Assistant form, or the seed file | Markdown prompts and Skills |
+| An **Operation's** prose, approval requirement or kill switch | Editing the Operation form | The rest of the Operation is the code's, and shown read-only. `just bootstrap` does not undo these |
 | **Demo data** | `just demo-data` | Parties, processes, documents, invoices, and matching Firefly books |
 | **LLM configuration** | `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_BASE_URL` | `scripted` by default; costs nothing and needs no key |
 | A **schedule** | A `cron` on an Assistant's `schedule` Trigger | Read in `SCHEDULE_TIMEZONE`, default `Europe/Berlin`. One timezone for the whole system |
@@ -357,11 +362,19 @@ Read-only forms are an **affordance, not an authorisation boundary**. What prote
 single-writer invariant is that nothing in the UI navigates to those documents in edit mode, not
 that the server would refuse.
 
+The Runtime's row and an **Assistant's** row are not the same row, and `Operation` is where they
+part. The Runtime reads the catalogue on every Turn — it has to, it is how it knows what to offer.
+An Assistant may not read it at all: `Operation_DM` is the one Model `thingstore.get` and
+`.search` refuse, because its entire content is the configuration that constrains the reader, and a
+model that could read it would know exactly which Operations are guarded and what the User has
+written about them. Everything else in the machinery stays readable, as it always has been.
+
 Between Assistants, capability is declared rather than assumed: an Assistant may call only the
-Operations its `tools[]` lists, one row per Operation, and one row per callee for
-`assistant.call:<key>`. The registry filters the schemas offered to the model, so an undeclared
+Operations its `grants[]` lists, one row per Operation, and one row per callee for
+`assistant.call:<key>`. The registry filters the schemas offered to the model, so an ungranted
 Operation is **invisible**, not merely refused. Self-calls are rejected. Reading an Assistant tells
-you exactly what it can reach (ADR-0010).
+you exactly what it can reach — provided the Operation is also switched on in the catalogue and
+implemented in the Runtime, which is the conjunction ADR-0010's rule became (ADR-0019).
 
 Everything is on `127.0.0.1`. There is no multi-tenancy, no sharing and no per-Thing visibility.
 
@@ -406,6 +419,22 @@ This is one running vertical slice, not a finished system.
 - **`updatedAt` records the last Runtime write only.** A save from the web application moves only
   `__meta.modifiedAt`, because the machine fields are on no form and A12's form engine offers no
   save hook that could reach one.
+- **Switching an Operation off is not retroactive.** A Conversation already suspended on
+  `bank.sendMoney` is waiting on an Open Question, not on the Operation: answering that question
+  resumes it, and the Assistant is told on its *next* Turn that the Operation is switched off. So
+  the kill switch stops the next call rather than unwinding the one in flight — and a Conversation
+  that had already been asked to do something by hand will still be asked, because the User has the
+  question in their inbox and the switch does not reach into it. Nothing is stranded either way: a
+  Conversation that crashed mid-call has its intent settled as *no longer available* by the ordinary
+  recovery path.
+- **The catalogue answers what exists, not who may.** *"Which Assistants can book a transaction?"* is
+  still answered by opening each Assistant and reading its grants; an Operation carries no list of
+  the Assistants granted it, because computing one would mean letting the Runtime write the very
+  Model it is forbidden to write.
+- **An empty catalogue stops everything.** If `just bootstrap` has never run, the Runtime refuses to
+  scan and reports itself unhealthy rather than falling back to what the code knows. That is the
+  intended behaviour — a second answer to *"what can this Assistant do"* is exactly what the
+  catalogue exists to remove — and the remedy is in the log.
 
 **Operational limits**
 

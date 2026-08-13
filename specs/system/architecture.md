@@ -112,7 +112,7 @@ every Gradle task the template provides.
 │   ├── src/watcher/          the seven scans
 │   ├── src/operations/       the registry and the seventeen Implementations
 │   ├── src/connectors/       firefly
-│   ├── src/bootstrap/        seeds the two Assistants and the RuntimeState singleton
+│   ├── src/bootstrap/        seeds the two Assistants, the catalogue and the RuntimeState singleton
 │   ├── src/demo/             the demo household loader
 │   └── fixtures/             the scripted LLM transcript
 ├── import/
@@ -451,7 +451,7 @@ consumes.
 true on the day it was written. The catalogue is the answer now: open **Operations** in the web
 application, or read `runtime/src/operations/implementations.ts` for the seventeen Implementations
 that seed it. What a User wants from it — what does this Operation do, which System does it touch,
-does it need my approval, is it on — is four columns of an overview rather than four questions for
+does it need my approval, is it on — is now an overview and a form rather than four questions for
 whoever last read the source.
 
 The registry resolves the Assistant's `grants[]` against a **catalogue snapshot taken once per
@@ -460,8 +460,9 @@ with the reason for each — `absent`, `disabled`, `unimplemented`, `unparseable
 `bare-call`. The schemas offered to the LLM are derived from the same call, so the advertised set
 and the executable set cannot drift, and an Operation that is not offered is invisible rather than
 merely refused. The dropped half is what lets the belt check at execution tell a model *why* — that
-its Operation is switched off, rather than that it never had one, which after this change would
-often be false.
+the Operation is switched off, or no longer implemented, rather than that it was never one of its
+tools, which is false whenever the grant is still sitting in the Assistant's definition where the
+User can see it.
 
 **The Manual Connectors do not require approvals, and must not.** `bank.sendMoney`, `email.send` and
 `document.requestText` already suspend with an Open Question, because the User *performs* them by
@@ -709,7 +710,7 @@ Two loaders, deliberately distinct:
 | Tier | Runner | Proves |
 |---|---|---|
 | **Model validation** | `import/validate-models.mjs` + Gradle `convertModels` | Every `_DM`/`_FM`/`_OM` is well-formed; **both directions** — an `elementRef` with no field fails, and a field no form model references warns, with an allow-list for the deliberately machine-owned ones. Also that every `indexed` field the watcher uses exists |
-| **Runtime unit** | vitest | The loop driver against `ScriptedProvider`: birth, one Turn, tool dispatch, tool gating, suspension on `askUser`, continuation on answer, `wakeAt` timeout, lease recovery **without re-execution**, one Invoice → exactly one Accountant Conversation, `maxTurns` → Open Question, late child result, self-call rejection |
+| **Runtime unit** | vitest | The loop driver against `ScriptedProvider`: birth, one Turn, dispatching a call, grant resolution and the four ways it can drop one, suspension on `askUser`, continuation on answer, `wakeAt` timeout, lease recovery **without re-execution**, one Invoice → exactly one Accountant Conversation, `maxTurns` → Open Question, late child result, self-call rejection |
 | **Integration** | vitest against the live stack | The A12 client's CRUD and query, search-then-create idempotency, the Thing repository, every watcher query, the Firefly connector. Skipped rather than failed when the stack is down |
 | **Client** | vitest | The markdown editor's suite and the client's own |
 | **End-to-end** | Playwright, `LLM_PROVIDER=scripted` | Login as four users, every module opened, Party CRUD, a prompt round-tripped through the markdown editor, localisation, the favicon, the whole invoice slice, and surviving a restart |

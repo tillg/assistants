@@ -310,5 +310,6 @@ parties silently loses one party's work. Every document has exactly one writer a
 |---|---|
 | `Party`, `Document`, `Invoice`, `Process` | User **and** Runtime (different documents, never the same one at the same time) |
 | `Assistant` | User (the Runtime only reads it) |
+| `Operation` | User (the Runtime reads the catalogue once per Turn and never writes it; `just bootstrap`, which runs as the User, creates each Operation and afterwards re-applies only the code-owned fields — `System`, `Kind`, `Parameters`, `Mutating`) |
 | `Conversation`, `RuntimeState` | **Runtime only** — the form is read-only |
 | `OpenQuestion` | Runtime writes it once at creation, then **the User only** |

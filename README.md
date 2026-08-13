@@ -183,8 +183,9 @@ Then:
 
 - **<http://localhost:8081>** — the A12 web application. It redirects to Keycloak; log in as
   `human` / `human`. The navigation has one entry per Thing: Open Questions, Documents, Invoices,
-  Processes, Parties, Assistants, Conversations, Runtime. Start at **Open Questions** — that is the
-  User's actual inbox. **Assistants** is where you read and edit a prompt, in the markdown editor.
+  Processes, Parties, Assistants, Operations, Conversations, Runtime. Start at **Open Questions** —
+  that is the User's actual inbox. **Assistants** is where you read and edit a prompt, in the
+  markdown editor; **Operations** is the catalogue of what any Assistant can be granted.
 - **<http://localhost:8084>** — Firefly III, the books, behind oauth2-proxy. The same
   `human` / `human` through the same Keycloak, and if you are already signed in at 8081 it lets you
   straight through. `just firefly-token` prints the personal access token the bootstrap container
@@ -256,7 +257,7 @@ makes both of those cases unreachable.
 
 | Recipe | What it does | When you want it |
 |---|---|---|
-| `just bootstrap` | Loads what the system **is**: the Receptionist, the Accountant and the `RuntimeState` singleton. Runs as the **User** (`BOOTSTRAP_USER`, default `human`), not as the Runtime, because an Assistant is the User's to write ([D-007a](DECISIONS.md)). Idempotent, and it *reconciles* — the Assistant seeds are re-applied on every run, so a prompt edited in the web application is overwritten. The `RuntimeState` is left alone, because it is live state | Called by `dev`. Re-run after editing the seeded Assistant definitions |
+| `just bootstrap` | Loads what the system **is**: the Receptionist, the Accountant, the catalogue of seventeen Operations and the `RuntimeState` singleton. Runs as the **User** (`BOOTSTRAP_USER`, default `human`), not as the Runtime, because an Assistant is the User's to write and so is an Operation ([D-007a](DECISIONS.md)). Idempotent, and it *reconciles* three different ways: the Assistant seeds are re-applied on every run, so a prompt edited in the web application is overwritten; `RuntimeState` is left alone, because it is live state; and an Operation gets only its code-owned fields back, so a description, an approval requirement or a kill switch you set stays set | Called by `dev`. Re-run after editing the seeded Assistant definitions, or after adding an Operation |
 | `just demo-data` | Loads what the household **has**: parties, processes, documents, invoices, and the Firefly books. Pauses the Runtime while loading | A realistic system to look at, without spending anything |
 | `just demo-reset` | `clean` → `build` → `up` → `wait` → `bootstrap` → `demo-data`. Takes the books with it | When the demo state has drifted. Firefly has no bulk delete and its data lives in a named volume, so a full teardown is the only reset symmetric across both Authorities |
 | `just firefly-token` | Prints the Firefly personal access token from the shared volume | Talking to the Firefly API by hand |
@@ -269,7 +270,7 @@ makes both of those cases unreachable.
 |---|---|---|
 | `just test` | `test-models` + `test-runtime` + `test-integration` + `test-client` + `test-e2e`, in that order | Before claiming anything is done. The last three need the stack up |
 | `just test-models` | `import/validate-models.mjs` in both directions, then the Gradle model conversion | After touching any model under `import/models/` |
-| `just test-runtime` | The loop driver's branching under vitest: one Turn, tool gating, suspension, continuation, lease recovery, the runaway guards, Assistant-to-Assistant calls | After touching `runtime/src/` |
+| `just test-runtime` | The loop driver's branching under vitest: one Turn, grant resolution and the gating it produces, suspension, continuation, lease recovery, the runaway guards, Assistant-to-Assistant calls | After touching `runtime/src/` |
 | `just test-integration` | The A12 client, the Thing repository, the watcher's queries and the Firefly connector against the **live** stack, one file at a time. Skipped rather than failed when the stack is down | After touching `runtime/src/a12/`, the watcher's queries or the Firefly connector — the tier that catches what the unit fakes cannot see. Requires the stack to be up |
 | `just test-client` | The markdown editor's unit tests and the client's own | After touching `client/src/` |
 | `just test-e2e` | Playwright against the running stack with the scripted model | Before a commit that touches the UI. Requires the stack to be up |
@@ -311,7 +312,7 @@ passwords — `.env.example` and `e2e/fixtures/users.json` — out of secret sca
 
 **ThingStore** (`server/`, `import/models/`) — an A12 Data Service holding every Thing and
 exposing A12's JSON-RPC interface. It is the only integration surface in the system: the
-UserInterface reads it, the Runtime polls it, and nothing else talks to anything directly. Eight
+UserInterface reads it, the Runtime polls it, and nothing else talks to anything directly. Nine
 Models, each with a document model, a form model and an overview model, plus one application model
 for navigation.
 
@@ -328,9 +329,12 @@ ThingStore every two seconds, in seven passes: things that materialised, questio
 answered, `wakeAt` deadlines that passed, leases that expired, child results not yet delivered,
 Conversations with a Turn owing, and schedules whose due instant has come round. The **Loop Driver**
 is one function, `advance(conversationId)`,
-that takes one Conversation exactly one Turn forward and returns holding nothing. Seventeen Tools are
-registered — ThingStore reads and writes, `ui.askUser`, `assistant.call`, six `bookkeeping.*`
-operations against Firefly, and four Manual Connector operations. It authenticates as a dedicated
+that takes one Conversation exactly one Turn forward and returns holding nothing. Seventeen
+**Implementations** are registered — ThingStore reads and writes, `ui.askUser`, `assistant.call`,
+seven `bookkeeping.*` operations against Firefly, and four Manual Connectors — and each Turn joins
+them by key to the catalogue of Operation Things it reads from the store, so what an Assistant is
+offered is the Implementation's code and the Operation's prose, flags and kill switch together
+([ADR-0019](docs/adr/0019-an-operation-is-a-thing.md)). It authenticates as a dedicated
 `runtime` user with no `DOCUMENT_DELETE`, no `MODEL_MANAGE` ([D-007](DECISIONS.md)) and no
 `ASSISTANT_WRITE` ([D-007a](DECISIONS.md)) — a Keycloak
 user like any other, reached through the direct access grant because a headless process has no
@@ -364,7 +368,7 @@ the ThingStore rejects. Realm import is create-only — editing these files chan
 
 ## The Things
 
-Eight Models. The **Authority** column is the one system that owns that fact
+Nine Models. The **Authority** column is the one system that owns that fact
 ([ADR-0006](docs/adr/0006-one-authority-per-fact.md)); the **Written by** column matters because
 A12 has no optimistic locking, so every document has exactly one writer at any instant.
 
@@ -374,7 +378,8 @@ A12 has no optimistic locking, so every document has exactly one writer at any i
 | `Document` | ThingStore | An item that has arrived but has not yet been understood, plus whatever text was extracted from it | User and Runtime |
 | `Invoice` | ThingStore *(document facts only)* | The extracted invoice: issuer, number, dates, amounts, subject. **No `paid` field and no `bookkeepingRef`** | User and Runtime |
 | `Process` | ThingStore | The routing slip — a title, a status and an append-only list of steps. Passive; nothing executes it | User and Runtime |
-| `Assistant` | ThingStore | An Assistant's definition: key, system prompt, skills, triggers and the Tools it may use | **User only** — the Runtime reads it, and the ThingStore refuses it write access ([D-007a](DECISIONS.md)) |
+| `Assistant` | ThingStore | An Assistant's definition: key, system prompt, skills, triggers and the Operations it is granted | **User only** — the Runtime reads it, and the ThingStore refuses it write access ([D-007a](DECISIONS.md)) |
+| `Operation` | ThingStore | One capability of one System: its key, what it does, its parameters, whether it needs your approval and whether it is switched on. The code that performs it is not in here — that is its **Implementation**, joined by the key | **User only** — the same right and the same refusal ([ADR-0019](docs/adr/0019-an-operation-is-a-thing.md)) |
 | `Conversation` | ThingStore | One run of one Assistant: status, what it is waiting for, turn count, and an append-only list of entries. Either a subject Thing or a `scheduledFor` instant gave birth to it — exactly one of the two | **Runtime only** — the form is read-only |
 | `OpenQuestion` | ThingStore | A question put to the User — `free-text`, `confirm`, `choice` or `perform` — and the User's answer to it | Runtime writes it once at creation, then **the User only** |
 | `RuntimeState` | ThingStore | A singleton: the watcher's watermark, the pause flag, the births-per-hour counter, the heartbeat | **Runtime only** |
@@ -386,6 +391,19 @@ The first is what makes creation retry-safe — the ThingStore assigns the ident
 double-counts the watermark boundary. Note that `updatedAt` therefore records the last **Runtime**
 write: a UI save moves only `__meta.modifiedAt`, because the four machine fields are on no form and
 A12's form engine offers no save hook that could reach one.
+
+*"What can my Assistants actually do?"* is answered by the **Operations** module, and it used to be
+answered by reading TypeScript. The catalogue holds one Thing per Operation, so opening it tells you
+what each one does, which System it touches, whether it needs your approval and whether it is
+switched on — and the last two are yours to change, in a form, without a deploy. Unticking `Enabled`
+on `bank.sendMoney` withdraws it from every Assistant on their next Turn and survives a restart,
+which is the switch that used to be missing between `just pause` (stop everything) and an
+Assistant's `enabled` flag (stop one Assistant). What the catalogue cannot do is invent a capability:
+the code that performs an Operation is registered under the Operation's key, and an Operation with no
+Implementation behind it is not offered to anybody and says so. Descriptions, approval requirements,
+kill switches and notes are yours and `just bootstrap` will not undo them; the key, System, kind,
+parameter schema and `mutating` flag are the code's, shown read-only, and re-applied on every
+bootstrap.
 
 ## Adding a Thing
 
@@ -411,8 +429,8 @@ silently returns nothing.
 7. Name the Model's **Authority** ([ADR-0006](docs/adr/0006-one-authority-per-fact.md)). An unnamed
    Authority is a future disagreement.
 8. If Assistants should be born from it, add it to the trigger-eligible allow-list in
-   `runtime/src/watcher/watcher.ts`, and to `WRITABLE_MODELS` in `runtime/src/tools/tools.ts` if
-   they should be able to create one.
+   `runtime/src/watcher/watcher.ts`, and to `WRITABLE_MODELS` in
+   `runtime/src/operations/implementations.ts` if they should be able to create one.
 9. `just test-models`, then `just build`.
 
 ## Design notes worth knowing
@@ -430,10 +448,15 @@ silently returns nothing.
 - **One Authority per fact**, which is why an Invoice has no `paid` field and no reference to its
   booking: "is this paid?" and "how was this booked?" are both searches against Firefly, where the
   ThingID travels as `external_id` ([ADR-0006](docs/adr/0006-one-authority-per-fact.md)).
-- **An Assistant declares its Tools**, one row per Operation, and a call to another Assistant is
-  declared per callee as `assistant.call:<key>`; the registry filters the schemas offered to the
-  model, so an undeclared Operation is not refused, it is invisible
-  ([ADR-0010](docs/adr/0010-assistants-declare-their-tools.md)).
+- **An Assistant declares the Operations it is granted**, one row per Operation, and a call to
+  another Assistant is declared per callee as `assistant.call:<key>`; the registry filters the
+  schemas offered to the model, so an ungranted Operation is not refused, it is invisible
+  ([ADR-0010](docs/adr/0010-assistants-declare-their-tools.md)). Since the catalogue moved into the
+  store the rule is a conjunction: an Operation is offered when it is granted **and** switched on
+  **and** implemented, and the two new conditions can only ever take a capability away
+  ([ADR-0019](docs/adr/0019-an-operation-is-a-thing.md)). *Tool* is the LLM provider's word for the
+  schema we send it, and it now appears only at that boundary
+  ([ADR-0020](docs/adr/0020-tool-is-the-providers-word.md)).
 - **Assistants are Things you edit in the UI**, not code you deploy. Changing the Receptionist's
   prompt is editing a document in a markdown field
   ([ADR-0003](docs/adr/0003-assistants-are-things.md)).
@@ -466,25 +489,40 @@ This is one running vertical slice, not a finished system. What is honestly miss
   whatsoever, so Firefly is only as protected as the network path to it. Inside the compose network
   it is wide open, which is what lets the Runtime and `firefly-bootstrap` use it; the security
   argument is entirely that it publishes no host port. Give it one and authentication is gone.
-- **An Assistant can read every Model.** Writes are guarded — `WRITABLE_MODELS` is enforced in
-  `thingstore.create` and `.update`, and the store separately refuses the `runtime` identity any write
-  to `Assistant_DM` ([D-007a](DECISIONS.md)). Reads are not: `READABLE_MODELS` is declared beside it
-  and consulted nowhere, so `thingstore.get` and `.search` accept any Model the Runtime knows about,
-  including `Assistant_DM`, `Conversation_DM` and `RuntimeState_DM`. Nothing depends on it and no
-  prompt asks for it, but it is a guard that reads as present and is not.
+- **The read guard covers exactly one Model.** `READABLE_MODELS` used to be a constant nothing
+  consulted; it is real now, and it withholds `Operation_DM` from `thingstore.get` and `.search`,
+  because the catalogue is the one Model whose entire content is the configuration that constrains
+  the reader. Everything else an Assistant could read before, it can still read —
+  `Assistant_DM`, `Conversation_DM`, `OpenQuestion_DM`, `RuntimeState_DM`. Narrowing that further
+  would change what existing Assistants can see with no test saying which prompts relied on it, so it
+  is a separate change with its own blast radius. Writes are guarded independently: `WRITABLE_MODELS`
+  in `thingstore.create` and `.update`, and the store refusing the `runtime` identity any write to
+  `Assistant_DM` or `Operation_DM` ([D-007a](DECISIONS.md)).
 - **Email and Bank are Manual Connectors.** `email.send`, `email.fetch` and `bank.sendMoney` do not
   talk to anything; they raise an Open Question and the User does the work by hand and reports
   back. This is deliberate — ADR-0004 says the system must run end to end with every External
   System manual, and this is where that is proved — but it means no mail is fetched and no money
   moves.
-- **Operations are compiled in.** The seventeen of them live in `runtime/src/tools/tools.ts` — prose,
-  parameter schema, approval requirement and code, all in one place — so adding one, retiring one,
-  rewording the sentence a model reads, or switching one off is a code change and a deploy. There is
-  no per-Operation kill switch between `RuntimeState.paused`, which stops everything, and
-  `Assistant.enabled`, which stops one Assistant. Moving the catalogue into the ThingStore is a
-  planned change ([specs/changes/operations-as-things](specs/changes/operations-as-things/proposal.md));
-  adding Operations *dynamically* is not, and would need a generic Implementation, which is close
-  enough to an `exec` tool to deserve its own argument before anyone builds it.
+- **The catalogue does not say where an Operation's code lives.** An Operation Thing describes what
+  an Operation does; the function that performs it is registered under the same key in
+  `runtime/src/operations/implementations.ts`, and nothing in the form points at it. There is
+  deliberately no `implementation` field — `key` is code-owned and read-only precisely because a
+  renamed Operation is a set of grants pointing at nothing, so a second name would always equal the
+  first. The consequence is that *"where is this actually done?"* is still a grep, and an Operation
+  whose Implementation has been deleted survives in the catalogue as *unimplemented* until the User
+  removes it.
+- **Operations cannot be added dynamically.** The catalogue can describe, reword, guard, weaken and
+  switch off an Operation; it cannot make one exist, because there is no Implementation to bind. So
+  adding a capability is still a code change and a deploy. Making one addable from the UI would need
+  a generic Implementation the model can be pointed at, which is `exec` with extra steps — learning
+  17 in [ASSISTANTS_VS_OPENCLAW.md](specs/research/ASSISTANTS_VS_OPENCLAW.md) rejects it and
+  [ADR-0010](docs/adr/0010-assistants-declare-their-tools.md)'s granularity is the reason. Wanting it
+  later is not the same as designing for it now.
+- **A description improved in code does not reach a running system.** `just bootstrap` re-applies
+  what the code knows and never re-applies a decision, and the prose a model reads is on the decision
+  side of that line. So a reworded description in `implementations.ts` reaches fresh installs only;
+  bootstrap names the Operations whose stored description has diverged from their seed and changes
+  nothing.
 - **Text extraction is not implemented.** A Document's `extractedText` is supplied by whoever
   creates the Document: the demo loader, or the User pasting text into the create form.
   `document.requestText` is a Manual Connector. OCR and PDF parsing are a later change.
@@ -528,13 +566,13 @@ This is one running vertical slice, not a finished system. What is honestly miss
 │   ├── src/llm/              provider interface + openai / anthropic / scripted
 │   ├── src/loop/             advance() — one Conversation, one Turn
 │   ├── src/watcher/          the seven scans
-│   ├── src/tools/            the Tool registry and the seventeen Operations
+│   ├── src/operations/       the registry and the seventeen Implementations
 │   ├── src/connectors/       firefly
-│   ├── src/bootstrap/        seeds the two Assistants and the RuntimeState singleton
+│   ├── src/bootstrap/        seeds the two Assistants, the catalogue and the RuntimeState singleton
 │   ├── src/demo/             the demo household loader
 │   └── fixtures/             the scripted LLM transcript
 ├── import/
-│   ├── models/               the eight Things (DM/FM/OM) + the application model
+│   ├── models/               the nine Things (DM/FM/OM) + the application model
 │   ├── auth/                 roles.yaml — realm role → A12 access rights
 │   └── validate-models.mjs   the model validator just test-models runs
 ├── .env.example              every credential the stack needs; just setup turns it into .env
