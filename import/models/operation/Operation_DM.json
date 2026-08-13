@@ -1,6 +1,6 @@
 {
   "header": {
-    "id": "Assistant_DM",
+    "id": "Operation_DM",
     "modelType": "document",
     "modelVersion": "29.4.0",
     "locales": [
@@ -14,11 +14,11 @@
     "labels": [
       {
         "locale": "en",
-        "text": "Assistant"
+        "text": "Operation"
       },
       {
         "locale": "de",
-        "text": "Assistent"
+        "text": "Operation"
       }
     ],
     "annotations": [
@@ -31,9 +31,9 @@
   },
   "content": {
     "modelInfo": {
-      "name": "Assistant_DM",
+      "name": "Operation_DM",
       "immutable": false,
-      "joinedModelsInfo": "Assistant_DM-document-meta-data+Add"
+      "joinedModelsInfo": "Operation_DM-document-meta-data+Add"
     },
     "modelConfig": {
       "decimalSeparator": ".",
@@ -46,8 +46,8 @@
       "rootGroups": [
         {
           "type": "Group",
-          "id": "group_assistant",
-          "name": "Assistant",
+          "id": "group_operation",
+          "name": "Operation",
           "Group": {
             "repeatability": 1,
             "elements": [
@@ -65,7 +65,7 @@
                   "fieldType": {
                     "type": "StringType",
                     "StringType": {
-                      "maxLength": 60
+                      "maxLength": 80
                     }
                   },
                   "label": [
@@ -84,12 +84,6 @@
                 "type": "Field",
                 "id": "f_name",
                 "name": "Name",
-                "annotations": [
-                  {
-                    "name": "indexed",
-                    "value": "true"
-                  }
-                ],
                 "Field": {
                   "fieldType": {
                     "type": "StringType",
@@ -111,13 +105,114 @@
               },
               {
                 "type": "Field",
+                "id": "f_system",
+                "name": "System",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 40,
+                      "hintList": [
+                        {
+                          "locale": "en",
+                          "values": [
+                            "ThingStore",
+                            "UserInterface",
+                            "Bookkeeping",
+                            "Email",
+                            "Bank",
+                            "Runtime"
+                          ]
+                        },
+                        {
+                          "locale": "de",
+                          "values": [
+                            "ThingStore",
+                            "UserInterface",
+                            "Bookkeeping",
+                            "Email",
+                            "Bank",
+                            "Runtime"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "System"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "System"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_kind",
+                "name": "Kind",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 40,
+                      "hintList": [
+                        {
+                          "locale": "en",
+                          "values": [
+                            "internal",
+                            "connector",
+                            "manual-connector"
+                          ]
+                        },
+                        {
+                          "locale": "de",
+                          "values": [
+                            "internal",
+                            "connector",
+                            "manual-connector"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Kind"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Art"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
                 "id": "f_description",
                 "name": "Description",
                 "Field": {
                   "fieldType": {
                     "type": "StringType",
                     "StringType": {
-                      "maxLength": 400
+                      "lineBreaksPermitted": true,
+                      "noValueValidation": true
                     }
                   },
                   "label": [
@@ -134,47 +229,40 @@
               },
               {
                 "type": "Field",
-                "id": "f_systemPrompt",
-                "name": "SystemPrompt",
+                "id": "f_mutating",
+                "name": "Mutating",
                 "Field": {
                   "fieldType": {
-                    "type": "StringType",
-                    "StringType": {
-                      "lineBreaksPermitted": true,
-                      "noValueValidation": true
-                    }
+                    "type": "BooleanType"
                   },
                   "label": [
                     {
                       "locale": "en",
-                      "text": "System prompt"
+                      "text": "Mutating"
                     },
                     {
                       "locale": "de",
-                      "text": "System-Prompt"
+                      "text": "Verändernd"
                     }
                   ]
                 }
               },
               {
                 "type": "Field",
-                "id": "f_llmModel",
-                "name": "LlmModel",
+                "id": "f_requiresApproval",
+                "name": "RequiresApproval",
                 "Field": {
                   "fieldType": {
-                    "type": "StringType",
-                    "StringType": {
-                      "maxLength": 80
-                    }
+                    "type": "BooleanType"
                   },
                   "label": [
                     {
                       "locale": "en",
-                      "text": "LLM model"
+                      "text": "Requires approval"
                     },
                     {
                       "locale": "de",
-                      "text": "LLM-Modell"
+                      "text": "Genehmigung erforderlich"
                     }
                   ]
                 }
@@ -201,211 +289,48 @@
               },
               {
                 "type": "Field",
-                "id": "f_maxTurns",
-                "name": "MaxTurns",
+                "id": "f_notes",
+                "name": "Notes",
                 "Field": {
                   "fieldType": {
-                    "type": "NumberType",
-                    "NumberType": {
-                      "minFractionalDigits": 0,
-                      "maxFractionalDigits": 0
+                    "type": "StringType",
+                    "StringType": {
+                      "lineBreaksPermitted": true,
+                      "noValueValidation": true
                     }
                   },
                   "label": [
                     {
                       "locale": "en",
-                      "text": "Max turns"
+                      "text": "Notes"
                     },
                     {
                       "locale": "de",
-                      "text": "Maximale Turns"
+                      "text": "Notizen"
                     }
                   ]
                 }
               },
               {
-                "type": "Group",
-                "id": "f_skills",
-                "name": "Skills",
-                "Group": {
-                  "repeatability": 50,
-                  "elements": [
-                    {
-                      "type": "Field",
-                      "id": "f_skill_name",
-                      "name": "SkillName",
-                      "Field": {
-                        "fieldType": {
-                          "type": "StringType",
-                          "StringType": {
-                            "maxLength": 120
-                          }
-                        },
-                        "label": [
-                          {
-                            "locale": "en",
-                            "text": "Skill name"
-                          },
-                          {
-                            "locale": "de",
-                            "text": "Skill-Name"
-                          }
-                        ]
-                      }
-                    },
-                    {
-                      "type": "Field",
-                      "id": "f_skill_instructions",
-                      "name": "SkillInstructions",
-                      "Field": {
-                        "fieldType": {
-                          "type": "StringType",
-                          "StringType": {
-                            "lineBreaksPermitted": true,
-                            "noValueValidation": true
-                          }
-                        },
-                        "label": [
-                          {
-                            "locale": "en",
-                            "text": "Skill instructions"
-                          },
-                          {
-                            "locale": "de",
-                            "text": "Skill-Anweisungen"
-                          }
-                        ]
-                      }
+                "type": "Field",
+                "id": "f_parameters",
+                "name": "Parameters",
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "lineBreaksPermitted": true,
+                      "noValueValidation": true
                     }
-                  ]
-                }
-              },
-              {
-                "type": "Group",
-                "id": "f_triggers",
-                "name": "Triggers",
-                "Group": {
-                  "repeatability": 20,
-                  "elements": [
+                  },
+                  "label": [
                     {
-                      "type": "Field",
-                      "id": "f_trigger_kind",
-                      "name": "TriggerKind",
-                      "Field": {
-                        "fieldType": {
-                          "type": "StringType",
-                          "StringType": {
-                            "maxLength": 40,
-                            "hintList": [
-                              {
-                                "locale": "en",
-                                "values": [
-                                  "thing-materialised",
-                                  "assistant-call",
-                                  "schedule"
-                                ]
-                              },
-                              {
-                                "locale": "de",
-                                "values": [
-                                  "thing-materialised",
-                                  "assistant-call",
-                                  "schedule"
-                                ]
-                              }
-                            ]
-                          }
-                        },
-                        "label": [
-                          {
-                            "locale": "en",
-                            "text": "Trigger kind"
-                          },
-                          {
-                            "locale": "de",
-                            "text": "Trigger-Art"
-                          }
-                        ]
-                      }
+                      "locale": "en",
+                      "text": "Parameters"
                     },
                     {
-                      "type": "Field",
-                      "id": "f_trigger_modelFilter",
-                      "name": "TriggerModelFilter",
-                      "Field": {
-                        "fieldType": {
-                          "type": "StringType",
-                          "StringType": {
-                            "maxLength": 60
-                          }
-                        },
-                        "label": [
-                          {
-                            "locale": "en",
-                            "text": "Model filter"
-                          },
-                          {
-                            "locale": "de",
-                            "text": "Modell-Filter"
-                          }
-                        ]
-                      }
-                    },
-                    {
-                      "type": "Field",
-                      "id": "f_trigger_cron",
-                      "name": "TriggerCron",
-                      "Field": {
-                        "fieldType": {
-                          "type": "StringType",
-                          "StringType": {
-                            "maxLength": 60
-                          }
-                        },
-                        "label": [
-                          {
-                            "locale": "en",
-                            "text": "Cron expression"
-                          },
-                          {
-                            "locale": "de",
-                            "text": "Cron-Ausdruck"
-                          }
-                        ]
-                      }
-                    }
-                  ]
-                }
-              },
-              {
-                "type": "Group",
-                "id": "f_grants",
-                "name": "Grants",
-                "Group": {
-                  "repeatability": 60,
-                  "elements": [
-                    {
-                      "type": "Field",
-                      "id": "f_operation_key",
-                      "name": "OperationKey",
-                      "Field": {
-                        "fieldType": {
-                          "type": "StringType",
-                          "StringType": {
-                            "maxLength": 120
-                          }
-                        },
-                        "label": [
-                          {
-                            "locale": "en",
-                            "text": "Operation"
-                          },
-                          {
-                            "locale": "de",
-                            "text": "Operation"
-                          }
-                        ]
-                      }
+                      "locale": "de",
+                      "text": "Parameter"
                     }
                   ]
                 }

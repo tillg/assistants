@@ -596,6 +596,100 @@
         ]
       },
       {
+        "name": "OperationModule",
+        "menu": {
+          "name": "Operation",
+          "label": [
+            {
+              "locale": "en",
+              "text": "Operations"
+            },
+            {
+              "locale": "de",
+              "text": "Operationen"
+            }
+          ],
+          "initialActivity": {
+            "descriptor": {
+              "module": "Operation"
+            }
+          }
+        },
+        "flows": [
+          {
+            "name": "OperationFlow",
+            "scenes": [
+              {
+                "name": "OperationOverview",
+                "description": "Overview of Operation Documents",
+                "matchConditions": [
+                  {
+                    "key": "module",
+                    "mustEqual": "Operation"
+                  },
+                  {
+                    "key": "instance",
+                    "isSet": false
+                  }
+                ],
+                "sceneChange": {
+                  "onEnter": [
+                    {
+                      "layout": {
+                        "name": "MasterDetail"
+                      },
+                      "type": "REGION_CLEAR"
+                    },
+                    {
+                      "type": "VIEW_ADD",
+                      "name": "OverviewEngine",
+                      "models": [
+                        {
+                          "modelType": "overview",
+                          "name": "Operation_OM"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "OperationForm",
+                "description": "Form showing on Operation Document",
+                "matchConditions": [
+                  {
+                    "key": "module",
+                    "mustEqual": "Operation"
+                  },
+                  {
+                    "key": "instance",
+                    "isSet": true
+                  }
+                ],
+                "sceneChange": {
+                  "onEnter": [
+                    {
+                      "type": "VIEW_ADD",
+                      "name": "FormEngine",
+                      "constraints": {
+                        "type": "MasterDetail"
+                      },
+                      "models": [
+                        {
+                          "modelType": "form",
+                          "name": "Operation_FM",
+                          "documentModel": "Operation_DM"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
         "name": "ConversationModule",
         "menu": {
           "name": "Conversation",

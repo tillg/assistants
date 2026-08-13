@@ -4,8 +4,8 @@ import { MemoryStore } from "./memory-store.js";
 import { ThingRepository, SPECS, nowIso } from "../../src/a12/things.js";
 import type { A12Client } from "../../src/a12/client.js";
 import { LoopDriver } from "../../src/loop/advance.js";
-import { ToolRegistry, type ToolDefinition } from "../../src/tools/registry.js";
-import { buildTools } from "../../src/tools/tools.js";
+import { OperationRegistry, type GrantedOperation } from "../../src/operations/registry.js";
+import { buildOperations } from "../../src/operations/implementations.js";
 import { Watcher, RUNTIME_STATE_KEY } from "../../src/watcher/watcher.js";
 import { ScriptedProvider, type ScriptedStep } from "../../src/llm/scripted.js";
 import type { FireflyConnector } from "../../src/connectors/firefly.js";
@@ -15,7 +15,7 @@ import { ASSISTANT_SEEDS } from "../../src/bootstrap/assistants.js";
 export interface Harness {
     store: MemoryStore;
     things: ThingRepository;
-    registry: ToolRegistry;
+    registry: OperationRegistry;
     driver: LoopDriver;
     watcher: Watcher;
     firefly: FakeFirefly;
@@ -116,7 +116,7 @@ export function buildHarness(
     const store = options.store ?? new MemoryStore();
     const things = new ThingRepository(store as unknown as A12Client);
     const firefly = new FakeFirefly();
-    const registry = new ToolRegistry();
+    const registry = new OperationRegistry();
 
     let llmContext = { assistantKey: "", turn: 0 };
     const llm = new ScriptedProvider(steps, () => llmContext);
@@ -184,7 +184,7 @@ export function buildHarness(
     });
 
     registry.registerAll(
-        buildTools({
+        buildOperations({
             things,
             firefly: firefly as unknown as FireflyConnector,
             raiseQuestion: (input) =>
@@ -245,7 +245,7 @@ export function buildHarness(
                 maxTurns: 20,
                 skills: [],
                 triggers: [{ kind: "thing-materialised", modelFilter: "Document_DM" }],
-                tools: seed.tools.map((operation) => ({ operation })),
+                grants: seed.grants.map((operationKey) => ({ operationKey })),
                 idempotencyKey: `assistant:${overrides.key ?? seed.key}`,
                 ...overrides,
             }) as Promise<Stored<Assistant>>;
@@ -275,4 +275,4 @@ export function buildHarness(
 }
 
 export { RUNTIME_STATE_KEY, SPECS, nowIso };
-export type { ToolDefinition };
+export type { GrantedOperation };

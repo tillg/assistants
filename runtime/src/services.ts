@@ -15,8 +15,8 @@ import type {
     Stored,
 } from "./domain/types.js";
 import { LoopDriver, type AdvanceDeps } from "./loop/advance.js";
-import { ToolRegistry } from "./tools/registry.js";
-import { buildTools } from "./tools/tools.js";
+import { OperationRegistry } from "./operations/registry.js";
+import { buildOperations } from "./operations/implementations.js";
 import { FireflyConnector } from "./connectors/firefly.js";
 import { Watcher } from "./watcher/watcher.js";
 import { OpenAiProvider } from "./llm/openai.js";
@@ -28,7 +28,7 @@ import type { Config } from "./config.js";
 export interface Runtime {
     client: A12Client;
     things: ThingRepository;
-    registry: ToolRegistry;
+    registry: OperationRegistry;
     firefly: FireflyConnector;
     driver: LoopDriver;
     watcher: Watcher;
@@ -59,7 +59,7 @@ export function buildRuntime(config: Config): Runtime {
     let llmContext = { assistantKey: "", turn: 0 };
     const llm = buildProvider(config, () => llmContext);
 
-    const registry = new ToolRegistry();
+    const registry = new OperationRegistry();
 
     async function findAssistant(key: string): Promise<Stored<Assistant> | undefined> {
         if (!key) return undefined;
@@ -169,7 +169,7 @@ export function buildRuntime(config: Config): Runtime {
     const driver = new LoopDriver(advanceDeps);
 
     registry.registerAll(
-        buildTools({
+        buildOperations({
             things,
             firefly,
             raiseQuestion: (input) =>

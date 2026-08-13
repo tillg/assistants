@@ -154,7 +154,7 @@ export const SPECS = {
                 name: "Triggers",
                 fields: { kind: "TriggerKind", modelFilter: "TriggerModelFilter", cron: "TriggerCron" },
             },
-            tools: { name: "Tools", fields: { operation: "ToolOperation" } },
+            grants: { name: "Grants", fields: { operationKey: "OperationKey" } },
         },
     },
     Conversation_DM: {

@@ -889,3 +889,62 @@ carries it from `.env` exactly as `just bootstrap` already carried `BOOTSTRAP_PA
 recipe that forgets it now fails at startup naming the variable, rather than authenticating with a
 stale copy. `BOOTSTRAP_PASSWORD` keeps its `human` default deliberately: that login is published in
 README and is not generated, so a default for it is not a second source of truth for a secret.
+
+---
+
+## D-024 — `Operation.Enabled` cannot be indexed
+
+*Decided 2026-08-13 22:52 CEST, during the autonomous run of `operations-as-things`.*
+
+**Decided**: ship `Operation_DM.f_enabled` **without** the `indexed` annotation, and correct both
+artefacts that asked for it.
+
+`specs/changes/operations-as-things/architecture.md`'s field table and `plan.md`'s phase A both
+marked `Enabled` indexed, with the rationale *"the kill switch. Indexed so 'what is switched off' is
+one query"*. `import/validate-models.mjs` refuses it:
+
+```
+ERROR Operation_DM.f_enabled (Enabled) is annotated "indexed" but is a BooleanType — only
+StringType and DateTimeType can be filtered on, so a query on it returns nothing
+```
+
+**Why**: the validator's rule is the load-bearing one and the annotation would have been a lie. A12
+cannot filter a Boolean at all, so the "one query" the rationale promised was never on offer — the
+annotation would have bought a false sense that a constraint existed. `Assistant_DM.f_enabled` is
+unindexed for exactly this reason, and the watcher reads `enabled === false` after fetching rather
+than filtering on it. The catalogue now matches its sibling.
+
+**Cost**: nil in practice. The per-Turn snapshot is one unconstrained query that loads the whole
+catalogue, so *"what is switched off"* is a filter over seventeen rows already in memory.
+
+**Alternative**: make `Enabled` a `StringType` code (`on`/`off`) with a `hintList`, which would be
+queryable. Rejected: it trades a checkbox for a text field on the control the User reaches for most,
+to enable a query nothing in the change needs.
+
+**Reversal cost**: Low — a field-type change plus a reindex, if a real query is ever wanted.
+
+## D-025 — `Operation.Parameters` renders as a text area
+
+*Decided 2026-08-13 22:54 CEST.*
+
+**Decided**: `f_parameters` carries `exposition: "AREA"` alongside its `readonly: true`.
+
+Unspecified in the artefacts. architecture.md wants the field *"last and collapsed: raw JSON Schema
+is not what a form is for, and it is the first thing anyone wants on the day they are working out
+why the model called something oddly."* Without `AREA` a JSON Schema renders in a one-line input,
+which satisfies "last" and defeats the second half. No `markdown-editor` annotation: it is JSON,
+not prose.
+
+**Reversal cost**: Trivial — one key.
+
+## D-026 — The Operation form's layout follows the Assistant pair
+
+*Decided 2026-08-13 22:54 CEST.*
+
+The AM module entry, section grouping, grid layouts, column widths and `sortable` flags were all
+unspecified. Every one of them copies the Assistant pair's structure verbatim, so the menu reads
+Assistants → Operations → Conversations and the two halves of *the system's own definition* sit
+together. `Enabled` sits in the identity row beside `Key` and `Name`, because `Mutating` and
+`RequiresApproval` had to be a two-cell row of their own (architecture.md requires them adjacent).
+
+**Reversal cost**: Trivial.

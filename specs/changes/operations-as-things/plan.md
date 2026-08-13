@@ -8,25 +8,27 @@ finished until its tier passes.
 
 ## A — The Model
 
-- [ ] Create `import/models/operation/Operation_DM.json`. Root group `Operation`, header
+- [x] Create `import/models/operation/Operation_DM.json`. Root group `Operation`, header
   `roles: "user,runtime"`, `modelVersion` per CONVENTIONS.md's per-type table. Fields in the order
   given in architecture.md's table, the four machine fields last. **No `Implementation` field.**
-- [ ] `Key`, `System`, `Kind` and `Enabled` carry the `indexed` annotation — as a **sibling** of the
-  `"Field"` payload, not inside it.
-- [ ] `System` and `Kind` carry `hintList`s, one entry per locale with the same ASCII values, so the
+- [x] `Key`, `System` and `Kind` carry the `indexed` annotation — as a **sibling** of the
+  `"Field"` payload, not inside it. **`Enabled` does not**: it is a `BooleanType`, and
+  `validate-models.mjs` refuses `indexed` on one because A12 can filter only `StringType` and
+  `DateTimeType`. `Assistant_DM.f_enabled` is unindexed for the same reason.
+- [x] `System` and `Kind` carry `hintList`s, one entry per locale with the same ASCII values, so the
   form gives a picker without becoming an Enum the index would localise. `System` includes `Runtime`,
   which is a legitimate System in the catalogue even though it is not an External System.
-- [ ] `Description`, `Parameters` and `Notes` are `StringType` with `lineBreaksPermitted` **and**
+- [x] `Description`, `Parameters` and `Notes` are `StringType` with `lineBreaksPermitted` **and**
   `noValueValidation` — prose and JSON both need the first, and the second exempts them from the
   BMP character check.
-- [ ] Create `Operation_FM.json`: direct binding, `Description` and `Notes` as `exposition: "AREA"`,
+- [x] Create `Operation_FM.json`: direct binding, `Description` and `Notes` as `exposition: "AREA"`,
   each `elementRef` at most once. `Mutating` sits beside `RequiresApproval`; `Parameters` goes last
   and read-only.
-- [ ] Create `Operation_OM.json`: columns `Key`, `System`, `Kind`, `Enabled`, `RequiresApproval`,
+- [x] Create `Operation_OM.json`: columns `Key`, `System`, `Kind`, `Enabled`, `RequiresApproval`,
   `Mutating`.
-- [ ] Add the Operation pair to `import/models/AssistantsAppModel_AM.json`, beside the Assistant pair.
-- [ ] `node import/validate-models.mjs` — green, and the model count it reports goes from 26 to 29.
-- [ ] `just build && just up` so the new models reach `build/wcf-output/data/models` and the server
+- [x] Add the Operation pair to `import/models/AssistantsAppModel_AM.json`, beside the Assistant pair.
+- [x] `node import/validate-models.mjs` — green, and the model count it reports goes from 26 to 29.
+- [x] `just build && just up` so the new models reach `build/wcf-output/data/models` and the server
   imports them; confirm the form opens in the web application with no data in it yet.
 
 ## B — The rename
@@ -34,31 +36,31 @@ finished until its tier passes.
 Atomic, and before any new code leans on either vocabulary. A half-rename is what makes someone ask
 *"so what is the difference between a Tool and an Operation?"* again in six months.
 
-- [ ] `Assistant_DM.json`: group `f_tools`/`Tools` → `f_grants`/`Grants`, field
+- [x] `Assistant_DM.json`: group `f_tools`/`Tools` → `f_grants`/`Grants`, field
   `f_tool_operation`/`ToolOperation` → `f_operation_key`/`OperationKey`. Leave `repeatability: 60`
   intact; the locale labels read *Operation* / *Operation*, because the column holds one.
-- [ ] `Assistant_FM.json`: `section_tools`/`SectionTools` → `section_grants`/`SectionGrants`, title
+- [x] `Assistant_FM.json`: `section_tools`/`SectionTools` → `section_grants`/`SectionGrants`, title
   *Tools* / *Werkzeuge* → *Granted operations* / *Erteilte Operationen*, `inlinerepeat_tools` →
   `inlinerepeat_grants`, `repeatcolumn_tool_operation` → `repeatcolumn_operation_key`, and its
   `elementRef` to the DM's new field id. **The `elementRef` must match the DM id exactly** or the
   form's repeat renders empty.
-- [ ] `node import/validate-models.mjs` — the FM/OM cross-checks are what catch a missed `elementRef`.
-- [ ] Rename in `runtime/src/`: `ToolDefinition` → `GrantedOperation`, `ToolRegistry` →
+- [x] `node import/validate-models.mjs` — the FM/OM cross-checks are what catch a missed `elementRef`.
+- [x] Rename in `runtime/src/`: `ToolDefinition` → `GrantedOperation`, `ToolRegistry` →
   `OperationRegistry`, `ToolContext`/`ToolOutcome` → `OperationContext`/`OperationOutcome`,
   `ToolDeps` → `OperationDeps`, `interface ToolGrant` → `Grant` (its field `operation` →
   `operationKey`), `Assistant.tools` → `Assistant.grants`, `SPECS.Assistant_DM`'s `tools` group →
   `grants`.
-- [ ] Move `runtime/src/tools/tools.ts` → `runtime/src/operations/implementations.ts` and
+- [x] Move `runtime/src/tools/tools.ts` → `runtime/src/operations/implementations.ts` and
   `runtime/src/tools/registry.ts` → `runtime/src/operations/registry.ts`.
-- [ ] `AssistantSeed.tools` → `grants` in `runtime/src/bootstrap/assistants.ts`, and the field written
+- [x] `AssistantSeed.tools` → `grants` in `runtime/src/bootstrap/assistants.ts`, and the field written
   in `bootstrap()`.
-- [ ] Leave alone, and grep to confirm nothing renamed them by accident: `ToolSchema`,
+- [x] Leave alone, and grep to confirm nothing renamed them by accident: `ToolSchema`,
   `toolNameForLlm`, `operationFromLlm`, `response.toolCalls`, `role: "tool"`, the `tool-intent` /
   `tool-result` Entry kinds, and `Entry.toolName` / `toolArgs` / `toolResult`. The last two groups are
   **stored data** — renaming them makes every existing Conversation unreadable to `buildMessages`.
   `runtime/fixtures/llm-script.json` uses the wire spelling and needs no change.
-- [ ] `just test-runtime` — green on the rename alone, before any behaviour changes.
-- [ ] `just build && just up && just bootstrap`, then open an Assistant in the web application and
+- [x] `just test-runtime` — green on the rename alone, before any behaviour changes.
+- [x] `just build && just up && just bootstrap`, then open an Assistant in the web application and
   confirm the granted Operations are listed under the renamed section. Until bootstrap runs, the
   stored `Tools` group is unreadable and grants are empty — the expected, recoverable state described
   in [architecture.md](architecture.md), not a bug to chase.

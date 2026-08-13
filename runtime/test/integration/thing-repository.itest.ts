@@ -3,7 +3,7 @@
  *
  * The model map is the part that cannot be tested without a server. `toDocument`/`fromDocument`
  * are each other's inverse whatever the field names are, so an in-memory round trip passes even
- * when a group field is named `Operation` and the model calls it `ToolOperation` — the value
+ * when a group field is named `operation` and the model calls it `OperationKey` — the value
  * simply lands somewhere the store would have rejected or dropped. Writing it and reading it
  * back is the only assertion that catches that class of bug.
  */
@@ -91,9 +91,9 @@ const PAYLOADS: Record<ThingModel, Record<string, unknown>> = {
         maxTurns: 7,
         skills: [{ name: "itest-skill", instructions: "Do\nnothing." }],
         triggers: [{ kind: "assistant-call", modelFilter: "", cron: "" }],
-        // The field the model calls `ToolOperation`. An in-memory round trip cannot tell the
+        // The field the model calls `OperationKey`. An in-memory round trip cannot tell the
         // difference between this and a wrong name; the store can.
-        tools: [{ operation: "thingstore.get" }, { operation: "bookkeeping.getBalance" }],
+        grants: [{ operationKey: "thingstore.get" }, { operationKey: "bookkeeping.getBalance" }],
     },
     Conversation_DM: {
         assistantKey: "itest-assistant",
@@ -307,7 +307,7 @@ describe.skipIf(!THING_STORE_UP)("ThingRepository against the live ThingStore", 
     // BUG-23. README's Things table says an Assistant is written by "User only — the Runtime reads
     // it", and until D-007a nothing but a string array inside the Runtime's own process enforced
     // it: the `runtime` identity could create an Assistant and rewrite an existing one's
-    // SystemPrompt, Enabled, MaxTurns and Tools — which is the whole of what an Assistant may do.
+    // SystemPrompt, Enabled, MaxTurns and Grants — which is the whole of what an Assistant may do.
     // The store refuses both now. These are the tests that catch it coming back.
     describe("an Assistant is the User's to write, and the store enforces it", () => {
         it("refuses to let the Runtime identity CREATE an Assistant", async () => {
@@ -349,7 +349,7 @@ describe.skipIf(!THING_STORE_UP)("ThingRepository against the live ThingStore", 
                     ...PAYLOADS.Assistant_DM,
                     // The escalation the guard exists to stop: an Assistant granting itself the
                     // Operation that moves money.
-                    tools: [{ operation: "bookkeeping.postTransaction" }],
+                    grants: [{ operationKey: "bookkeeping.postTransaction" }],
                     enabled: true,
                     idempotencyKey: key,
                 })
@@ -366,7 +366,7 @@ describe.skipIf(!THING_STORE_UP)("ThingRepository against the live ThingStore", 
                 SPECS.Assistant_DM,
                 existing.docRef,
             );
-            expect(loaded.data["tools"]).toEqual(PAYLOADS.Assistant_DM["tools"]);
+            expect(loaded.data["grants"]).toEqual(PAYLOADS.Assistant_DM["grants"]);
             expect(loaded.data["enabled"]).toBe(false);
         });
 

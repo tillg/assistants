@@ -1,7 +1,7 @@
 /**
  * The Operations at their own boundary.
  *
- * `loop.test.ts` drives tools through a scripted model, which is the right shape for testing the
+ * `loop.test.ts` drives Operations through a scripted model, which is the right shape for testing the
  * loop's branching and the wrong one for testing what a single Operation does with a particular
  * argument. These call `execute` directly, so the assertion is about the Operation's answer rather
  * than about the transcript it ends up in.
@@ -10,7 +10,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { buildHarness, nowIso, SPECS, type Harness } from "./support/harness.js";
-import type { ToolContext, ToolOutcome } from "../src/tools/registry.js";
+import type { OperationContext, OperationOutcome } from "../src/operations/registry.js";
 import { FireflyError } from "../src/connectors/firefly.js";
 import type { Assistant, Conversation, Stored } from "../src/domain/types.js";
 
@@ -53,14 +53,14 @@ async function call(
     harness: Harness,
     operation: string,
     args: Record<string, unknown>,
-    overrides: Partial<ToolContext> = {},
-): Promise<ToolOutcome> {
+    overrides: Partial<OperationContext> = {},
+): Promise<OperationOutcome> {
     const assistant = await harness.seedAssistant();
     const docRef = await harness.birth({ assistant });
     const conversation = await harness.conversation(docRef);
-    const tool = harness.registry.get(operation);
-    if (!tool) throw new Error(`No Operation named ${operation}`);
-    return tool.execute(args, {
+    const granted = harness.registry.get(operation);
+    if (!granted) throw new Error(`No Operation named `);
+    return granted.execute(args, {
         conversation: conversation as Stored<Conversation>,
         assistant: assistant as Stored<Assistant>,
         idempotencyKey: `${conversation.thingId}:1`,
@@ -116,7 +116,7 @@ describe("thingstore.update", () => {
 
     it("adds a step without discarding the ones already there", async () => {
         // README calls the Process "the routing slip — a title, a status and an append-only list of
-        // steps", and the tool promises "supply only the fields you are changing; the others are
+        // steps", and the Operation promises "supply only the fields you are changing; the others are
         // preserved". That held for scalars and was false for a repeating group: the supplied array
         // replaced the whole group, so the obvious move — "add step 4" — destroyed steps 1 to 3 and
         // reported `updated: true`.
@@ -175,7 +175,7 @@ describe("thingstore.update", () => {
     });
 
     it("changes only the fields it was given, even if the Thing moves underneath it", async () => {
-        // The tool's own promise is "supply only the fields you are changing; the others are
+        // The Operation's own promise is "supply only the fields you are changing; the others are
         // preserved". It read the Thing and wrote the whole snapshot back, which preserves the other
         // fields *as they were when it read* — so anything the User saved in between is reverted.
         // Redundant as well as harmful: `ThingRepository.update` already merges over the current
@@ -188,12 +188,12 @@ describe("thingstore.update", () => {
             idempotencyKey: "party-moving-underneath",
         });
 
-        // The User's save lands after the tool has read the Thing and before it writes.
+        // The User's save lands after the Operation has read the Thing and before it writes.
         const getDocument = harness.store.getDocument.bind(harness.store);
         let edited = false;
         harness.store.getDocument = async (docRef) => {
             const result = await getDocument(docRef);
-            // The tool's own read of *this* Party, not whatever else the harness reads first.
+            // The Operation's own read of *this* Party, not whatever else the harness reads first.
             if (!edited && docRef === created.docRef) {
                 edited = true;
                 const row = harness.store.rows.get(docRef)!;
@@ -347,11 +347,11 @@ describe("bookkeeping.postTransaction", () => {
 
 describe("thingstore.search", () => {
     it("refuses a field with no value in its own words, rather than throwing", async () => {
-        // `value` is optional in the tool's own schema, so a model omitting it makes a *permitted*
+        // `value` is optional in the Operation's own schema, so a model omitting it makes a *permitted*
         // call. Building `exact_match` with an empty value is not "no filter" — against the live
         // store it produces malformed JSON in the generated predicate and comes back as a bare
         // -32057 whose `data.description` is only "Unexpected error during query execution.", so
-        // even a better error channel would leave the model none the wiser. The tool has to guard.
+        // even a better error channel would leave the model none the wiser. The Operation has to guard.
         const harness = buildHarness([]);
         const outcome = await call(harness, "thingstore.search", {
             model: "Invoice_DM",

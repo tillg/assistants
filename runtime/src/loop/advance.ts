@@ -29,16 +29,16 @@ import type {
 import { TransientLlmError, type LlmMessage, type LlmProvider, type LlmUsage } from "../llm/provider.js";
 import {
     operationFromLlm,
-    ToolRegistry,
+    OperationRegistry,
     toolNameForLlm,
-    type ToolContext,
-    type ToolDefinition,
-    type ToolOutcome,
-} from "../tools/registry.js";
+    type OperationContext,
+    type GrantedOperation,
+    type OperationOutcome,
+} from "../operations/registry.js";
 
 export interface AdvanceDeps {
     things: ThingRepository;
-    registry: ToolRegistry;
+    registry: OperationRegistry;
     llm: LlmProvider;
     /** Set by the caller so ScriptedProvider can match on the current Assistant and turn. */
     setLlmContext(context: { assistantKey: string; turn: number }): void;
@@ -240,7 +240,7 @@ function approvalRequestsFor(
  * experience. A JSON blob in the inbox is how a safety feature becomes a thing the User clicks yes
  * on without reading.
  */
-export function renderApprovalPrompt(tool: ToolDefinition, args: Record<string, unknown>): string {
+export function renderApprovalPrompt(tool: GrantedOperation, args: Record<string, unknown>): string {
     const described = tool.describeCall?.(args)?.trim();
     const body = described
         ? described
@@ -587,8 +587,8 @@ export class LoopDriver {
                 continue;
             }
 
-            const context: ToolContext = { conversation: stored, assistant, idempotencyKey };
-            let outcome: ToolOutcome;
+            const context: OperationContext = { conversation: stored, assistant, idempotencyKey };
+            let outcome: OperationOutcome;
             // The approval check goes HERE — after the intent is written, before the Operation runs.
             // That position is not incidental: the intent is already in the transcript, so a refusal
             // is visible in the Conversation rather than inferred from its absence, and it is the
@@ -673,10 +673,10 @@ export class LoopDriver {
     private async gateOnApproval(
         stored: Stored<Conversation>,
         assistant: Stored<Assistant>,
-        tool: ToolDefinition,
+        tool: GrantedOperation,
         args: Record<string, unknown>,
         argsHash: string,
-    ): Promise<ToolOutcome | undefined> {
+    ): Promise<OperationOutcome | undefined> {
         const approval = await findApproval(stored.data, tool.name, argsHash, (questionId) =>
             this.loadQuestion(questionId),
         );
@@ -732,7 +732,7 @@ export class LoopDriver {
     private async raiseApproval(
         stored: Stored<Conversation>,
         assistant: Stored<Assistant>,
-        tool: ToolDefinition,
+        tool: GrantedOperation,
         args: Record<string, unknown>,
         argsHash: string,
     ): Promise<string> {
@@ -781,7 +781,7 @@ export class LoopDriver {
     private async suspend(
         stored: Stored<Conversation>,
         operation: string,
-        outcome: Extract<ToolOutcome, { kind: "pending" }>,
+        outcome: Extract<OperationOutcome, { kind: "pending" }>,
         turnsRun: number,
     ): Promise<AdvanceResult> {
         const conversation = stored.data;
@@ -812,7 +812,7 @@ export class LoopDriver {
         stored: Stored<Conversation>,
         assistant: Stored<Assistant>,
         intent: Entry,
-    ): Promise<ToolOutcome | undefined> {
+    ): Promise<OperationOutcome | undefined> {
         const conversation = stored.data;
         const operation = intent.toolName ?? "";
         const key = intent.idempotencyKey ?? "";
@@ -826,7 +826,7 @@ export class LoopDriver {
             idempotencyKey: key,
         });
 
-        const settle = (verdict: ToolOutcome, text: string): ToolOutcome => {
+        const settle = (verdict: OperationOutcome, text: string): OperationOutcome => {
             const result = appendEntry(conversation, {
                 role: "tool",
                 kind: "tool-result",
@@ -861,8 +861,8 @@ export class LoopDriver {
 
         if (!tool.reconcile) return undefined;
 
-        const context: ToolContext = { conversation: stored, assistant, idempotencyKey: key };
-        let outcome: ToolOutcome | undefined;
+        const context: OperationContext = { conversation: stored, assistant, idempotencyKey: key };
+        let outcome: OperationOutcome | undefined;
         try {
             outcome = await tool.reconcile(safeParse(intent.toolArgs), context);
         } catch (error) {

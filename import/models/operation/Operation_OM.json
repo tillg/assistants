@@ -1,0 +1,222 @@
+{
+  "header": {
+    "id": "Operation_OM",
+    "modelType": "overview",
+    "modelVersion": "39.0.0",
+    "locales": [
+      {
+        "code": "en"
+      },
+      {
+        "code": "de"
+      }
+    ],
+    "labels": [
+      {
+        "locale": "en",
+        "text": "Operations"
+      },
+      {
+        "locale": "de",
+        "text": "Operationen"
+      }
+    ],
+    "annotations": [
+      {
+        "name": "roles",
+        "value": "user,runtime"
+      }
+    ],
+    "modelReferences": [
+      {
+        "purpose": "document-model-for-overview",
+        "modelType": "document",
+        "alias": "DM",
+        "reference": "Operation_DM"
+      }
+    ]
+  },
+  "content": {
+    "columns": [
+      {
+        "id": "col_key",
+        "label": [
+          {
+            "locale": "en",
+            "text": "Key"
+          },
+          {
+            "locale": "de",
+            "text": "Schlüssel"
+          }
+        ],
+        "width": 3,
+        "elementRef": "f_key",
+        "sortable": true,
+        "preferredSorting": "ASC"
+      },
+      {
+        "id": "col_system",
+        "label": [
+          {
+            "locale": "en",
+            "text": "System"
+          },
+          {
+            "locale": "de",
+            "text": "System"
+          }
+        ],
+        "width": 2,
+        "elementRef": "f_system",
+        "sortable": true,
+        "preferredSorting": "ASC"
+      },
+      {
+        "id": "col_kind",
+        "label": [
+          {
+            "locale": "en",
+            "text": "Kind"
+          },
+          {
+            "locale": "de",
+            "text": "Art"
+          }
+        ],
+        "width": 2,
+        "elementRef": "f_kind",
+        "sortable": true,
+        "preferredSorting": "ASC"
+      },
+      {
+        "id": "col_enabled",
+        "label": [
+          {
+            "locale": "en",
+            "text": "Enabled"
+          },
+          {
+            "locale": "de",
+            "text": "Aktiviert"
+          }
+        ],
+        "width": 1,
+        "elementRef": "f_enabled",
+        "sortable": false
+      },
+      {
+        "id": "col_requiresApproval",
+        "label": [
+          {
+            "locale": "en",
+            "text": "Requires approval"
+          },
+          {
+            "locale": "de",
+            "text": "Genehmigung erforderlich"
+          }
+        ],
+        "width": 2,
+        "elementRef": "f_requiresApproval",
+        "sortable": false
+      },
+      {
+        "id": "col_mutating",
+        "label": [
+          {
+            "locale": "en",
+            "text": "Mutating"
+          },
+          {
+            "locale": "de",
+            "text": "Verändernd"
+          }
+        ],
+        "width": 1,
+        "elementRef": "f_mutating",
+        "sortable": false
+      }
+    ],
+    "rowActionGroup": {
+      "actions": [
+        {
+          "event": "delete",
+          "confirmation": {
+            "title": [
+              {
+                "locale": "en",
+                "text": "Delete Item"
+              },
+              {
+                "locale": "de",
+                "text": "Item löschen"
+              }
+            ],
+            "message": [
+              {
+                "locale": "en",
+                "text": "Do you really want to delete this item?"
+              },
+              {
+                "locale": "de",
+                "text": "Möchten Sie diesen Eintrag wirklich löschen?"
+              }
+            ]
+          },
+          "icon": {
+            "name": "delete"
+          },
+          "destructive": false,
+          "primary": false
+        }
+      ]
+    },
+    "subHeaderBox": {
+      "leftSlot": [
+        {
+          "type": "button",
+          "label": [
+            {
+              "locale": "en",
+              "text": "Add"
+            },
+            {
+              "locale": "de",
+              "text": "Hinzufügen"
+            }
+          ],
+          "event": "add",
+          "icon": {
+            "name": "add"
+          },
+          "destructive": false,
+          "primary": false
+        }
+      ],
+      "rightSlot": [
+        {
+          "type": "search"
+        },
+        {
+          "type": "filter"
+        }
+      ]
+    },
+    "footerBox": {
+      "leftSlot": [],
+      "rightSlot": []
+    },
+    "configuration": {
+      "enableFilter": true,
+      "showFullTextSearch": true,
+      "pagingSize": 10,
+      "filterConfiguration": {
+        "showFilterButton": true,
+        "showFilterBar": true,
+        "filterMode": "all"
+      },
+      "rowHeight": 49
+    }
+  }
+}

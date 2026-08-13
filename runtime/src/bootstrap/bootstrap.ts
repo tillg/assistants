@@ -46,7 +46,7 @@ export async function bootstrap(
             maxTurns: seed.maxTurns,
             skills: seed.skills,
             triggers: seed.triggers,
-            tools: seed.tools.map((operation) => ({ operation })),
+            grants: seed.grants.map((operationKey) => ({ operationKey })),
             idempotencyKey: key,
         };
         const existing = await things.findByIdempotencyKey<Record<string, unknown>>(

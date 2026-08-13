@@ -169,7 +169,7 @@ describe("tool gating (ADR-0010)", () => {
     it("does not offer an Assistant a tool it has not declared", async () => {
         const harness = buildHarness([]);
         const assistant = await harness.seedAssistant({
-            tools: [{ operation: "thingstore.get" }],
+            grants: [{ operationKey: "thingstore.get" }],
         });
         const schemas = harness.registry.schemasFor(assistant.data);
         const names = schemas.map((schema) => schema.name);
@@ -184,7 +184,7 @@ describe("tool gating (ADR-0010)", () => {
                 toolCalls: [{ name: "bookkeeping__postTransaction", arguments: { splits: [] } }],
             },
         ]);
-        const assistant = await harness.seedAssistant({ tools: [{ operation: "thingstore.get" }] });
+        const assistant = await harness.seedAssistant({ grants: [{ operationKey: "thingstore.get" }] });
         const docRef = await harness.birth({ assistant });
         await harness.driver.advance(docRef);
 
@@ -198,7 +198,7 @@ describe("tool gating (ADR-0010)", () => {
         const harness = buildHarness([]);
         const assistant = await harness.seedAssistant({
             key: "receptionist",
-            tools: [{ operation: "assistant.call:receptionist" }, { operation: "assistant.call:accountant" }],
+            grants: [{ operationKey: "assistant.call:receptionist" }, { operationKey: "assistant.call:accountant" }],
         });
         const callees = harness.registry.calleesOf(assistant.data);
         expect(callees).toEqual(["accountant"]);
@@ -212,7 +212,7 @@ describe("tool gating (ADR-0010)", () => {
  */
 describe("an Operation that requires an approval (ADR-0018)", () => {
     const bookingAssistant = (harness: Harness) =>
-        harness.seedAssistant({ tools: [{ operation: "bookkeeping.postTransaction" }] });
+        harness.seedAssistant({ grants: [{ operationKey: "bookkeeping.postTransaction" }] });
 
     it("refuses a booking with no approval at all, and asks the User itself", async () => {
         // The Assistant's prompt says nothing about asking, and it does not ask. Nothing reaches
@@ -294,7 +294,7 @@ describe("an Operation that requires an approval (ADR-0018)", () => {
             { turn: 1, toolCalls: [{ name: "bookkeeping__postTransaction", arguments: POSTING }] },
         ]);
         const assistant = await harness.seedAssistant({
-            tools: [{ operation: "ui.askUser" }, { operation: "bookkeeping.postTransaction" }],
+            grants: [{ operationKey: "ui.askUser" }, { operationKey: "bookkeeping.postTransaction" }],
         });
         const docRef = await harness.birth({ assistant });
 
@@ -503,7 +503,7 @@ describe("an Operation that requires an approval (ADR-0018)", () => {
             { turn: 1, text: "Here they are.", finishReason: "answered" },
         ]);
         const assistant = await harness.seedAssistant({
-            tools: [{ operation: "bookkeeping.listAccounts" }],
+            grants: [{ operationKey: "bookkeeping.listAccounts" }],
         });
         const docRef = await harness.birth({ assistant });
 
@@ -543,7 +543,7 @@ describe("what a Turn cost (#6)", () => {
                 ],
             },
         ]);
-        const assistant = await harness.seedAssistant({ tools: [{ operation: "thingstore.search" }] });
+        const assistant = await harness.seedAssistant({ grants: [{ operationKey: "thingstore.search" }] });
         const docRef = await harness.birth({ assistant });
 
         await harness.driver.advance(docRef);
@@ -671,7 +671,7 @@ describe("recovery", () => {
             { turn: 2, text: "Booked.", finishReason: "answered" },
         ]);
         const assistant = await harness.seedAssistant({
-            tools: [{ operation: "bookkeeping.postTransaction" }],
+            grants: [{ operationKey: "bookkeeping.postTransaction" }],
         });
         const docRef = await harness.birth({ assistant });
 
@@ -718,7 +718,7 @@ describe("recovery", () => {
                 ],
             },
         ]);
-        const assistant = await harness.seedAssistant({ tools: [{ operation: "thingstore.update" }] });
+        const assistant = await harness.seedAssistant({ grants: [{ operationKey: "thingstore.update" }] });
         const docRef = await harness.birth({ assistant });
         await harness.driver.advance(docRef);
 
@@ -753,7 +753,7 @@ describe("recovery", () => {
             },
             { turn: 1, text: "No answer came, so I assumed yes.", finishReason: "answered" },
         ]);
-        const assistant = await harness.seedAssistant({ tools: [{ operation: "ui.askUser" }] });
+        const assistant = await harness.seedAssistant({ grants: [{ operationKey: "ui.askUser" }] });
         const docRef = await harness.birth({ assistant });
         await harness.driver.advance(docRef);
         const questionId = (await harness.conversation(docRef)).data.currentQuestionId!;
@@ -786,7 +786,7 @@ describe("recovery", () => {
             },
             { turn: 1, text: "Recorded.", finishReason: "answered" },
         ]);
-        const assistant = await harness.seedAssistant({ tools: [{ operation: "bank.sendMoney" }] });
+        const assistant = await harness.seedAssistant({ grants: [{ operationKey: "bank.sendMoney" }] });
         const docRef = await harness.birth({ assistant });
         await harness.driver.advance(docRef);
         const questionId = (await harness.conversation(docRef)).data.currentQuestionId!;
@@ -814,7 +814,7 @@ describe("recovery", () => {
             { turn: 0, toolCalls: [{ name: "ui__askUser", arguments: { kind: "confirm", prompt: "Pay?" } }] },
             { turn: 1, text: "Understood, I will not repeat it.", finishReason: "answered" },
         ]);
-        const assistant = await harness.seedAssistant({ tools: [{ operation: "ui.askUser" }] });
+        const assistant = await harness.seedAssistant({ grants: [{ operationKey: "ui.askUser" }] });
         const docRef = await harness.birth({ assistant });
         await harness.driver.advance(docRef);
 
@@ -870,7 +870,7 @@ describe("recovery", () => {
         ]);
         const receptionist = await harness.seedAssistant({
             key: "receptionist",
-            tools: [{ operation: "assistant.call:accountant" }],
+            grants: [{ operationKey: "assistant.call:accountant" }],
         });
         await harness.seedAssistant({ key: "accountant", name: "Accountant", triggers: [] });
         const docRef = await harness.birth({ assistant: receptionist });
@@ -910,7 +910,7 @@ describe("manual connectors", () => {
             },
             { turn: 1, text: "Thanks, recorded.", finishReason: "answered" },
         ]);
-        const assistant = await harness.seedAssistant({ tools: [{ operation: "bank.sendMoney" }] });
+        const assistant = await harness.seedAssistant({ grants: [{ operationKey: "bank.sendMoney" }] });
         const docRef = await harness.birth({ assistant });
 
         await harness.driver.advance(docRef);
@@ -1036,7 +1036,7 @@ describe("guards", () => {
         ]);
         const receptionist = await harness.seedAssistant({
             key: "receptionist",
-            tools: [{ operation: "assistant.call:accountant" }],
+            grants: [{ operationKey: "assistant.call:accountant" }],
         });
         await harness.seedAssistant({ key: "accountant", enabled: false, triggers: [] });
         const docRef = await harness.birth({ assistant: receptionist });
@@ -1113,7 +1113,7 @@ describe("answering", () => {
             },
             { turn: 1, text: "Booked.", finishReason: "answered" },
         ]);
-        const assistant = await harness.seedAssistant({ tools: [{ operation: "ui.askUser" }] });
+        const assistant = await harness.seedAssistant({ grants: [{ operationKey: "ui.askUser" }] });
         const docRef = await harness.birth({ assistant });
         await harness.driver.advance(docRef);
 
@@ -1185,9 +1185,9 @@ describe("recording tool names", () => {
         ]);
         const receptionist = await harness.seedAssistant({
             key: "receptionist",
-            tools: [{ operation: "assistant.call:accountant" }],
+            grants: [{ operationKey: "assistant.call:accountant" }],
         });
-        await harness.seedAssistant({ key: "accountant", tools: [{ operation: "thingstore.get" }] });
+        await harness.seedAssistant({ key: "accountant", grants: [{ operationKey: "thingstore.get" }] });
 
         const docRef = await harness.birth({ assistant: receptionist });
         await harness.driver.advance(docRef);
@@ -1214,11 +1214,11 @@ describe("assistant-to-assistant calls (ADR-0007)", () => {
 
         const receptionist = await harness.seedAssistant({
             key: "receptionist",
-            tools: [{ operation: "assistant.call:accountant" }],
+            grants: [{ operationKey: "assistant.call:accountant" }],
         });
         await harness.seedAssistant({
             key: "accountant",
-            tools: [{ operation: "thingstore.get" }],
+            grants: [{ operationKey: "thingstore.get" }],
             triggers: [{ kind: "assistant-call" }],
         });
 

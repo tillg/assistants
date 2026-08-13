@@ -1,6 +1,6 @@
 {
   "header": {
-    "id": "Assistant_FM",
+    "id": "Operation_FM",
     "modelType": "form",
     "modelVersion": "39.0.0",
     "locales": [
@@ -14,11 +14,11 @@
     "labels": [
       {
         "locale": "en",
-        "text": "Assistant"
+        "text": "Operation"
       },
       {
         "locale": "de",
-        "text": "Assistent"
+        "text": "Operation"
       }
     ],
     "annotations": [
@@ -29,10 +29,10 @@
     ],
     "modelReferences": [
       {
-        "alias": "Assistant_DM",
+        "alias": "Operation_DM",
         "modelType": "document",
         "purpose": "data binding",
-        "reference": "Assistant_DM"
+        "reference": "Operation_DM"
       }
     ]
   },
@@ -181,8 +181,8 @@
                       },
                       {
                         "type": "Control",
-                        "id": "ctrl_description",
-                        "elementRef": "f_description"
+                        "id": "ctrl_enabled",
+                        "elementRef": "f_enabled"
                       }
                     ]
                   },
@@ -193,18 +193,13 @@
                     "cell": [
                       {
                         "type": "Control",
-                        "id": "ctrl_llmModel",
-                        "elementRef": "f_llmModel"
+                        "id": "ctrl_system",
+                        "elementRef": "f_system"
                       },
                       {
                         "type": "Control",
-                        "id": "ctrl_enabled",
-                        "elementRef": "f_enabled"
-                      },
-                      {
-                        "type": "Control",
-                        "id": "ctrl_maxTurns",
-                        "elementRef": "f_maxTurns"
+                        "id": "ctrl_kind",
+                        "elementRef": "f_kind"
                       }
                     ]
                   }
@@ -215,19 +210,19 @@
           },
           {
             "type": "Section",
-            "id": "section_systemPrompt",
-            "name": "SectionSystemPrompt",
+            "id": "section_description",
+            "name": "SectionDescription",
             "title": {
               "type": "Multilingual",
               "multilingualText": {
                 "text": [
                   {
                     "locale": "en",
-                    "text": "System prompt"
+                    "text": "Description"
                   },
                   {
                     "locale": "de",
-                    "text": "System-Prompt"
+                    "text": "Beschreibung"
                   }
                 ]
               }
@@ -235,8 +230,8 @@
             "screenElements": [
               {
                 "type": "ControlGrid",
-                "id": "grid_systemPrompt",
-                "name": "GridSystemPrompt",
+                "id": "grid_description",
+                "name": "GridDescription",
                 "layout": {
                   "lg": "12"
                 },
@@ -248,8 +243,8 @@
                     "cell": [
                       {
                         "type": "Control",
-                        "id": "ctrl_systemPrompt",
-                        "elementRef": "f_systemPrompt",
+                        "id": "ctrl_description",
+                        "elementRef": "f_description",
                         "annotations": [
                           {
                             "name": "widget",
@@ -265,157 +260,145 @@
           },
           {
             "type": "Section",
-            "id": "section_skills",
-            "name": "SectionSkills",
+            "id": "section_behaviour",
+            "name": "SectionBehaviour",
             "title": {
               "type": "Multilingual",
               "multilingualText": {
                 "text": [
                   {
                     "locale": "en",
-                    "text": "Skills"
+                    "text": "Behaviour"
                   },
                   {
                     "locale": "de",
-                    "text": "Skills"
+                    "text": "Verhalten"
                   }
                 ]
               }
             },
             "screenElements": [
               {
-                "type": "InlineRepeat",
-                "id": "inlinerepeat_skills",
-                "name": "inline-repeat-Skills",
-                "repeatOverviewColumn": [
+                "type": "ControlGrid",
+                "id": "grid_behaviour",
+                "name": "GridBehaviour",
+                "layout": {
+                  "lg": "6-6"
+                },
+                "row": [
                   {
-                    "type": "FieldBasedRepeatOverviewColumn",
-                    "id": "repeatcolumn_skill_name",
-                    "width": 1,
-                    "sortable": false,
-                    "filterable": false,
-                    "preferredSorting": "ASC",
-                    "elementRef": "f_skill_name"
-                  },
-                  {
-                    "type": "FieldBasedRepeatOverviewColumn",
-                    "id": "repeatcolumn_skill_instructions",
-                    "width": 3,
-                    "sortable": false,
-                    "filterable": false,
-                    "preferredSorting": "ASC",
-                    "annotations": [
+                    "type": "Row",
+                    "id": "row_4",
+                    "name": "r4",
+                    "cell": [
                       {
-                        "name": "widget",
-                        "value": "markdown-editor"
+                        "type": "Control",
+                        "id": "ctrl_mutating",
+                        "elementRef": "f_mutating"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_requiresApproval",
+                        "elementRef": "f_requiresApproval"
                       }
-                    ],
-                    "elementRef": "f_skill_instructions"
+                    ]
                   }
                 ],
-                "groupRef": "f_skills",
-                "enableAdd": true,
-                "enableRemove": true
+                "verticalAlignment": "BOTTOM"
               }
             ]
           },
           {
             "type": "Section",
-            "id": "section_triggers",
-            "name": "SectionTriggers",
+            "id": "section_notes",
+            "name": "SectionNotes",
             "title": {
               "type": "Multilingual",
               "multilingualText": {
                 "text": [
                   {
                     "locale": "en",
-                    "text": "Triggers"
+                    "text": "Notes"
                   },
                   {
                     "locale": "de",
-                    "text": "Trigger"
+                    "text": "Notizen"
                   }
                 ]
               }
             },
             "screenElements": [
               {
-                "type": "InlineRepeat",
-                "id": "inlinerepeat_triggers",
-                "name": "inline-repeat-Triggers",
-                "repeatOverviewColumn": [
+                "type": "ControlGrid",
+                "id": "grid_notes",
+                "name": "GridNotes",
+                "layout": {
+                  "lg": "12"
+                },
+                "row": [
                   {
-                    "type": "FieldBasedRepeatOverviewColumn",
-                    "id": "repeatcolumn_trigger_kind",
-                    "width": 1,
-                    "sortable": false,
-                    "filterable": false,
-                    "preferredSorting": "ASC",
-                    "elementRef": "f_trigger_kind"
-                  },
-                  {
-                    "type": "FieldBasedRepeatOverviewColumn",
-                    "id": "repeatcolumn_trigger_modelFilter",
-                    "width": 1,
-                    "sortable": false,
-                    "filterable": false,
-                    "preferredSorting": "ASC",
-                    "elementRef": "f_trigger_modelFilter"
-                  },
-                  {
-                    "type": "FieldBasedRepeatOverviewColumn",
-                    "id": "repeatcolumn_trigger_cron",
-                    "width": 1,
-                    "sortable": false,
-                    "filterable": false,
-                    "preferredSorting": "ASC",
-                    "elementRef": "f_trigger_cron"
+                    "type": "Row",
+                    "id": "row_5",
+                    "name": "r5",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_notes",
+                        "elementRef": "f_notes",
+                        "annotations": [
+                          {
+                            "name": "widget",
+                            "value": "markdown-editor"
+                          }
+                        ]
+                      }
+                    ]
                   }
-                ],
-                "groupRef": "f_triggers",
-                "enableAdd": true,
-                "enableRemove": true
+                ]
               }
             ]
           },
           {
             "type": "Section",
-            "id": "section_grants",
-            "name": "SectionGrants",
+            "id": "section_parameters",
+            "name": "SectionParameters",
             "title": {
               "type": "Multilingual",
               "multilingualText": {
                 "text": [
                   {
                     "locale": "en",
-                    "text": "Granted operations"
+                    "text": "Parameters"
                   },
                   {
                     "locale": "de",
-                    "text": "Erteilte Operationen"
+                    "text": "Parameter"
                   }
                 ]
               }
             },
             "screenElements": [
               {
-                "type": "InlineRepeat",
-                "id": "inlinerepeat_grants",
-                "name": "inline-repeat-Grants",
-                "repeatOverviewColumn": [
+                "type": "ControlGrid",
+                "id": "grid_parameters",
+                "name": "GridParameters",
+                "layout": {
+                  "lg": "12"
+                },
+                "row": [
                   {
-                    "type": "FieldBasedRepeatOverviewColumn",
-                    "id": "repeatcolumn_operation_key",
-                    "width": 3,
-                    "sortable": false,
-                    "filterable": false,
-                    "preferredSorting": "ASC",
-                    "elementRef": "f_operation_key"
+                    "type": "Row",
+                    "id": "row_6",
+                    "name": "r6",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_parameters",
+                        "elementRef": "f_parameters"
+                      }
+                    ]
                   }
-                ],
-                "groupRef": "f_grants",
-                "enableAdd": true,
-                "enableRemove": true
+                ]
               }
             ]
           }
@@ -425,11 +408,32 @@
     "fieldConfiguration": {
       "field": [
         {
-          "elementRef": "f_systemPrompt",
+          "elementRef": "f_key",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_system",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_kind",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_description",
           "exposition": "AREA"
         },
         {
-          "elementRef": "f_skill_instructions",
+          "elementRef": "f_mutating",
+          "readonly": true
+        },
+        {
+          "elementRef": "f_notes",
+          "exposition": "AREA"
+        },
+        {
+          "elementRef": "f_parameters",
+          "readonly": true,
           "exposition": "AREA"
         }
       ]

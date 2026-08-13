@@ -304,7 +304,7 @@ describe("result delivery (scan 5)", () => {
         ]);
         const receptionist = await harness.seedAssistant({
             key: "receptionist",
-            tools: [{ operation: "assistant.call:accountant" }],
+            grants: [{ operationKey: "assistant.call:accountant" }],
         });
         await harness.seedAssistant({ key: "accountant", triggers: [] });
         const docRef = await harness.birth({ assistant: receptionist });
@@ -460,7 +460,7 @@ describe("the schedule scan (scan 7)", () => {
         return harness.seedAssistant({
             key: "accountant",
             triggers: [{ kind: "schedule", cron: "0 7 * * *" }],
-            tools: [{ operation: "thingstore.search" }],
+            grants: [{ operationKey: "thingstore.search" }],
             ...overrides,
         });
     }
@@ -697,7 +697,7 @@ describe("the schedule scan (scan 7)", () => {
             },
         ]);
         await scheduled(harness, {
-            tools: [{ operation: "bookkeeping.listOpenItems" }, { operation: "ui.askUser" }],
+            grants: [{ operationKey: "bookkeeping.listOpenItems" }, { operationKey: "ui.askUser" }],
         });
 
         // Birth, then the two Turns — scan 7 runs last, so each pass moves it on by one.

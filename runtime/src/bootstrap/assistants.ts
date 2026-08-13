@@ -17,7 +17,7 @@ export interface AssistantSeed {
     maxTurns: number;
     skills: Array<{ name: string; instructions: string }>;
     triggers: Array<{ kind: string; modelFilter?: string; cron?: string }>;
-    tools: string[];
+    grants: string[];
 }
 
 export const RECEPTIONIST: AssistantSeed = {
@@ -92,7 +92,7 @@ When you see one:
         },
     ],
     triggers: [{ kind: "thing-materialised", modelFilter: "Document_DM" }],
-    tools: [
+    grants: [
         "thingstore.get",
         "thingstore.search",
         "thingstore.create",
@@ -226,7 +226,7 @@ things.`,
     // Note what adding this does immediately: a cron has no start date, so the first scan after
     // bootstrap finds today's 07:00 already past and births one Conversation at once.
     triggers: [{ kind: "assistant-call" }, { kind: "schedule", cron: "0 7 * * *" }],
-    tools: [
+    grants: [
         "thingstore.get",
         "thingstore.search",
         "thingstore.update",

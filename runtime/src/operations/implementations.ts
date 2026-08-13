@@ -1,7 +1,7 @@
 /**
  * Every Operation the Assistants can reach.
  *
- * The shape to notice: **any tool may answer `pending`**. Coding agents assume a tool returns in
+ * The shape to notice: **any Operation may answer `pending`**. Coding agents assume a call returns in
  * seconds and block inside the Turn; our Operations are human-paced by design — a Manual
  * Connector, a question to the User, a call to another Assistant — so the pending path is the
  * normal path, not the exception. That single generalisation is what turns a coding-agent loop
@@ -13,7 +13,7 @@ import { ThingRepository, SPECS, byCreatedAt, nowIso, path as fieldPath, eq } fr
 import type { ModelSpec } from "../a12/things.js";
 import { FireflyError } from "../connectors/firefly.js";
 import type { FireflyConnector, PostingSplit } from "../connectors/firefly.js";
-import type { ToolContext, ToolDefinition, ToolOutcome } from "./registry.js";
+import type { OperationContext, GrantedOperation, OperationOutcome } from "./registry.js";
 import { isAnswered } from "../watcher/watcher.js";
 import {
     isTriggerEligible,
@@ -23,12 +23,12 @@ import {
     type ThingModel,
 } from "../domain/types.js";
 
-export interface ToolDeps {
+export interface OperationDeps {
     things: ThingRepository;
     firefly: FireflyConnector;
     /** Raise an Open Question and return its ThingID. Shared by askUser and every Manual Connector. */
     raiseQuestion(input: {
-        context: ToolContext;
+        context: OperationContext;
         kind: "free-text" | "confirm" | "choice" | "perform";
         prompt: string;
         options?: Array<{ value: string; label: string }>;
@@ -36,7 +36,7 @@ export interface ToolDeps {
     }): Promise<string>;
     /** Birth a child Conversation for another Assistant. */
     callAssistant(input: {
-        context: ToolContext;
+        context: OperationContext;
         assistantKey: string;
         prompt: string;
         subjectThingId?: string;
@@ -256,10 +256,10 @@ const READABLE_MODELS: readonly string[] = Object.keys(SPECS);
 /** Models an Assistant may create or edit. Never its own machinery. */
 const WRITABLE_MODELS: readonly string[] = ["Party_DM", "Document_DM", "Invoice_DM", "Process_DM"];
 
-export function buildTools(deps: ToolDeps): ToolDefinition[] {
+export function buildOperations(deps: OperationDeps): GrantedOperation[] {
     const { things, firefly } = deps;
 
-    const thingstoreCreate: ToolDefinition = {
+    const thingstoreCreate: GrantedOperation = {
         name: "thingstore.create",
         description:
             "Create a new Thing in the ThingStore. Returns its ThingID. Safe to retry: a repeated " +
@@ -277,7 +277,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             },
             required: ["model", "fields"],
         },
-        async execute(args, context): Promise<ToolOutcome> {
+        async execute(args, context): Promise<OperationOutcome> {
             const model = String(args["model"] ?? "");
             if (!WRITABLE_MODELS.includes(model)) {
                 return {
@@ -294,7 +294,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             log.info("thing created", { model, thingId: created.thingId });
             return { kind: "value", value: { thingId: created.thingId, model } };
         },
-        async reconcile(args, context): Promise<ToolOutcome | undefined> {
+        async reconcile(args, context): Promise<OperationOutcome | undefined> {
             const model = String(args["model"] ?? "");
             if (!WRITABLE_MODELS.includes(model)) return { kind: "value", value: null };
             const existing = await things.findByIdempotencyKey(
@@ -307,7 +307,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
         },
     };
 
-    const thingstoreGet: ToolDefinition = {
+    const thingstoreGet: GrantedOperation = {
         name: "thingstore.get",
         description: "Read one Thing by its Model and ThingID.",
         mutating: false,
@@ -316,7 +316,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             properties: { model: str("The Model, e.g. Invoice_DM."), thingId: str("The ThingID.") },
             required: ["model", "thingId"],
         },
-        async execute(args): Promise<ToolOutcome> {
+        async execute(args): Promise<OperationOutcome> {
             const model = String(args["model"] ?? "");
             const thingId = String(args["thingId"] ?? "");
             const found = await things.get(specFor(model), `${model}/${thingId}`);
@@ -324,7 +324,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
         },
     };
 
-    const thingstoreUpdate: ToolDefinition = {
+    const thingstoreUpdate: GrantedOperation = {
         name: "thingstore.update",
         description:
             "Update fields on an existing Thing. Supply only the fields you are changing; the " +
@@ -341,7 +341,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             },
             required: ["model", "thingId", "fields"],
         },
-        async execute(args, context): Promise<ToolOutcome> {
+        async execute(args, context): Promise<OperationOutcome> {
             const model = String(args["model"] ?? "");
             if (!WRITABLE_MODELS.includes(model)) {
                 return {
@@ -369,7 +369,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             void context;
             return { kind: "value", value: { thingId: current.thingId, model, updated: true } };
         },
-        async reconcile(): Promise<ToolOutcome> {
+        async reconcile(): Promise<OperationOutcome> {
             // An update sets named fields to values the model chose, so applying it twice reaches
             // the same state. Reporting the uncertainty is enough; the next Turn can re-read.
             return {
@@ -380,7 +380,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
         },
     };
 
-    const thingstoreSearch: ToolDefinition = {
+    const thingstoreSearch: GrantedOperation = {
         name: "thingstore.search",
         description:
             "Find Things of one Model. Without a field filter it returns the most recent ones. " +
@@ -396,7 +396,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             },
             required: ["model"],
         },
-        async execute(args): Promise<ToolOutcome> {
+        async execute(args): Promise<OperationOutcome> {
             const model = String(args["model"] ?? "");
             const spec = specFor(model);
             const field = args["field"] ? String(args["field"]) : undefined;
@@ -426,7 +426,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             }
             const value = String(args["value"] ?? "");
             if (field !== undefined && value === "") {
-                // `value` is optional in this tool's schema, so omitting it is a permitted call —
+                // `value` is optional in this Operation's schema, so omitting it is a permitted call —
                 // and an `exact_match` with an empty value is not "no filter". The store cannot
                 // build a predicate from it and answers a bare -32057 whose own description is
                 // "Unexpected error during query execution.", so this has to be caught here.
@@ -467,7 +467,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
         },
     };
 
-    const askUser: ToolDefinition = {
+    const askUser: GrantedOperation = {
         name: "ui.askUser",
         description:
             "Ask the User a question and stop until they answer. Use this for any decision that is " +
@@ -496,7 +496,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             },
             required: ["kind", "prompt"],
         },
-        async execute(args, context): Promise<ToolOutcome> {
+        async execute(args, context): Promise<OperationOutcome> {
             const kind = String(args["kind"] ?? "free-text") as "free-text" | "confirm" | "choice";
             const prompt = String(args["prompt"] ?? "").trim();
             if (!prompt) return { kind: "error", message: "A question needs a prompt." };
@@ -509,7 +509,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             });
             return { kind: "pending", waitingFor: "user", questionId };
         },
-        async reconcile(_args, context): Promise<ToolOutcome | undefined> {
+        async reconcile(_args, context): Promise<OperationOutcome | undefined> {
             const existing = await things.findByIdempotencyKey<OpenQuestion>(
                 SPECS.OpenQuestion_DM,
                 context.idempotencyKey,
@@ -524,7 +524,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
         },
     };
 
-    const assistantCall: ToolDefinition = {
+    const assistantCall: GrantedOperation = {
         name: "assistant.call",
         description:
             "Ask another Assistant to do something. The call is asynchronous: a new conversation is " +
@@ -546,7 +546,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             },
             required: ["prompt"],
         },
-        async execute(args, context): Promise<ToolOutcome> {
+        async execute(args, context): Promise<OperationOutcome> {
             const assistantKey = String(args["assistantKey"] ?? "");
             if (!assistantKey) {
                 return { kind: "error", message: "assistant.call must name the Assistant to call." };
@@ -599,7 +599,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
          * never asked it. Without this, an interrupted call escalated to the User about work that
          * had demonstrably happened.
          */
-        async reconcile(args, context): Promise<ToolOutcome | undefined> {
+        async reconcile(args, context): Promise<OperationOutcome | undefined> {
             const child = await things.findByIdempotencyKey<Conversation>(
                 SPECS.Conversation_DM,
                 context.idempotencyKey,
@@ -636,14 +636,14 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
         },
     };
 
-    const listAccounts: ToolDefinition = {
+    const listAccounts: GrantedOperation = {
         name: "bookkeeping.listAccounts",
         description:
             "List the chart of accounts. Always look here before booking — account names must match " +
             "exactly, and you may not invent one.",
         mutating: false,
         parameters: { type: "object", properties: {} },
-        async execute(): Promise<ToolOutcome> {
+        async execute(): Promise<OperationOutcome> {
             const accounts = await firefly.listAccounts(true);
             return {
                 kind: "value",
@@ -656,7 +656,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
         },
     };
 
-    const postTransaction: ToolDefinition = {
+    const postTransaction: GrantedOperation = {
         name: "bookkeeping.postTransaction",
         description:
             "Book a balanced transaction into the books. Account names must already exist — call " +
@@ -669,7 +669,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
         // that sentence was kept by the Accountant's system prompt and by nothing else.
         //
         // `bookkeeping.createAccount` deliberately does NOT carry it: it is granted to no Assistant
-        // (see ACCOUNTANT's tools), so the flag would only add a path nothing exercises.
+        // (see ACCOUNTANT's grants), so the flag would only add a path nothing exercises.
         requiresApproval: true,
         describeCall: describePosting,
         parameters: {
@@ -715,7 +715,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             },
             required: ["splits"],
         },
-        async execute(args, context): Promise<ToolOutcome> {
+        async execute(args, context): Promise<OperationOutcome> {
             const splits = (args["splits"] ?? []) as PostingSplit[];
             if (!Array.isArray(splits) || splits.length === 0) {
                 return { kind: "error", message: "postTransaction needs at least one split." };
@@ -748,7 +748,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
                 },
             };
         },
-        async reconcile(_args, context): Promise<ToolOutcome | undefined> {
+        async reconcile(_args, context): Promise<OperationOutcome | undefined> {
             // The one that would cost real money. Firefly carries our key in `external_id`, so
             // this is a question we can actually answer rather than a guess.
             const landed = await firefly.findByExternalId(context.idempotencyKey);
@@ -762,7 +762,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
         },
     };
 
-    const listTransactions: ToolDefinition = {
+    const listTransactions: GrantedOperation = {
         name: "bookkeeping.listTransactions",
         description:
             "The register: transactions in a date range, optionally for one account. Use this to " +
@@ -778,7 +778,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             },
             required: ["start", "end"],
         },
-        async execute(args): Promise<ToolOutcome> {
+        async execute(args): Promise<OperationOutcome> {
             const groups = await firefly.listTransactions({
                 start: String(args["start"] ?? ""),
                 end: String(args["end"] ?? ""),
@@ -791,7 +791,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
         },
     };
 
-    const getBalance: ToolDefinition = {
+    const getBalance: GrantedOperation = {
         name: "bookkeeping.getBalance",
         description: "The current balance of one account.",
         mutating: false,
@@ -800,24 +800,24 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             properties: { account: str("Exact account name.") },
             required: ["account"],
         },
-        async execute(args): Promise<ToolOutcome> {
+        async execute(args): Promise<OperationOutcome> {
             return { kind: "value", value: await firefly.getBalance(String(args["account"] ?? "")) };
         },
     };
 
-    const listOpenItems: ToolDefinition = {
+    const listOpenItems: GrantedOperation = {
         name: "bookkeeping.listOpenItems",
         description:
             "Unpaid invoices and unclaimed reimbursements — the non-zero balances on payable and " +
             "receivable accounts.",
         mutating: false,
         parameters: { type: "object", properties: {} },
-        async execute(): Promise<ToolOutcome> {
+        async execute(): Promise<OperationOutcome> {
             return { kind: "value", value: await firefly.listOpenItems() };
         },
     };
 
-    const getBudgetReport: ToolDefinition = {
+    const getBudgetReport: GrantedOperation = {
         name: "bookkeeping.getBudgetReport",
         description:
             "Each budget's target and what has been spent against it, for a period. Defaults to the " +
@@ -831,7 +831,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
                 end: str("Last day of the period, yyyy-mm-dd. Defaults to the end of this month."),
             },
         },
-        async execute(args): Promise<ToolOutcome> {
+        async execute(args): Promise<OperationOutcome> {
             // A period is required by Firefly, not optional: without one it reports `spent: null` for
             // every budget, which reads as "nothing spent". ACCOUNTING.md always specified
             // `getBudgetReport(period)`; the parameter simply was not there.
@@ -842,7 +842,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
         },
     };
 
-    const createAccount: ToolDefinition = {
+    const createAccount: GrantedOperation = {
         name: "bookkeeping.createAccount",
         description: "Add an account to the chart of accounts.",
         mutating: true,
@@ -855,7 +855,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             },
             required: ["name", "type"],
         },
-        async execute(args): Promise<ToolOutcome> {
+        async execute(args): Promise<OperationOutcome> {
             // Search-then-create, so a repeated Turn cannot produce two accounts with one name —
             // the silent chart corruption this connector exists to prevent.
             const name = String(args["name"] ?? "");
@@ -871,7 +871,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
             });
             return { kind: "value", value: created };
         },
-        async reconcile(args): Promise<ToolOutcome> {
+        async reconcile(args): Promise<OperationOutcome> {
             const name = String(args["name"] ?? "");
             const accounts = await firefly.listAccounts(true);
             const existing = accounts.find(
@@ -897,13 +897,13 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
         properties: Record<string, unknown>;
         required: string[];
         renderPrompt(args: Record<string, unknown>): string;
-    }): ToolDefinition {
+    }): GrantedOperation {
         return {
             name: input.name,
             description: `${input.description} This is performed by the User by hand, so it may take a while.`,
             mutating: true,
             parameters: { type: "object", properties: input.properties, required: input.required },
-            async execute(args, context): Promise<ToolOutcome> {
+            async execute(args, context): Promise<OperationOutcome> {
                 const questionId = await deps.raiseQuestion({
                     context,
                     kind: "perform",
@@ -912,7 +912,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
                 });
                 return { kind: "pending", waitingFor: "tool", questionId };
             },
-            async reconcile(_args, context): Promise<ToolOutcome | undefined> {
+            async reconcile(_args, context): Promise<OperationOutcome | undefined> {
                 const existing = await things.findByIdempotencyKey<OpenQuestion>(
                     SPECS.OpenQuestion_DM,
                     context.idempotencyKey,

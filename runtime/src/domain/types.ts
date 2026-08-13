@@ -122,8 +122,8 @@ export interface Trigger {
     cron?: string;
 }
 
-export interface ToolGrant {
-    operation?: string;
+export interface Grant {
+    operationKey?: string;
 }
 
 export interface Assistant extends MachineFields {
@@ -136,7 +136,7 @@ export interface Assistant extends MachineFields {
     maxTurns?: number;
     skills?: Skill[];
     triggers?: Trigger[];
-    tools?: ToolGrant[];
+    grants?: Grant[];
 }
 
 export type ConversationStatus = "running" | "waiting" | "done" | "failed";

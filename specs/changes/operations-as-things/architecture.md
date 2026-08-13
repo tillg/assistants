@@ -222,7 +222,7 @@ what withholds writes.
 | `Description` | `StringType {lineBreaksPermitted, noValueValidation}` | | User | Markdown. What the model reads. `noValueValidation` because it is prose and may contain anything the BMP allows |
 | `Mutating` | `BooleanType` | | code | Mirrored for display. Never read back |
 | `RequiresApproval` | `BooleanType` | | **User** | Authoritative |
-| `Enabled` | `BooleanType` | ✓ | **User** | The kill switch. Indexed so "what is switched off" is one query |
+| `Enabled` | `BooleanType` | | **User** | The kill switch. **Not** indexed: `validate-models.mjs` refuses `indexed` on a `BooleanType`, because A12 can only filter `StringType` and `DateTimeType` — the annotation would be a lie. "What is switched off" is a client-side filter over a snapshot of seventeen rows, which is what the per-Turn read already loads |
 | `Notes` | `StringType {lineBreaksPermitted, noValueValidation}` | | User | The User's own note |
 | `Parameters` | `StringType {lineBreaksPermitted, noValueValidation}` | | code | The JSON Schema, as text. Read-only in the form, and last |
 | the four machine fields | | | | `IdempotencyKey`, `CreatedByConversationId`, `CreatedAt`, `UpdatedAt`, in that order, last |
