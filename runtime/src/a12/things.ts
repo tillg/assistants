@@ -157,6 +157,23 @@ export const SPECS = {
             grants: { name: "Grants", fields: { operationKey: "OperationKey" } },
         },
     },
+    Operation_DM: {
+        model: "Operation_DM",
+        root: "Operation",
+        fields: {
+            key: "Key",
+            name: "Name",
+            system: "System",
+            kind: "Kind",
+            description: "Description",
+            mutating: "Mutating",
+            requiresApproval: "RequiresApproval",
+            enabled: "Enabled",
+            notes: "Notes",
+            parameters: "Parameters",
+            ...MACHINE_FIELDS,
+        },
+    },
     Conversation_DM: {
         model: "Conversation_DM",
         root: "Conversation",

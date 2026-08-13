@@ -998,3 +998,50 @@ books with it, to avoid writing twelve lines of SQL.
 instead and points at the migration file. This is the one place in this session where an artefact
 asserted something about A12's behaviour that turned out to be false rather than merely unspecified,
 so it is worth reading the corrected paragraph rather than trusting the old one from memory.
+
+## D-028 — Resolution details the artefacts left open
+
+*Decided 2026-08-14 00:30 CEST, phase D of operations-as-things.*
+
+architecture.md fixes the two explicit directions of `requiresApproval` and the four drop reasons,
+but a working registry needs answers to several questions it does not ask. Each of these is a
+one-line change if you disagree; all are in `runtime/src/operations/registry.ts`.
+
+- **`requiresApproval` *unset* on the Thing falls back to the seed.** Only an explicit `false`
+  weakens the guarantee, and only that warns. This matters because `Enabled` is tri-state and so is
+  this: a hand-created Operation with the box untouched must not silently switch a money guard off.
+  Same reasoning architecture.md applies to `Enabled`, applied one field over.
+- **`description` unset on the Thing falls back to the seed's.** A blank description is not a
+  sentence worth offering to a model. When the Thing has one it always wins, which is the case the
+  proposal cares about.
+- **`parameters` missing or blank is `unparseable`.** There is no fifth reason in the enumeration
+  and the failure is the same class — a hand-edited document or a bad seed.
+- **`DroppedGrant.key` carries the full declared grant** (`assistant.call:receptionist`, not
+  `assistant.call`), so phase E's belt message can match what the model actually called.
+- **The weakening warning is deduplicated on the registry instance**, of which there is exactly one
+  per process. That is what makes *"once per process"* both true and testable.
+- **Every drop is logged at `warn`**, naming the Assistant, the key and the reason — and for
+  `unparseable`, the parser's own message. The proposal's complaint was that a mistyped grant is
+  *silent*; a returned reason nobody logs would only half fix it.
+- **`OperationImplementation.name` is the key; `seed.name` is the human label.** architecture.md
+  gives both without distinguishing them, and the Model has both `Key` and `Name` ("human label for
+  the overview"). Seventeen labels were invented ("Book a transaction", "Check the post", …).
+  Bootstrap writes them into `Name` in phase F — that is the one place to change the words.
+
+## D-029 — The auth rule has three literals, not four sites
+
+*Found 2026-08-14 00:35 CEST, phase G.*
+
+plan.md asks for `Operation_DM` in *"all three resource shapes — the bare model-name string, the
+`DocumentV2`, and both sides of the `DocumentUpdateResource`"*, which reads as four edits. The rule
+has **three** `{'Assistant_DM'}` literals: the bare string and the `DocumentV2` share one set via a
+ternary, and the two sides of `DocumentUpdateResource` are separate. All three were widened, so the
+intent is fully covered; the count in the plan is what is wrong, not the coverage.
+
+Two adjacent comments in `roles.yaml` were corrected as well, because the change made them false
+rather than merely incomplete: the `runtime` block comment still said *"a self-granted Tool"* (a word
+commit `1120ecb` retired), and the `runtime` role description said it *"never writes an Assistant"*,
+which is now only half of what it is denied.
+
+**Still outstanding**: architecture.md wants the narrow-name caveat documented in the roles table and
+the permissions table as well. Those live outside `import/auth/` and are picked up in phase I.

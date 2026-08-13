@@ -70,17 +70,17 @@ Atomic, and before any new code leans on either vocabulary. A half-rename is wha
 
 ## C — Types and the repository
 
-- [ ] Add `"Operation_DM"` to `ThingModel` in `runtime/src/domain/types.ts` and the `Operation`
+- [x] Add `"Operation_DM"` to `ThingModel` in `runtime/src/domain/types.ts` and the `Operation`
   interface (fields per architecture.md — no `implementation`).
-- [ ] Leave `TRIGGER_ELIGIBLE_MODELS` alone, and add a sentence to its comment saying `Operation_DM`
+- [x] Leave `TRIGGER_ELIGIBLE_MODELS` alone, and add a sentence to its comment saying `Operation_DM`
   is excluded for the same structural reason as `Assistant_DM` — so the next reader does not "fix" it.
-- [ ] Add `SPECS.Operation_DM` in `runtime/src/a12/things.ts`, machine fields spread last.
-- [ ] Test: a round trip through `toDocument` / `fromDocument` preserves every field, including a
+- [x] Add `SPECS.Operation_DM` in `runtime/src/a12/things.ts`, machine fields spread last.
+- [x] Test: a round trip through `toDocument` / `fromDocument` preserves every field, including a
   `Parameters` string containing newlines and braces.
 
 ## D — The Implementation / Operation split
 
-- [ ] Write the failing tests first, in `runtime/test/registry.test.ts` against a hand-built
+- [x] Write the failing tests first, in `runtime/test/registry.test.ts` against a hand-built
   catalogue fixture:
   - a grant naming an Operation that is not in the catalogue → not offered, dropped as `absent`,
     naming the Assistant and the key;
@@ -95,25 +95,25 @@ Atomic, and before any new code leans on either vocabulary. A half-rename is wha
   - `mutating` comes from the Implementation even when the Thing says the opposite;
   - unchanged behaviour: a bare `assistant.call` is not a wildcard, a self-call is refused, duplicate
     grants collapse, `calleesOf` is untouched.
-- [ ] Add `OperationImplementation` and `DroppedGrant` to `runtime/src/operations/registry.ts` and
+- [x] Add `OperationImplementation` and `DroppedGrant` to `runtime/src/operations/registry.ts` and
   change `register` / `registerAll` to take Implementations.
-- [ ] Change `grantedTo(assistant, catalogue)` to return `{ granted, dropped }` and
+- [x] Change `grantedTo(assistant, catalogue)` to return `{ granted, dropped }` and
   `schemasFor(assistant, catalogue)` to resolve against the snapshot. Keep the `GrantedOperation`
   **shape** exactly as it is — it was renamed in B and must not also change field for field, or
   `advance()` stops being a near-no-op in this change.
-- [ ] Convert all seventeen definitions in `runtime/src/operations/implementations.ts` to
+- [x] Convert all seventeen definitions in `runtime/src/operations/implementations.ts` to
   Implementations: `execute`, `reconcile`, `describeCall` and `mutating` stay where they are;
   `description`, `parameters` and `requiresApproval` move into `seed`, along with the new `name`,
   `system` and `kind`. `manualConnector` produces `kind: "manual-connector"` and keeps appending
   *"This is performed by the User by hand"* to the seeded description.
-- [ ] Confirm `WRITABLE_MODELS` still excludes `Operation_DM`, and add a test that
+- [x] Confirm `WRITABLE_MODELS` still excludes `Operation_DM`, and add a test that
   `thingstore.update` on it is refused with a message naming the allowed Models.
-- [ ] **Make `READABLE_MODELS` real.** It is declared at today's `tools.ts:254` and referenced
+- [x] **Make `READABLE_MODELS` real.** It is declared at today's `tools.ts:254` and referenced
   nowhere. Define it as `Object.keys(SPECS)` minus `Operation_DM`, enforce it in `thingstore.get` and
   `thingstore.search` exactly as `WRITABLE_MODELS` is enforced in `create` / `update`, and delete the
   doc comment that claimed a guard that did not exist. Tests: `Operation_DM` is refused with a message
   naming what may be read; every other Model still reads.
-- [ ] `just test-runtime` — green.
+- [x] `just test-runtime` — green.
 
 ## E — The Turn loads a catalogue
 

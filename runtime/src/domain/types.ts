@@ -1,4 +1,4 @@
-/** The eight Models, as the Runtime sees them. */
+/** The nine Models, as the Runtime sees them. */
 
 export type ThingModel =
     | "Party_DM"
@@ -6,6 +6,7 @@ export type ThingModel =
     | "Invoice_DM"
     | "Process_DM"
     | "Assistant_DM"
+    | "Operation_DM"
     | "Conversation_DM"
     | "OpenQuestion_DM"
     | "RuntimeState_DM";
@@ -16,6 +17,10 @@ export type ThingModel =
  * This allow-list is a safety mechanism, not a convenience. An Assistant is a Thing and a
  * Conversation is a Thing (ADR-0003), so without it the Runtime would trigger on its own
  * output and feed itself forever.
+ *
+ * `Operation_DM` is absent for the same structural reason as `Assistant_DM`: it is part of the
+ * system's own definition, so editing the catalogue must not be an event that births a
+ * Conversation. This is not an oversight to be fixed.
  */
 export const TRIGGER_ELIGIBLE_MODELS: readonly ThingModel[] = [
     "Document_DM",
@@ -137,6 +142,28 @@ export interface Assistant extends MachineFields {
     skills?: Skill[];
     triggers?: Trigger[];
     grants?: Grant[];
+}
+
+/**
+ * One Operation in the catalogue — the data half of a capability (ADR-0019).
+ *
+ * There is no `implementation` field: the code half is registered under {@link key} and found by
+ * it. `mutating` is mirrored here for display and is **never** read back — it is a claim about what
+ * `execute` does, and only the code that does it can make it.
+ */
+export interface Operation extends MachineFields {
+    key?: string;
+    name?: string;
+    system?: string;
+    kind?: string;
+    description?: string;
+    /** The JSON Schema, as text. */
+    parameters?: string;
+    mutating?: boolean;
+    requiresApproval?: boolean;
+    /** Tri-state: unset reads as enabled. Only an explicit `false` switches an Operation off. */
+    enabled?: boolean;
+    notes?: string;
 }
 
 export type ConversationStatus = "running" | "waiting" | "done" | "failed";

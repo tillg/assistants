@@ -24,6 +24,7 @@ import type {
     Entry,
     FinishReason,
     OpenQuestion,
+    Operation,
     Stored,
 } from "../domain/types.js";
 import { TransientLlmError, type LlmMessage, type LlmProvider, type LlmUsage } from "../llm/provider.js";
@@ -426,6 +427,16 @@ export class LoopDriver {
         conversation.status = "running";
         conversation.waitingFor = "";
 
+        /**
+         * The catalogue this Turn resolves against.
+         *
+         * **PHASE E SHIM.** It is derived from the registered Implementations' seeds rather than
+         * read from `Operation_DM`. Phase E replaces this one line with a single unconstrained
+         * `things.search(SPECS.Operation_DM)` and the refusal for an empty catalogue; the three
+         * call sites below already take the snapshot, so nothing else here moves.
+         */
+        const catalogue = this.deps.registry.seedCatalogue();
+
         // --- reconcile an interrupted Turn before starting a new one ----------------------
         //
         // This is the half of the intent log that makes writing it worthwhile. Without it,
@@ -434,7 +445,7 @@ export class LoopDriver {
         // sequence has moved on) — which is exactly how you book the same invoice twice.
         const unresolved = unresolvedIntent(conversation);
         if (unresolved) {
-            const outcome = await this.reconcile(stored, assistant, unresolved);
+            const outcome = await this.reconcile(stored, assistant, unresolved, catalogue);
             if (!outcome) {
                 // The intent gets a result even though nothing could answer it, for two reasons.
                 // `unresolvedIntent` would otherwise find it again on the next wake and escalate
@@ -491,7 +502,7 @@ export class LoopDriver {
 
         let response;
         try {
-            response = await this.callLlmWithRetries(assistant.data, conversation);
+            response = await this.callLlmWithRetries(assistant.data, conversation, catalogue);
         } catch (error) {
             await this.escalate(
                 stored,
@@ -534,7 +545,7 @@ export class LoopDriver {
         }
 
         // --- tool calls -------------------------------------------------------------------
-        const granted = this.deps.registry.grantedTo(assistant.data);
+        const { granted } = this.deps.registry.grantedTo(assistant.data, catalogue);
         /**
          * A Turn that ends `wants-tools` appends no `assistant` Entry at all — only one
          * `tool-intent` per call — so "the Turn's assistant Entry" names a row that does not exist
@@ -812,13 +823,14 @@ export class LoopDriver {
         stored: Stored<Conversation>,
         assistant: Stored<Assistant>,
         intent: Entry,
+        catalogue: Operation[],
     ): Promise<OperationOutcome | undefined> {
         const conversation = stored.data;
         const operation = intent.toolName ?? "";
         const key = intent.idempotencyKey ?? "";
         const tool = this.deps.registry
-            .grantedTo(assistant.data)
-            .find((candidate) => candidate.name === operation);
+            .grantedTo(assistant.data, catalogue)
+            .granted.find((candidate) => candidate.name === operation);
 
         log.warn("reconciling an interrupted tool call", {
             conversationId: stored.thingId,
@@ -888,9 +900,13 @@ export class LoopDriver {
      * Transient failures are retried inside the Turn with bounded backoff; each attempt is
      * recorded so the transcript explains itself later.
      */
-    private async callLlmWithRetries(assistant: Assistant, conversation: Conversation) {
+    private async callLlmWithRetries(
+        assistant: Assistant,
+        conversation: Conversation,
+        catalogue: Operation[],
+    ) {
         const messages = buildMessages(assistant, conversation);
-        const tools = this.deps.registry.schemasFor(assistant);
+        const tools = this.deps.registry.schemasFor(assistant, catalogue);
         const model = assistant.llmModel || "gpt-4o-mini";
 
         let lastError: unknown;

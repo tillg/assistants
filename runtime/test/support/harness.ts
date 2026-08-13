@@ -9,13 +9,19 @@ import { buildOperations } from "../../src/operations/implementations.js";
 import { Watcher, RUNTIME_STATE_KEY } from "../../src/watcher/watcher.js";
 import { ScriptedProvider, type ScriptedStep } from "../../src/llm/scripted.js";
 import type { FireflyConnector } from "../../src/connectors/firefly.js";
-import type { Assistant, Conversation, OpenQuestion, Stored } from "../../src/domain/types.js";
+import type { Assistant, Conversation, OpenQuestion, Operation, Stored } from "../../src/domain/types.js";
 import { ASSISTANT_SEEDS } from "../../src/bootstrap/assistants.js";
 
 export interface Harness {
     store: MemoryStore;
     things: ThingRepository;
     registry: OperationRegistry;
+    /**
+     * The catalogue the resolution tests resolve against: one Operation per registered
+     * Implementation, from its seed, all enabled — which is what bootstrap creates on a fresh
+     * stack. A test that cares about a switched-off or hand-edited Operation builds its own.
+     */
+    catalogue: Operation[];
     driver: LoopDriver;
     watcher: Watcher;
     firefly: FakeFirefly;
@@ -231,6 +237,7 @@ export function buildHarness(
         store,
         things,
         registry,
+        catalogue: registry.seedCatalogue(),
         driver,
         watcher,
         firefly,

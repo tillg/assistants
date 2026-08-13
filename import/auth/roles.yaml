@@ -16,9 +16,13 @@ roles:
   - name: admin
     description: admin role
     accessRights:
-      # Not an A12 built-in right: ours, named here and enforced by the "Assistant Write
-      # Permission" in childAuthorizationDefinition.json. Held by every human role and by no
-      # machine one, which is the whole of an Assistant's write protection (D-007a).
+      # Not an A12 built-in right: ours, named here and enforced by the "System Definition Write
+      # Permission" in childAuthorizationDefinition.json. It covers Assistant_DM *and*
+      # Operation_DM -- the system's own definition -- so read it as "may write the system's own
+      # definition". The name is narrower than the job: minting a second OPERATION_WRITE right was
+      # refused deliberately, because a "may edit Assistants but not Operations" role is one this
+      # single-household system has no use for (ADR-0019). Held by every human role and by no
+      # machine one, which is the whole of the write protection for both Models (D-007a).
       - ASSISTANT_WRITE
       - DOCUMENT_CREATE
       - DOCUMENT_UPDATE
@@ -45,10 +49,11 @@ roles:
       - ATTACHMENT_UPLOAD
       - QUERY
   # The absent rights are the point. No DOCUMENT_DELETE (D-007) and no ASSISTANT_WRITE (D-007a),
-  # so a hallucinated delete and a self-granted Tool are both a -32059 from the store rather than
-  # something enforced inside the same LLM-driven process that would be doing the escalating.
+  # so a hallucinated delete, a self-granted Operation, and an Operation edited to drop its
+  # approval step are all a -32059 from the store rather than something enforced inside the same
+  # LLM-driven process that would be doing the escalating.
   - name: runtime
-    description: runtime role - the Assistant Runtime writes Things, but never deletes one and never writes an Assistant
+    description: runtime role - the Assistant Runtime writes Things, but never deletes one and never writes the system's own definition (an Assistant or an Operation)
     accessRights:
       - DOCUMENT_CREATE
       - DOCUMENT_UPDATE

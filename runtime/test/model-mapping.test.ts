@@ -11,7 +11,8 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { SPECS, type ModelSpec } from "../src/a12/things.js";
+import { SPECS, fromDocument, toDocument, type ModelSpec } from "../src/a12/things.js";
+import type { Operation } from "../src/domain/types.js";
 
 const MODELS_DIR = fileURLToPath(new URL("../../import/models/", import.meta.url));
 
@@ -95,4 +96,33 @@ describe("the Runtime's model map matches the models on disk", () => {
             });
         });
     }
+});
+
+/**
+ * An Operation carries two fields no other Model does: a JSON Schema and a markdown description,
+ * both of which contain the characters a naive mapping would mangle. The round trip is what says
+ * the catalogue can be written and read back as it was written.
+ */
+describe("an Operation survives the round trip", () => {
+    it("preserves every field, including Parameters with newlines and braces", () => {
+        const operation: Required<Operation> = {
+            key: "bookkeeping.postTransaction",
+            name: "Book a transaction",
+            system: "Bookkeeping",
+            kind: "connector",
+            description: "Book a balanced transaction.\n\nAccount names **must** already exist.",
+            mutating: true,
+            requiresApproval: true,
+            enabled: false,
+            notes: "Switched off while the books are being reconciled.",
+            parameters: '{\n  "type": "object",\n  "properties": { "splits": { "type": "array" } }\n}',
+            idempotencyKey: "operation:bookkeeping.postTransaction",
+            createdByConversationId: "",
+            createdAt: "2026-08-13T10:00:00",
+            updatedAt: "2026-08-13T10:00:00",
+        };
+
+        const document = toDocument(SPECS.Operation_DM, operation);
+        expect(fromDocument(SPECS.Operation_DM, document)).toEqual(operation);
+    });
 });

@@ -422,3 +422,61 @@ describe("thingstore.search", () => {
         expect(outcome.kind === "value" && (outcome.value as unknown[]).length).toBeGreaterThan(0);
     });
 });
+
+/**
+ * The two allow-lists, which are the whole of what an Assistant may reach through the ThingStore.
+ *
+ * `READABLE_MODELS` was declared and referenced nowhere until this change, so "an Assistant may
+ * read its own machinery but never write it" was a comment rather than a guard. It is a guard now,
+ * and the catalogue is the one Model it withholds: it is the safety configuration constraining the
+ * reader, and ADR-0010's design is that an Assistant learns what it may do from the schemas it is
+ * offered rather than by reading about them.
+ */
+describe("the Models an Assistant may read and write", () => {
+    const readable = Object.keys(SPECS).filter((model) => model !== "Operation_DM");
+
+    it("refuses to read one Operation, and says what it may read instead", async () => {
+        const harness = buildHarness([]);
+        const outcome = await call(harness, "thingstore.get", {
+            model: "Operation_DM",
+            thingId: "whatever",
+        });
+
+        expect(outcome.kind).toBe("error");
+        const message = outcome.kind === "error" ? outcome.message : "";
+        expect(message).toContain("may not read Operation_DM");
+        for (const model of readable) expect(message).toContain(model);
+    });
+
+    it("refuses to search the catalogue too, not merely to get one row of it", async () => {
+        const harness = buildHarness([]);
+        const outcome = await call(harness, "thingstore.search", { model: "Operation_DM" });
+
+        expect(outcome.kind).toBe("error");
+        const message = outcome.kind === "error" ? outcome.message : "";
+        expect(message).toContain("may not read Operation_DM");
+        expect(message).toContain("Invoice_DM");
+    });
+
+    it("still reads every other Model", async () => {
+        const harness = buildHarness([]);
+        for (const model of readable) {
+            const outcome = await call(harness, "thingstore.search", { model, limit: 1 });
+            expect([model, outcome.kind]).toEqual([model, "value"]);
+        }
+    });
+
+    it("refuses to update an Operation, naming the Models it may write", async () => {
+        const harness = buildHarness([]);
+        const outcome = await call(harness, "thingstore.update", {
+            model: "Operation_DM",
+            thingId: "whatever",
+            fields: { enabled: true },
+        });
+
+        expect(outcome.kind).toBe("error");
+        const message = outcome.kind === "error" ? outcome.message : "";
+        expect(message).toContain("may not update Operation_DM");
+        expect(message).toContain("Party_DM, Document_DM, Invoice_DM, Process_DM");
+    });
+});

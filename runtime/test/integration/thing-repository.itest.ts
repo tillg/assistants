@@ -95,6 +95,19 @@ const PAYLOADS: Record<ThingModel, Record<string, unknown>> = {
         // difference between this and a wrong name; the store can.
         grants: [{ operationKey: "thingstore.get" }, { operationKey: "bookkeeping.getBalance" }],
     },
+    Operation_DM: {
+        key: "itest.operation",
+        name: "itest Operation",
+        system: "Runtime",
+        kind: "internal",
+        description: "Created by the integration tier.\n\nGranted to **nobody**.",
+        mutating: false,
+        requiresApproval: false,
+        // Never enabled, and granted to no Assistant, so it cannot reach a resolution.
+        enabled: false,
+        notes: "line one\nline two",
+        parameters: '{\n  "type": "object",\n  "properties": { "why": { "type": "string" } }\n}',
+    },
     Conversation_DM: {
         assistantKey: "itest-assistant",
         title: "itest Conversation",
@@ -162,7 +175,7 @@ const KEEP: ThingModel[] = ["Conversation_DM", "OpenQuestion_DM"];
  * about authorization, so it uses the identity that is allowed to do it — and the refusal the
  * Runtime gets is asserted separately, below, rather than being silently designed around.
  */
-const USER_OWNED: ThingModel[] = ["Assistant_DM"];
+const USER_OWNED: ThingModel[] = ["Assistant_DM", "Operation_DM"];
 
 describe.skipIf(!THING_STORE_UP)("ThingRepository against the live ThingStore", () => {
     let client: A12Client;

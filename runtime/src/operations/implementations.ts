@@ -13,7 +13,7 @@ import { ThingRepository, SPECS, byCreatedAt, nowIso, path as fieldPath, eq } fr
 import type { ModelSpec } from "../a12/things.js";
 import { FireflyError } from "../connectors/firefly.js";
 import type { FireflyConnector, PostingSplit } from "../connectors/firefly.js";
-import type { OperationContext, GrantedOperation, OperationOutcome } from "./registry.js";
+import type { OperationContext, OperationImplementation, OperationOutcome } from "./registry.js";
 import { isAnswered } from "../watcher/watcher.js";
 import {
     isTriggerEligible,
@@ -248,34 +248,44 @@ function specFor(model: string): ModelSpec {
 }
 
 /**
- * Models an Assistant may **read**. Everything the Runtime knows about — including its own
- * machinery, which an Assistant may inspect but never write.
+ * Models an Assistant may **read**.
+ *
+ * Everything the Runtime knows about except the catalogue: `Operation_DM` is the one Model whose
+ * entire content is the safety configuration constraining the reader, and an Assistant learns what
+ * it may do from the schemas it is offered, which is ADR-0010's design.
  */
-const READABLE_MODELS: readonly string[] = Object.keys(SPECS);
+const READABLE_MODELS: readonly string[] = Object.keys(SPECS).filter(
+    (model) => model !== "Operation_DM",
+);
 
 /** Models an Assistant may create or edit. Never its own machinery. */
 const WRITABLE_MODELS: readonly string[] = ["Party_DM", "Document_DM", "Invoice_DM", "Process_DM"];
 
-export function buildOperations(deps: OperationDeps): GrantedOperation[] {
+export function buildOperations(deps: OperationDeps): OperationImplementation[] {
     const { things, firefly } = deps;
 
-    const thingstoreCreate: GrantedOperation = {
+    const thingstoreCreate: OperationImplementation = {
         name: "thingstore.create",
-        description:
-            "Create a new Thing in the ThingStore. Returns its ThingID. Safe to retry: a repeated " +
-            "call within the same turn returns the Thing already created rather than a duplicate.",
         mutating: true,
-        parameters: {
-            type: "object",
-            properties: {
-                model: str(`Which Model to create. One of: ${WRITABLE_MODELS.join(", ")}.`),
-                fields: {
-                    type: "object",
-                    description: "The Thing's fields, as camelCase property names.",
-                    additionalProperties: true,
+        seed: {
+            name: "Create a Thing",
+            system: "ThingStore",
+            kind: "internal",
+            description:
+                "Create a new Thing in the ThingStore. Returns its ThingID. Safe to retry: a repeated " +
+                "call within the same turn returns the Thing already created rather than a duplicate.",
+            parameters: {
+                type: "object",
+                properties: {
+                    model: str(`Which Model to create. One of: ${WRITABLE_MODELS.join(", ")}.`),
+                    fields: {
+                        type: "object",
+                        description: "The Thing's fields, as camelCase property names.",
+                        additionalProperties: true,
+                    },
                 },
+                required: ["model", "fields"],
             },
-            required: ["model", "fields"],
         },
         async execute(args, context): Promise<OperationOutcome> {
             const model = String(args["model"] ?? "");
@@ -307,39 +317,59 @@ export function buildOperations(deps: OperationDeps): GrantedOperation[] {
         },
     };
 
-    const thingstoreGet: GrantedOperation = {
+    const thingstoreGet: OperationImplementation = {
         name: "thingstore.get",
-        description: "Read one Thing by its Model and ThingID.",
         mutating: false,
-        parameters: {
-            type: "object",
-            properties: { model: str("The Model, e.g. Invoice_DM."), thingId: str("The ThingID.") },
-            required: ["model", "thingId"],
+        seed: {
+            name: "Read a Thing",
+            system: "ThingStore",
+            kind: "internal",
+            description: "Read one Thing by its Model and ThingID.",
+            parameters: {
+                type: "object",
+                properties: { model: str("The Model, e.g. Invoice_DM."), thingId: str("The ThingID.") },
+                required: ["model", "thingId"],
+            },
         },
         async execute(args): Promise<OperationOutcome> {
             const model = String(args["model"] ?? "");
+            if (!READABLE_MODELS.includes(model)) {
+                return {
+                    kind: "error",
+                    message: `Assistants may not read ${model}. Readable: ${READABLE_MODELS.join(", ")}.`,
+                };
+            }
             const thingId = String(args["thingId"] ?? "");
             const found = await things.get(specFor(model), `${model}/${thingId}`);
             return { kind: "value", value: { thingId: found.thingId, model, fields: found.data } };
         },
     };
 
-    const thingstoreUpdate: GrantedOperation = {
+    const thingstoreUpdate: OperationImplementation = {
         name: "thingstore.update",
-        description:
-            "Update fields on an existing Thing. Supply only the fields you are changing; the " +
-            "others are preserved. Rows of a repeating list (a Process's steps, its related " +
-            "Things) are merged, not replaced: supply just the row you are adding or correcting. " +
-            "Nothing is ever removed from a list.",
         mutating: true,
-        parameters: {
-            type: "object",
-            properties: {
-                model: str("The Model."),
-                thingId: str("The ThingID."),
-                fields: { type: "object", description: "Fields to change.", additionalProperties: true },
+        seed: {
+            name: "Update a Thing",
+            system: "ThingStore",
+            kind: "internal",
+            description:
+                "Update fields on an existing Thing. Supply only the fields you are changing; the " +
+                "others are preserved. Rows of a repeating list (a Process's steps, its related " +
+                "Things) are merged, not replaced: supply just the row you are adding or correcting. " +
+                "Nothing is ever removed from a list.",
+            parameters: {
+                type: "object",
+                properties: {
+                    model: str("The Model."),
+                    thingId: str("The ThingID."),
+                    fields: {
+                        type: "object",
+                        description: "Fields to change.",
+                        additionalProperties: true,
+                    },
+                },
+                required: ["model", "thingId", "fields"],
             },
-            required: ["model", "thingId", "fields"],
         },
         async execute(args, context): Promise<OperationOutcome> {
             const model = String(args["model"] ?? "");
@@ -380,24 +410,35 @@ export function buildOperations(deps: OperationDeps): GrantedOperation[] {
         },
     };
 
-    const thingstoreSearch: GrantedOperation = {
+    const thingstoreSearch: OperationImplementation = {
         name: "thingstore.search",
-        description:
-            "Find Things of one Model. Without a field filter it returns the most recent ones. " +
-            "Filtering matches a field exactly.",
         mutating: false,
-        parameters: {
-            type: "object",
-            properties: {
-                model: str("The Model to search."),
-                field: str("Optional: the camelCase property to filter on."),
-                value: str("Optional: the exact value that field must have."),
-                limit: num("Maximum results (default 25)."),
+        seed: {
+            name: "Find Things",
+            system: "ThingStore",
+            kind: "internal",
+            description:
+                "Find Things of one Model. Without a field filter it returns the most recent ones. " +
+                "Filtering matches a field exactly.",
+            parameters: {
+                type: "object",
+                properties: {
+                    model: str("The Model to search."),
+                    field: str("Optional: the camelCase property to filter on."),
+                    value: str("Optional: the exact value that field must have."),
+                    limit: num("Maximum results (default 25)."),
+                },
+                required: ["model"],
             },
-            required: ["model"],
         },
         async execute(args): Promise<OperationOutcome> {
             const model = String(args["model"] ?? "");
+            if (!READABLE_MODELS.includes(model)) {
+                return {
+                    kind: "error",
+                    message: `Assistants may not read ${model}. Readable: ${READABLE_MODELS.join(", ")}.`,
+                };
+            }
             const spec = specFor(model);
             const field = args["field"] ? String(args["field"]) : undefined;
             const limit = Number(args["limit"] ?? 25) || 25;
@@ -467,34 +508,40 @@ export function buildOperations(deps: OperationDeps): GrantedOperation[] {
         },
     };
 
-    const askUser: GrantedOperation = {
+    const askUser: OperationImplementation = {
         name: "ui.askUser",
-        description:
-            "Ask the User a question and stop until they answer. Use this for any decision that is " +
-            "the User's to make — approving a booking, resolving an ambiguity, confirming a total. " +
-            "The conversation suspends; you will be resumed with the answer.",
         mutating: true,
-        parameters: {
-            type: "object",
-            properties: {
-                kind: {
-                    type: "string",
-                    enum: ["free-text", "confirm", "choice"],
-                    description: "free-text for open answers, confirm for yes/no, choice for a list.",
-                },
-                prompt: str("The question, in markdown. Give the User the context they need."),
-                options: {
-                    type: "array",
-                    description: "For kind=choice: the options to offer.",
-                    items: {
-                        type: "object",
-                        properties: { value: { type: "string" }, label: { type: "string" } },
-                        required: ["value", "label"],
+        seed: {
+            name: "Ask the User",
+            system: "UserInterface",
+            kind: "internal",
+            description:
+                "Ask the User a question and stop until they answer. Use this for any decision that is " +
+                "the User's to make — approving a booking, resolving an ambiguity, confirming a total. " +
+                "The conversation suspends; you will be resumed with the answer.",
+            parameters: {
+                type: "object",
+                properties: {
+                    kind: {
+                        type: "string",
+                        enum: ["free-text", "confirm", "choice"],
+                        description:
+                            "free-text for open answers, confirm for yes/no, choice for a list.",
                     },
+                    prompt: str("The question, in markdown. Give the User the context they need."),
+                    options: {
+                        type: "array",
+                        description: "For kind=choice: the options to offer.",
+                        items: {
+                            type: "object",
+                            properties: { value: { type: "string" }, label: { type: "string" } },
+                            required: ["value", "label"],
+                        },
+                    },
+                    subjectThingId: str("Optional: the Thing this question is about."),
                 },
-                subjectThingId: str("Optional: the Thing this question is about."),
+                required: ["kind", "prompt"],
             },
-            required: ["kind", "prompt"],
         },
         async execute(args, context): Promise<OperationOutcome> {
             const kind = String(args["kind"] ?? "free-text") as "free-text" | "confirm" | "choice";
@@ -524,27 +571,32 @@ export function buildOperations(deps: OperationDeps): GrantedOperation[] {
         },
     };
 
-    const assistantCall: GrantedOperation = {
+    const assistantCall: OperationImplementation = {
         name: "assistant.call",
-        description:
-            "Ask another Assistant to do something. The call is asynchronous: a new conversation is " +
-            "started for them, and you are resumed when they finish.",
         mutating: true,
-        parameters: {
-            type: "object",
-            properties: {
-                prompt: str("What you are asking them to do, in markdown."),
-                subjectThingId: str("Optional: the Thing the work is about."),
-                subjectModel: str("Optional: that Thing's Model."),
-                awaitMode: {
-                    type: "string",
-                    enum: ["wait", "chase", "detach"],
-                    description:
-                        "wait: resume when they finish. chase: also wake after 5 minutes to check. " +
-                        "detach: do not wait for them at all.",
+        seed: {
+            name: "Call another Assistant",
+            system: "Runtime",
+            kind: "internal",
+            description:
+                "Ask another Assistant to do something. The call is asynchronous: a new conversation is " +
+                "started for them, and you are resumed when they finish.",
+            parameters: {
+                type: "object",
+                properties: {
+                    prompt: str("What you are asking them to do, in markdown."),
+                    subjectThingId: str("Optional: the Thing the work is about."),
+                    subjectModel: str("Optional: that Thing's Model."),
+                    awaitMode: {
+                        type: "string",
+                        enum: ["wait", "chase", "detach"],
+                        description:
+                            "wait: resume when they finish. chase: also wake after 5 minutes to check. " +
+                            "detach: do not wait for them at all.",
+                    },
                 },
+                required: ["prompt"],
             },
-            required: ["prompt"],
         },
         async execute(args, context): Promise<OperationOutcome> {
             const assistantKey = String(args["assistantKey"] ?? "");
@@ -636,13 +688,18 @@ export function buildOperations(deps: OperationDeps): GrantedOperation[] {
         },
     };
 
-    const listAccounts: GrantedOperation = {
+    const listAccounts: OperationImplementation = {
         name: "bookkeeping.listAccounts",
-        description:
-            "List the chart of accounts. Always look here before booking — account names must match " +
-            "exactly, and you may not invent one.",
         mutating: false,
-        parameters: { type: "object", properties: {} },
+        seed: {
+            name: "List accounts",
+            system: "Bookkeeping",
+            kind: "connector",
+            description:
+                "List the chart of accounts. Always look here before booking — account names must match " +
+                "exactly, and you may not invent one.",
+            parameters: { type: "object", properties: {} },
+        },
         async execute(): Promise<OperationOutcome> {
             const accounts = await firefly.listAccounts(true);
             return {
@@ -656,64 +713,71 @@ export function buildOperations(deps: OperationDeps): GrantedOperation[] {
         },
     };
 
-    const postTransaction: GrantedOperation = {
+    const postTransaction: OperationImplementation = {
         name: "bookkeeping.postTransaction",
-        description:
-            "Book a balanced transaction into the books. Account names must already exist — call " +
-            "bookkeeping.listAccounts first. Safe to retry: booking the same thing twice is a no-op. " +
-            "The User must approve the exact posting before it happens: the first call is refused " +
-            "and asks them, and you are resumed to make the same call again once they have said yes.",
         mutating: true,
-        // The one Operation in the system that moves a number in someone's books, and therefore the
-        // one the README's "nothing is booked without an answer" is about. Until this flag existed
-        // that sentence was kept by the Accountant's system prompt and by nothing else.
-        //
-        // `bookkeeping.createAccount` deliberately does NOT carry it: it is granted to no Assistant
-        // (see ACCOUNTANT's grants), so the flag would only add a path nothing exercises.
-        requiresApproval: true,
         describeCall: describePosting,
-        parameters: {
-            type: "object",
-            properties: {
-                groupTitle: str("A short title for the whole transaction."),
-                thingId: str(
-                    "The ThingID of the Invoice this books. Always supply it: it links the journal " +
-                        "back to the Invoice, and it is the only way a repeat of this posting can be " +
-                        "recognised — the idempotency key differs between Turns, so it cannot.",
-                ),
-                splits: {
-                    type: "array",
-                    description: "The postings. Usually one.",
-                    items: {
-                        type: "object",
-                        properties: {
-                            type: { type: "string", enum: ["withdrawal", "deposit", "transfer"] },
-                            date: str("yyyy-mm-dd"),
-                            amount: str("A positive decimal, e.g. \"184.30\"."),
-                            description: str("What this posting is."),
-                            sourceAccount: str("Exact name of the account money leaves."),
-                            destinationAccount: str("Exact name of the account money arrives at."),
-                            currencyCode: str(
-                                "The amount's currency, if it is not the account's own. A posting in " +
-                                    "another currency is refused rather than booked at the same " +
-                                    "number — convert it first, or ask the User.",
-                            ),
-                            budgetName: str("Optional budget to charge."),
-                            categoryName: str("Optional category."),
-                            notes: str("Optional notes."),
+        seed: {
+            name: "Book a transaction",
+            system: "Bookkeeping",
+            kind: "connector",
+            description:
+                "Book a balanced transaction into the books. Account names must already exist — call " +
+                "bookkeeping.listAccounts first. Safe to retry: booking the same thing twice is a no-op. " +
+                "The User must approve the exact posting before it happens: the first call is refused " +
+                "and asks them, and you are resumed to make the same call again once they have said yes.",
+            // The one Operation in the system that moves a number in someone's books, and therefore
+            // the one the README's "nothing is booked without an answer" is about. It is a **seed**:
+            // the Operation Thing carries the authoritative value, and the User owns it in both
+            // directions (ADR-0018, as amended).
+            //
+            // `bookkeeping.createAccount` deliberately does NOT carry it: it is granted to no
+            // Assistant (see ACCOUNTANT's grants), so the flag would only add a path nothing
+            // exercises.
+            requiresApproval: true,
+            parameters: {
+                type: "object",
+                properties: {
+                    groupTitle: str("A short title for the whole transaction."),
+                    thingId: str(
+                        "The ThingID of the Invoice this books. Always supply it: it links the journal " +
+                            "back to the Invoice, and it is the only way a repeat of this posting can be " +
+                            "recognised — the idempotency key differs between Turns, so it cannot.",
+                    ),
+                    splits: {
+                        type: "array",
+                        description: "The postings. Usually one.",
+                        items: {
+                            type: "object",
+                            properties: {
+                                type: { type: "string", enum: ["withdrawal", "deposit", "transfer"] },
+                                date: str("yyyy-mm-dd"),
+                                amount: str("A positive decimal, e.g. \"184.30\"."),
+                                description: str("What this posting is."),
+                                sourceAccount: str("Exact name of the account money leaves."),
+                                destinationAccount: str("Exact name of the account money arrives at."),
+                                currencyCode: str(
+                                    "The amount's currency, if it is not the account's own. A posting in " +
+                                        "another currency is refused rather than booked at the same " +
+                                        "number — convert it first, or ask the User.",
+                                ),
+                                budgetName: str("Optional budget to charge."),
+                                categoryName: str("Optional category."),
+                                notes: str("Optional notes."),
+                            },
+                            required: [
+                                "type",
+                                "date",
+                                "amount",
+                                "description",
+                                "sourceAccount",
+                                "destinationAccount",
+                            ],
                         },
-                        required: [
-                            "type",
-                            "date",
-                            "amount",
-                            "description",
-                            "sourceAccount",
-                            "destinationAccount",
-                        ],
                     },
                 },
+                required: ["splits"],
             },
-            required: ["splits"],
         },
         async execute(args, context): Promise<OperationOutcome> {
             const splits = (args["splits"] ?? []) as PostingSplit[];
@@ -762,21 +826,26 @@ export function buildOperations(deps: OperationDeps): GrantedOperation[] {
         },
     };
 
-    const listTransactions: GrantedOperation = {
+    const listTransactions: OperationImplementation = {
         name: "bookkeeping.listTransactions",
-        description:
-            "The register: transactions in a date range, optionally for one account. Use this to " +
-            "check what has already been booked before booking something again.",
         mutating: false,
-        parameters: {
-            type: "object",
-            properties: {
-                start: str("First day to include, yyyy-mm-dd."),
-                end: str("Last day to include, yyyy-mm-dd. Must be after start."),
-                account: str("Optional: restrict to one account, by its exact name."),
-                limit: num("Maximum transactions (default 25)."),
+        seed: {
+            name: "List transactions",
+            system: "Bookkeeping",
+            kind: "connector",
+            description:
+                "The register: transactions in a date range, optionally for one account. Use this to " +
+                "check what has already been booked before booking something again.",
+            parameters: {
+                type: "object",
+                properties: {
+                    start: str("First day to include, yyyy-mm-dd."),
+                    end: str("Last day to include, yyyy-mm-dd. Must be after start."),
+                    account: str("Optional: restrict to one account, by its exact name."),
+                    limit: num("Maximum transactions (default 25)."),
+                },
+                required: ["start", "end"],
             },
-            required: ["start", "end"],
         },
         async execute(args): Promise<OperationOutcome> {
             const groups = await firefly.listTransactions({
@@ -791,44 +860,61 @@ export function buildOperations(deps: OperationDeps): GrantedOperation[] {
         },
     };
 
-    const getBalance: GrantedOperation = {
+    const getBalance: OperationImplementation = {
         name: "bookkeeping.getBalance",
-        description: "The current balance of one account.",
         mutating: false,
-        parameters: {
-            type: "object",
-            properties: { account: str("Exact account name.") },
-            required: ["account"],
+        seed: {
+            name: "Account balance",
+            system: "Bookkeeping",
+            kind: "connector",
+            description: "The current balance of one account.",
+            parameters: {
+                type: "object",
+                properties: { account: str("Exact account name.") },
+                required: ["account"],
+            },
         },
         async execute(args): Promise<OperationOutcome> {
             return { kind: "value", value: await firefly.getBalance(String(args["account"] ?? "")) };
         },
     };
 
-    const listOpenItems: GrantedOperation = {
+    const listOpenItems: OperationImplementation = {
         name: "bookkeeping.listOpenItems",
-        description:
-            "Unpaid invoices and unclaimed reimbursements — the non-zero balances on payable and " +
-            "receivable accounts.",
         mutating: false,
-        parameters: { type: "object", properties: {} },
+        seed: {
+            name: "List open items",
+            system: "Bookkeeping",
+            kind: "connector",
+            description:
+                "Unpaid invoices and unclaimed reimbursements — the non-zero balances on payable and " +
+                "receivable accounts.",
+            parameters: { type: "object", properties: {} },
+        },
         async execute(): Promise<OperationOutcome> {
             return { kind: "value", value: await firefly.listOpenItems() };
         },
     };
 
-    const getBudgetReport: GrantedOperation = {
+    const getBudgetReport: OperationImplementation = {
         name: "bookkeeping.getBudgetReport",
-        description:
-            "Each budget's target and what has been spent against it, for a period. Defaults to the " +
-            "current calendar month. A budget with no target set for the period reports no limit, " +
-            "which is not the same as a target of zero.",
         mutating: false,
-        parameters: {
-            type: "object",
-            properties: {
-                start: str("First day of the period, yyyy-mm-dd. Defaults to the 1st of this month."),
-                end: str("Last day of the period, yyyy-mm-dd. Defaults to the end of this month."),
+        seed: {
+            name: "Budget report",
+            system: "Bookkeeping",
+            kind: "connector",
+            description:
+                "Each budget's target and what has been spent against it, for a period. Defaults to the " +
+                "current calendar month. A budget with no target set for the period reports no limit, " +
+                "which is not the same as a target of zero.",
+            parameters: {
+                type: "object",
+                properties: {
+                    start: str(
+                        "First day of the period, yyyy-mm-dd. Defaults to the 1st of this month.",
+                    ),
+                    end: str("Last day of the period, yyyy-mm-dd. Defaults to the end of this month."),
+                },
             },
         },
         async execute(args): Promise<OperationOutcome> {
@@ -842,18 +928,23 @@ export function buildOperations(deps: OperationDeps): GrantedOperation[] {
         },
     };
 
-    const createAccount: GrantedOperation = {
+    const createAccount: OperationImplementation = {
         name: "bookkeeping.createAccount",
-        description: "Add an account to the chart of accounts.",
         mutating: true,
-        parameters: {
-            type: "object",
-            properties: {
-                name: str("The account name."),
-                type: str("asset | expense | revenue | liability."),
-                currencyCode: str("Default EUR."),
+        seed: {
+            name: "Create an account",
+            system: "Bookkeeping",
+            kind: "connector",
+            description: "Add an account to the chart of accounts.",
+            parameters: {
+                type: "object",
+                properties: {
+                    name: str("The account name."),
+                    type: str("asset | expense | revenue | liability."),
+                    currencyCode: str("Default EUR."),
+                },
+                required: ["name", "type"],
             },
-            required: ["name", "type"],
         },
         async execute(args): Promise<OperationOutcome> {
             // Search-then-create, so a repeated Turn cannot produce two accounts with one name —
@@ -893,16 +984,29 @@ export function buildOperations(deps: OperationDeps): GrantedOperation[] {
      */
     function manualConnector(input: {
         name: string;
+        label: string;
+        system: string;
         description: string;
         properties: Record<string, unknown>;
         required: string[];
         renderPrompt(args: Record<string, unknown>): string;
-    }): GrantedOperation {
+    }): OperationImplementation {
         return {
             name: input.name,
-            description: `${input.description} This is performed by the User by hand, so it may take a while.`,
             mutating: true,
-            parameters: { type: "object", properties: input.properties, required: input.required },
+            seed: {
+                name: input.label,
+                system: input.system,
+                kind: "manual-connector",
+                // The sentence is appended here rather than written into each description, because
+                // it is a property of *being* a Manual Connector rather than of any one of them.
+                description: `${input.description} This is performed by the User by hand, so it may take a while.`,
+                parameters: {
+                    type: "object",
+                    properties: input.properties,
+                    required: input.required,
+                },
+            },
             async execute(args, context): Promise<OperationOutcome> {
                 const questionId = await deps.raiseQuestion({
                     context,
@@ -928,6 +1032,8 @@ export function buildOperations(deps: OperationDeps): GrantedOperation[] {
 
     const requestText = manualConnector({
         name: "document.requestText",
+        label: "Request a transcription",
+        system: "UserInterface",
         description: "Ask for the text of a document that has not been transcribed yet.",
         properties: {
             thingId: str("The Document's ThingID."),
@@ -947,6 +1053,8 @@ export function buildOperations(deps: OperationDeps): GrantedOperation[] {
 
     const emailSend = manualConnector({
         name: "email.send",
+        label: "Send an email",
+        system: "Email",
         description: "Send an email.",
         properties: {
             to: str("Recipient."),
@@ -973,6 +1081,8 @@ export function buildOperations(deps: OperationDeps): GrantedOperation[] {
 
     const emailFetch = manualConnector({
         name: "email.fetch",
+        label: "Check the post",
+        system: "Email",
         description: "Ask for new mail matching a description.",
         properties: { matching: str("What to look for.") },
         required: ["matching"],
@@ -988,6 +1098,8 @@ export function buildOperations(deps: OperationDeps): GrantedOperation[] {
 
     const bankSendMoney = manualConnector({
         name: "bank.sendMoney",
+        label: "Send money",
+        system: "Bank",
         description: "Transfer money.",
         properties: {
             iban: str("Recipient IBAN."),

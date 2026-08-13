@@ -17,10 +17,10 @@
       ]
     },
     {
-      "name": "User Has ASSISTANT_WRITE Right For An Assistant",
-      "description": "An Assistant is written by the User only -- the Runtime reads it (D-007a). The Data Service checks the three document write scopes with three different resource shapes, so all three are recognised here: the model name alone (checkDocumentCreatePermissionByModel, the cheap pre-check in DefaultDocumentService), the DocumentV2 being created, and the DocumentUpdateResource carrying the old and new document. Any other shape falls through to 'not an Assistant', so an unforeseen call path can never be denied by this rule.",
+      "name": "User Has ASSISTANT_WRITE Right For The System's Own Definition",
+      "description": "The system's own definition -- Assistant_DM and Operation_DM -- is written by the User only; the Runtime reads it (D-007a, ADR-0019). Operation_DM is guarded here because an Operation is a Thing, and an Assistant able to edit the catalogue could untick requiresApproval on the Operation that moves money. The access right is still ASSISTANT_WRITE: a second right would have been more precise and was refused as speculative granularity in a single-household system. The Data Service checks the three document write scopes with three different resource shapes, so all three are recognised here: the model name alone (checkDocumentCreatePermissionByModel, the cheap pre-check in DefaultDocumentService), the DocumentV2 being created, and the DocumentUpdateResource carrying the old and new document. Any other shape falls through to 'not a guarded model', so an unforeseen call path can never be denied by this rule.",
       "rules": [
-        "hasAccessRight('ASSISTANT_WRITE') or !({'Assistant_DM'}.contains(#resource instanceof T(java.lang.String) ? #resource : (#resource instanceof T(com.mgmtp.a12.kernel.md.document.apiV2.immutable.DocumentV2) ? #resource.getDocumentModelId() : null)) or (#resource instanceof T(com.mgmtp.a12.dataservices.authorization.DocumentUpdateResource) and ({'Assistant_DM'}.contains(#resource.getNewDocument()?.getDocumentModelId()) or {'Assistant_DM'}.contains(#resource.getOldDocument()?.getDocumentModelId()))))"
+        "hasAccessRight('ASSISTANT_WRITE') or !({'Assistant_DM','Operation_DM'}.contains(#resource instanceof T(java.lang.String) ? #resource : (#resource instanceof T(com.mgmtp.a12.kernel.md.document.apiV2.immutable.DocumentV2) ? #resource.getDocumentModelId() : null)) or (#resource instanceof T(com.mgmtp.a12.dataservices.authorization.DocumentUpdateResource) and ({'Assistant_DM','Operation_DM'}.contains(#resource.getNewDocument()?.getDocumentModelId()) or {'Assistant_DM','Operation_DM'}.contains(#resource.getOldDocument()?.getDocumentModelId()))))"
       ]
     }
   ],
@@ -45,10 +45,10 @@
       ]
     },
     {
-      "name": "Assistant Write Permission",
-      "description": "Withholds Assistant_DM from every role without ASSISTANT_WRITE, which is the `runtime` role. `call-parent-scope` defaults to true, so the parent definition's DOCUMENT_CREATE / DOCUMENT_UPDATE / DOCUMENT_PARTIAL_UPDATE checks still run and every permission on the scope must pass.",
+      "name": "System Definition Write Permission",
+      "description": "Withholds Assistant_DM and Operation_DM -- the system's own definition -- from every role without ASSISTANT_WRITE, which is the `runtime` role. The right's name is narrower than its job, which is the accepted cost of reusing ASSISTANT_WRITE rather than minting OPERATION_WRITE. `call-parent-scope` defaults to true, so the parent definition's DOCUMENT_CREATE / DOCUMENT_UPDATE / DOCUMENT_PARTIAL_UPDATE checks still run and every permission on the scope must pass.",
       "policy-refs": [
-        "User Has ASSISTANT_WRITE Right For An Assistant"
+        "User Has ASSISTANT_WRITE Right For The System's Own Definition"
       ],
       "scopes": [
         "Document Create",

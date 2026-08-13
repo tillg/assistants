@@ -171,7 +171,7 @@ describe("tool gating (ADR-0010)", () => {
         const assistant = await harness.seedAssistant({
             grants: [{ operationKey: "thingstore.get" }],
         });
-        const schemas = harness.registry.schemasFor(assistant.data);
+        const schemas = harness.registry.schemasFor(assistant.data, harness.catalogue);
         const names = schemas.map((schema) => schema.name);
         expect(names).toContain("thingstore__get");
         expect(names).not.toContain("bookkeeping__postTransaction");
