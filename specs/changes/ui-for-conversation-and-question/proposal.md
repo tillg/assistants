@@ -58,9 +58,10 @@ flowchart LR
         direction TB
         M3["Menu: Conversations"] --> C2["Conversation overview<br/>🛑 marks blocked"]
         C2 --> CF2["Conversation form<br/>pinned header<br/>transcript · pending question bubble"]
-        CF2 -- "Answer" --> OQF2["OpenQuestion form<br/>same header · same transcript<br/>answer controls"]
-        OQF2 -- "Save" --> C2
-        CF2 -- "about what" --> SUB["Invoice · Document<br/>Process · Party"]
+        CF2 -- "Answer<br/>(Conversations stays the master)" --> OQF2["OpenQuestion form<br/>same header · same transcript<br/>answer controls"]
+        OQF2 -- "Save — no navigation;<br/>the 🛑 clears in the master beside it" --> OQF2
+        OQF2 -- "Cancel" --> C2
+        CF2 -- "about what" --> SUB["Invoice · Document<br/>Process · Party<br/>own list as master"]
     end
 ```
 
@@ -115,7 +116,7 @@ into a chip you open when you care, and the system prompt stops competing with e
 | `OpenQuestion_FM` | its `SectionQuestion` splits: the prompt stays open, the four machinery Controls move to a collapsed *Details* section |
 | Client | a transcript component with a pinned header, an entry reader, a cost summer, a subject-link resolver, a read-a-Thing-by-id hook, a cross-module navigation saga, the `CustomScreenElement` form-model-map entry |
 | `import/validate-models.mjs` | teaches ADR-0008's coverage check about custom screen elements, and errors on an `exposes` that names no group |
-| e2e | five files: the navigation spec, `OpenQuestionPage`'s route to a question, `7-forms-open`, `5-localization`, `2-restart`, plus new specs for the transcript and the marker |
+| e2e | five files: the navigation spec, `OpenQuestionPage`'s route to a question, `7-forms-open`, `5-localization`, `2-restart`, plus `RaisedQuestion` gaining `subjectThingId` and new specs for the transcript and the marker |
 | Prose | `specs/system/functional.md`, `specs/system/architecture.md`, `README.md`, `import/models/CONVENTIONS.md`, a new ADR |
 
 **Out of scope, deliberately**
@@ -171,8 +172,10 @@ The User opens the application and lands on Conversations. Three rows carry 🛑
 header that stays put, which Assistant is talking, what it is about, that it is blocked and what it has
 cost so far — and beneath it who asked what, in order, ending in a red-flagged bubble with the question
 and an **Answer** button. Answering opens a screen showing the same header and the same thread with the
-answer controls under it. Saving returns them to the list, and within about two seconds the Runtime has
-moved the Conversation on.
+answer controls under it, and the Conversations list still beside it. Saving leaves them on that screen —
+`CRUD::SAVE` does not navigate, here or anywhere else in this application — and within about two seconds
+the Runtime has moved the Conversation on and the 🛑 has cleared from the list they can already see. They
+leave by the form's own *Cancel*.
 
 Acceptance, as the e2e tier will put it:
 
@@ -188,8 +191,12 @@ Acceptance, as the e2e tier will put it:
 - A pending question's words appear on the Conversation form even when it is an approval — whose
   `approval-request` Entry carries no text at all.
 - The question's own form shows the header and transcript of its Conversation above the answer
-  controls.
-- The invoice slice still books an invoice end to end, with both answers given through the new route.
+  controls, with the Conversations list as its master pane; *Cancel* returns there.
+- With its Conversation unreadable, that form still opens, still shows the prompt, and still saves an
+  answer — the header degrades to what the question's own document carries.
+- The invoice slice still books an invoice end to end, with both answers given through the new route —
+  each question found by its Conversation's *(subject, assistant)* pair, and no prompt-matching needed,
+  because a blocked Conversation has exactly one pending question.
 
 ## Risks
 

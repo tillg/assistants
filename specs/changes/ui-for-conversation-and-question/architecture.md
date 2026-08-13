@@ -79,10 +79,19 @@ the markdown editor:
 }
 ```
 
-`widget` selects the component — `WidgetAnnotationValue` in `client/src/components/widgetAnnotation.ts`
-gains `"conversation-transcript"`. `exposes` names the Document Model group the element renders, and
-has two readers: the validator (below) and nothing else. The component does not need it — it knows
-what it renders — but the model file should not be the only place where that is implicit.
+The two annotations do different jobs, and only one of them is always present.
+
+**`widget` is required** and selects the component — `WidgetAnnotationValue` in
+`client/src/components/widgetAnnotation.ts` gains `"conversation-transcript"`.
+
+**`exposes` is optional**, names a group **of the Document Model this form is bound to**, and has one
+reader: the validator (below). It is a claim about ADR-0008 coverage — *"the fields under this group are
+visible here, by custom code rather than by a table"* — so it belongs only where the claim is true. On
+`Conversation_FM` that is `f_entries`. On `OpenQuestion_FM` the element carries **`widget` alone**: it
+renders another document's Entries, and `OpenQuestion_DM` has exactly two groups, `group_openquestion`
+and `f_options`. Naming `f_entries` there would be a false claim about a group that does not exist —
+which the validator rejects as an error, by design, because a typo has to fail rather than silently
+cover nothing.
 
 `height` is not cosmetic here. The element renders a **bounded box that scrolls internally**, and that
 is what makes the pinned header possible: `position: sticky` needs a scroll ancestor, and if the only
@@ -124,8 +133,8 @@ compile error. `crud-core`'s `selectRow` (`lib/internal/sagas.js:69-98`) is not 
 like: it *spreads* the current descriptor, so it never changes module.
 
 ```ts
-/** Open `<documentModel>/<thingId>` in another module. */
-function* openForeignForm(module: string, documentModel: string, thingId: string) {
+/** Open `<documentModel>/<thingId>` in `module`, with `masterModule`'s overview beside it. */
+function* openForeignForm(module: string, documentModel: string, thingId: string, masterModule: string) {
     // 1. tear down what we are leaving — this is the withDirtyHandling veto point
     const ids = Object.keys(yield* select(ActivitySelectors.topLevelActivities()));
     if (ids.length > 0) {
@@ -133,7 +142,7 @@ function* openForeignForm(module: string, documentModel: string, thingId: string
         if (!(yield* call(ActivitySagas.waitForResponseCancelRequested))) return;
     }
     // 2. a master activity, so the detail has somewhere to go back to
-    const master = ActivityActions.create({ activityDescriptor: { module: "Conversation" } });
+    const master = ActivityActions.create({ activityDescriptor: { module: masterModule } });
     yield* put(master);
     // 3. the detail
     yield* put(ActivityActions.create({
@@ -142,6 +151,9 @@ function* openForeignForm(module: string, documentModel: string, thingId: string
     }));
 }
 ```
+
+`ActivitySelectors.topLevelActivities()` and `ActivitySagas.waitForResponseCancelRequested()` both
+exist in the shipped typings; the recipe compiles as written.
 
 **`model` is mandatory, and it is the Document Model id.** Model resolution filters the scene's model
 descriptors by it — `allModelDescriptors.filter(({ documentModel }) => documentModel === undefined ||
@@ -179,20 +191,29 @@ slice is *not* on this path — `createCddDataProvider` only claims a load when 
 this application has no CDM models — so `cddActivityStateAdapter` in
 `CustomizableRelationshipFormEngine` stays a read-side adapter and needs no new trigger.
 
-**The master activity is the Conversations overview, not the Open Questions overview.** Step 2 exists
-because a lone top-level form activity has nowhere to go: `event_cancel` removes the activity, and with
-no parent the region renders `empty-div` — a blank content area with nothing to re-push it. Given that
-a parent is required, which one it is becomes a choice, and `{ module: "Conversation" }` is the better
-answer: the User came from Conversations, answering is one step inside that act, and `cancel` returns
-them to the list where the answered Conversation no longer carries its 🛑. Landing them on a *questions*
-list instead would reintroduce the second inbox this change exists to remove.
+**`masterModule` is a parameter, because the two callers want different answers.** Step 2 exists because
+a lone top-level form activity has nowhere to go: `event_cancel` removes the activity, and with no parent
+the region renders `empty-div` — a blank content area with nothing to re-push it. Given that a parent is
+required, which one it is is a UX decision, and it is not the same decision twice:
 
-Two consequences of that choice, both accepted: the Open Questions overview scene stays dormant (as
-above), and no menu entry highlights while the answer form is open — the menu highlights by
-deep-equalling a module's `initialActivity.descriptor` (`MainMenu.js:169`), and `OpenQuestion` no longer
-has a menu entry to match. The alternative — master = `{ module: "OpenQuestion" }` — would make
-`OpenQuestion_OM` and `OpenQuestionPending_QeM` live again, and is the one-line change to make if the
-dormant models ever need a reader.
+| Caller | `module` / `model` | `masterModule` | Why |
+|---|---|---|---|
+| **Answer**, on the Pending Question Bubble | `OpenQuestion` / `OpenQuestion_DM` | `Conversation` | The User came from Conversations and answering is one step inside that act. `cancel` returns them to the list, where the answered Conversation no longer carries its 🛑. Landing them on a list of *questions* would rebuild the second inbox this change exists to remove |
+| **about**, in the Header | the subject's own module | the same module | Reading an Invoice is a different act, not a step inside a conversation. The Invoice list belongs beside it, and the *Invoices* menu entry lights up, because the descriptor deep-equals that module's `initialActivity` (`MainMenu.js:169`) |
+
+So the Answer jump deliberately keeps a Conversations master and the subject link deliberately does not.
+Two consequences of the first, both accepted: the Open Questions overview scene stays dormant (as above),
+and no menu entry highlights while the answer form is open — `OpenQuestion` no longer has a menu entry to
+deep-equal against. Passing `masterModule: "OpenQuestion"` would make `OpenQuestion_OM` and
+`OpenQuestionPending_QeM` live again, and is the one-argument change to make if the dormant models ever
+need a reader.
+
+**Saving does not navigate, and that is not new.** `CRUD::SAVE` maps to `ActivityActions.save.started`
+(`crud-core/lib/internal/middlewares.js:45-47`), and the save saga calls `handleSaveActivity(…, true)` —
+no cancel, no push (`client-core/…/sagas/data/save.js:49-50`; only `commit` uses the removing variant).
+So after saving an answer the User is still on the question form, which is exactly today's behaviour. The
+new master makes it better rather than worse: the Conversations list is already beside them, and its 🛑
+clears on the Runtime's next scan about two seconds later. They leave by the form's own *Cancel*.
 
 Not viable, and worth recording so nobody tries it: **`CRUDActions.selectRow`** throws unless the
 instance is already in the loaded overview list (`crud-core/lib/internal/sagas.js:80-83`), and
@@ -251,7 +272,12 @@ sequenceDiagram
 ```
 
 One hook — `useThingById(model, thingId)` — serves both: a document read by id, no write, no activity,
-no dirty state. `@com.mgmtp.a12.dataservices/dataservices-access` is already a dependency and already
+no dirty state. It takes the Model as well as the id **because it has to compose a docRef**, exactly as
+seam 2b's navigation does: `OpenQuestion.ConversationId` holds a bare ThingID
+(`runtime/src/services.ts:85,98` — `conversationId: input.conversation.thingId`), and so does
+`Conversation.CurrentQuestionId`. Neither Thing carries the `Model/ThingID` form that the store's
+document read wants. ADR-0002 is why — a ThingID identifies and nothing more — and the composition is
+therefore always the caller's, never the field's. `@com.mgmtp.a12.dataservices/dataservices-access` is already a dependency and already
 carries `DocumentJsonRpc2Request.GetDocumentJsonRpc2Request`; the app already configures
 `withDataServicesConfiguration`. Which of the two candidate calls to use — the document service
 directly, or a query through `dataservices-access/query` — is settled by a spike in phase A rather
@@ -264,6 +290,15 @@ Three invariants on that hook, and they are what keep this seam small:
    line where it would have been. A form must never fail to open because a second document is missing
    — the watcher already treats a vanished question as a thing to recover from, and the UI takes the
    same view.
+   - On the **question** form that needs one more thing, because there the fetched Conversation is not
+     an addition to the screen, it *is* the screen's context: no Conversation means no Header either,
+     and the *Details* section that used to carry `assistantKey` and `conversationId` is now collapsed.
+     So the Header **falls back to the OpenQuestion's own document** — its `assistantKey`, its `kind`,
+     the id it could not follow — beside the message line. The prompt and the answer controls are
+     unaffected, so the screen stays answerable, which is the only thing that must never break.
+     *Details* is not conditionally expanded: `conditionallyHidden` keys on document data, not on the
+     outcome of a fetch, so a form model cannot express it and pretending otherwise would be a step
+     that cannot be implemented.
 3. **No polling.** It reads on mount and when the id changes. A Conversation the Runtime is driving
    will be stale on screen; that is what it is today, and a reload is the User's existing answer.
 
@@ -482,7 +517,7 @@ subject is what happens when a fact has two homes. Derivation costs one expressi
 |---|---|---|
 | `initialActivity` | landing on a module with no menu entry, or on nothing | phase C's first check is that the application opens on Conversations |
 | `OpenQuestionModule` without a `menu` | scene unreachable → answering impossible | e2e navigates to it the new way, through a Conversation, in the same phase |
-| `OpenQuestionPage.openQuestion` (e2e) | its route through the *Open Questions* menu disappears | rewritten in the same phase as the AM change, so the invoice slice never goes red for a reason other than a real one |
+| `OpenQuestionPage.openQuestion` (e2e) | its route through the *Open Questions* menu disappears, **and so does the field it searched** | a Conversation row is addressed by *(subject, assistant)* instead — see below. Rewritten in the same phase as the AM change, so the invoice slice never goes red for a reason other than a real one |
 | `2-navigation.spec.ts` | asserts eight modules including *Open Questions* | its row goes; the spec's purpose — every menu entry opens and renders — is unchanged |
 | `7-forms-open.spec.ts` | its `MODULES` list includes *Open Questions* and it navigates by `clickMenuItem`, so it cannot reach that form at all any more | the row goes; the question form's opening moves to the new transcript spec and the invoice slice, which reach it the way the User now does |
 | `5-localization.spec.ts` | both locale tests assert the **welcome page's** title is *Open questions* / *Offene Fragen* | the landing page changed, so the expectation changes with it — a behavioural assertion, not a rename |
@@ -491,6 +526,33 @@ subject is what happens when a fact has two homes. Derivation costs one expressi
 | `formModelMap` | the app's `Control` override must survive | the new entry is added by spreading, exactly as `Control` is today |
 | A bounded, internally scrolling box inside a form | a nested scroll region is a classic way to make a form unusable on a narrow screen, and `position: sticky` fails silently when its ancestor is wrong | phase A proves the sticky header with a scrolled thread before it is built; the box's height is modelled, so it is changeable without a rebuild |
 | The subject link | `subjectModel` naming a model with no module, or a Conversation with no subject at all | `subject.ts` returns a descriptor or nothing, and both cases are unit-tested before the header renders one |
+
+### Addressing one Conversation row
+
+The old route searched the Open Questions overview for a Conversation's ThingID, which worked because
+`OpenQuestion.ConversationId` is an **indexed field on the document being listed** — the overview's
+search becomes a server-side `simple_search` over exactly those. Removing that overview removes the
+field, and no Conversation column or field carries a Conversation's own id: it is the docRef, not data.
+The titles do not help either — `watcher.ts:280` puts the first eight characters of the *subject's* id in
+one, `watcher.ts:807` writes *"…: scheduled <instant>"*, `services.ts:192` writes *"… (called by …)"*.
+
+So a Conversation row is addressed by the pair the Runtime already keeps unique: **`subjectThingId` +
+`assistantKey`**. `conversationExistsFor(assistantKey, subjectThingId)` (`watcher.ts:872`) is the
+birth-dedup guard, so at most one Conversation exists per pair — and a called Assistant inherits its
+caller's subject (`services.ts:90`), so every Conversation in one Document's tree is found by searching
+that Document's ThingID. Both fields are indexed, `Assistant key` is already a column, and nothing has to
+be added to any model.
+
+The second half of the old route disappears entirely. It needed the prompt to tell two questions of one
+booking apart, because the overview listed the answered one alongside the unanswered one. A Conversation
+has **one** `currentQuestionId`, so inside it the pending question is unique — searching by prompt is not
+made harder, it is made unnecessary.
+
+**This is deliberately not a Document Model change.** A `__meta/docRef` column on `Conversation_OM` was
+the obvious repair and was rejected: it would buy a test-only convenience at the cost of the *"no
+Document Model change, no reindex, no migration"* line in the proposal, and `validate-models.mjs` walks
+the DM file for `elementRef` targets, so a `__meta` reference would need an exemption in the validator
+too. Addressing by an invariant the Runtime already enforces costs nothing and asserts something true.
 
 ## What this does not change
 

@@ -5,9 +5,11 @@ Ordered so that each phase leaves the suite green and the application usable. Re
 Speaker table in [domain.md](domain.md).
 
 Test-first throughout: the failing test comes before the code that satisfies it. For the things no test
-can settle — whether a custom screen element renders at all, whether a header pins inside one, whether
-navigation may cross a module boundary, and whether a non-BMP glyph survives a model file — phase A
-settles them by trying, before anything is built on top.
+can settle, phase A settles them by trying, before anything is built on top: whether a custom screen
+element renders at all, whether a header pins inside one, whether a non-BMP glyph survives a model file,
+and what shape the store actually puts in an activity descriptor. **Cross-module navigation is not among
+them** — [architecture.md](architecture.md)'s seam 2b settles that from source, and phase D proves the
+built article against the action sequence recorded there.
 
 New user-visible strings are **English literals in the components**: this change registers no
 localisation key, because the application's localisation is being removed in a separate change (see
@@ -34,6 +36,8 @@ Commands are `just` recipes: `just test-models`, `just test-client`, `just test-
   in its expression, run `just test-models` **and** the A12 model checker
   (`/validate-a12-models`), and look at the rendered overview. Verify: no model error, and the glyph
   appears for a Conversation with `waitingFor = user` and not for others.
+  - [ ] Record the working expression **verbatim** in `architecture.md`'s seam 3. No artifact currently
+    contains the string an implementer would paste, only its semantics — and phase E depends on it.
   - [ ] If the model checker rejects the glyph, or it renders as a replacement character, fall back to
     an expression rendering a plain word and move the glyph into the client. Record which happened in
     this file before continuing — the rest of the plan does not depend on which way it went.
@@ -46,6 +50,9 @@ Commands are `just` recipes: `just test-models`, `just test-client`, `just test-
   - Seam 2b already settles the rest from source: cross-module navigation works, `model` is mandatory
     and is the DM id, the teardown handshake is obligatory, and `create` alone triggers the load. This
     step verifies the one claim that depends on what the *server* returns, not on the client sources.
+  - The same answer governs **seam 4's read**, not only navigation: `OpenQuestion.ConversationId` and
+    `Conversation.CurrentQuestionId` both hold bare ThingIDs, so `useThingById` composes a docRef too.
+    Confirm in the same sitting that a document read by composed docRef returns the document.
 - [ ] **Spike the read-by-id.** In a scratch component, read one `OpenQuestion_DM` document by ThingID
   through `dataservices-access` and log its `Prompt`. Verify: it resolves under the logged-in User's
   rights, and decide from what it took whether `useThingById` needs a saga or a plain effect. Note the
@@ -106,27 +113,32 @@ Everything in this phase is testable with `just test-client` alone: no store, no
   `height` from the model element, `overflow-y: auto`, the header slot sticky at its top.
 - [ ] Implement `client/src/sagas/openForeignForm.ts` per seam 2b, and register it in `appsetup.ts`'s
   `addCustomSagas` beside `LoadModelGraphSaga`: cancel every top-level activity and honour a veto, push
-  the `{ module: "Conversation" }` master, then push the detail with `initiatingActivityId` and a
-  descriptor carrying `module`, the composed `<Model>/<thingId>` **docRef** as `instance`, and `model`.
-  It lands here rather than in phase D because the Header's *about* link is its first caller.
-  - [ ] Unit-test the descriptor it builds — a bare ThingID in, a docRef out, `model` always present —
-    and that a vetoed cancel dispatches no push at all.
+  the `{ module: masterModule }` master, then push the detail with `initiatingActivityId` and a descriptor
+  carrying `module`, the composed `<Model>/<thingId>` **docRef** as `instance`, and `model`.
+  `masterModule` is a **parameter**, not a constant — the Header's *about* link passes the subject's own
+  module so the Invoice list sits beside the Invoice, and phase D's Answer button passes `Conversation`.
+  It lands here rather than in phase D because the *about* link is its first caller.
+  - [ ] Unit-test the descriptor it builds — a bare ThingID in, a docRef out, `model` always present,
+    `masterModule` honoured — and that a vetoed cancel dispatches no push at all.
 - [ ] Write the Header's component tests first: it names the Assistant and the title; it shows 🛑 when
   `waitingFor = user` and the finish reason when the Conversation is over; the *about* slot is a link
   for a subject Thing, the `scheduledFor` instant when there is none, and a link to the parent when
   `parentConversationId` is set; the cost reads `≥`. Implement `TranscriptHeader.tsx`.
 - [ ] Replace the Entries `InlineRepeat` in `Conversation_FM` with the `CustomScreenElement`
   (`name: "ConversationTranscript"`, `widget: conversation-transcript`, `exposes: f_entries`, a
-  `height`). Keep the Result and Last error sections and their order.
+  `height`). Keep the Result and Last error sections and their order. `exposes` belongs **here only** —
+  it is a claim about this form's own Document Model, and `Conversation_DM` is the one that has
+  `f_entries`.
 - [ ] Set `collapsible: true, initiallyCollapsed: true` on `Conversation_FM`'s `ConversationHeader`
   `MultiColumnSection`. All thirteen Controls stay — ADR-0008 is still met — they are simply one click
   away, since the pinned header now says what a reader needs.
 - [ ] Teach `import/validate-models.mjs` the `exposes` rule, both halves: a `CustomScreenElement`
   annotated `exposes: <groupId>` marks that group and every field under it as referenced for the
   ADR-0008 check, **and** it is an error if the annotation names a group the bound Document Model does
-  not have. Add both cases to `import/validate-models.selftest.mjs` first — a form whose only reference
-  to a group is such an element produces no warning; one with a typo'd `exposes` produces an error
-  rather than silently covering nothing.
+  not have. Add three cases to `import/validate-models.selftest.mjs` first — a form whose only reference
+  to a group is such an element produces no warning; one with a typo'd `exposes` produces an error rather
+  than silently covering nothing; and a `CustomScreenElement` carrying **no** `exposes` is legal and
+  silent, because that is what `OpenQuestion_FM`'s will be.
 - [ ] Correct that file's `INTENTIONALLY_UNEXPOSED` comment for `f_maxTurns`: the Header shows
   `turn 4/20`, so *"Runtime bookkeeping the User has no use for"* is no longer true of it. It stays on
   the list — the exclusion is about Controls — but the comment must stop asserting something false.
@@ -142,16 +154,21 @@ Everything in this phase is testable with `just test-client` alone: no store, no
 
 ## D — The pending question, in context
 
-- [ ] Implement `useThingById` per phase A's answer, read-only, failing soft. Unit-test the failure
-  paths: no id, a rejected request, a document that does not exist — each yields "nothing to show",
-  never a throw.
+- [ ] Implement `useThingById` per phase A's answer, read-only, failing soft, composing the docRef from
+  the Model and the bare ThingID it is given. Unit-test the failure paths: no id, a rejected request, a
+  document that does not exist — each yields "nothing to show", never a throw.
+- [ ] Test the question form's degraded state, since that is the one where the fetched document *is* the
+  context: with the Conversation unreadable, the Header falls back to the OpenQuestion's own
+  `assistantKey` and `kind` beside a message line, and the prompt and answer controls still work. The
+  screen must stay answerable — that is the only thing that must never break.
 - [ ] Write the test first: given a Conversation with `currentQuestionId` and a loaded OpenQuestion,
   the Transcript ends in a Pending Question Bubble carrying the question's prompt, its options, and an
   **Answer** button; given a Conversation with no `currentQuestionId`, there is no such bubble; given
   an id whose document is missing, a single message line and the rest of the thread intact.
 - [ ] Implement `PendingQuestion.tsx`. The prompt renders through the read-only
   `MarkdownRichTextEditor`. The **Answer** button asks `openForeignForm` for
-  `("OpenQuestion", "OpenQuestion_DM", currentQuestionId)` — it does not build a descriptor itself.
+  `("OpenQuestion", "OpenQuestion_DM", currentQuestionId, "Conversation")` — it does not build a
+  descriptor itself, and the last argument is why the User lands back among Conversations.
 - [ ] Verify in the browser that the approval question — whose `approval-request` Entry has no text —
   shows its words. This is the case the whole change exists for.
 - [ ] Verify the Answer jump against seam 2b's expected action sequence, devtools open:
@@ -168,7 +185,10 @@ Everything in this phase is testable with `just test-client` alone: no store, no
 - [ ] Type into the answer field, then `Cancel`, and confirm the dirty-handling dialog *does* appear.
   It proves the veto path is live on the new route, which is the whole reason answering stayed on this
   form.
-- [ ] Add the same `CustomScreenElement` to `OpenQuestion_FM`, above `section_answer`, reading the
+- [ ] Add the same `CustomScreenElement` to `OpenQuestion_FM`, above `section_answer`, **carrying
+  `widget` and not `exposes`** — it renders another document's Entries, and `OpenQuestion_DM` has no
+  `f_entries` group, so the coverage claim would be false and phase C's own validator rule would fail the
+  build. It reads the
   Conversation named by `ConversationId` through the same hook. It carries the same pinned Header — the
   question screen has to say which Assistant and about what, and it now does so from the Conversation
   rather than from a repeated `assistantKey`. Its Transcript shows no Pending Question Bubble; the
@@ -204,11 +224,24 @@ that is not a real one.
 - [ ] `e2e/tests/flow/2-restart.spec.ts`: `loginFreshly` waits for
   `getByRole("link", { name: "Open Questions" })` as its the-app-is-up signal. It waits for
   *Conversations* instead. Nothing else in that spec changes.
-- [ ] `e2e/pages/OpenQuestionPage.ts`: rewrite `openQuestion()` to route through **Conversations** —
-  search the conversation ThingID, open the row, find the Pending Question Bubble whose text matches
-  `distinguishingText(prompt)`, press **Answer**, then assert the question form as it does today.
-  Keep its doc comment's substance: it still only *fills in* fields, and it still leaves `answeredAt`
-  empty on purpose.
+- [ ] `e2e/pages/OpenQuestionPage.ts`: rewrite `openQuestion()` to route through **Conversations**,
+  addressing the row by *(subject, assistant)* — see architecture.md's *Addressing one Conversation row*.
+  Searching the conversation's own ThingID **cannot** work any more: it was findable only because
+  `OpenQuestion.ConversationId` was an indexed field on the document the old overview listed, and no
+  Conversation field or column carries a Conversation's own id.
+  - [ ] Search the **subject** ThingID — indexed, and inherited by a called Assistant
+    (`services.ts:90`), so every Conversation in one Document's tree matches. Narrow the rows by the
+    existing `Assistant key` column. `conversationExistsFor(assistantKey, subjectThingId)`
+    (`watcher.ts:872`) is the Runtime's birth-dedup guard, so that pair identifies exactly one row.
+  - [ ] Add `subjectThingId` to `RaisedQuestion` in `e2e/utils/agents.ts` — one line, read from the
+    Conversation body `waitForRaisedQuestion` already has in hand. `assistantKey` is there already.
+  - [ ] Then press **Answer** on the Pending Question Bubble and assert the question form as it does
+    today. **Delete the prompt-disambiguation**: `distinguishingText` and the two-rows-per-conversation
+    reasoning existed because the old overview listed an answered question beside an unanswered one. A
+    Conversation has one `currentQuestionId`, so the pending bubble is unique — and say so in the doc
+    comment, replacing the paragraph that explains the old problem.
+  - [ ] Keep the rest of that doc comment's substance: it still only *fills in* fields, and it still
+    leaves `answeredAt` empty on purpose.
   - [ ] Add the test IDs the page object needs to `e2e/types/testIds.ts` and to the components:
     the transcript, a bubble, a receipt, the pending question, the answer button, the blocked marker,
     the header and its *about* link.
@@ -232,8 +265,9 @@ that is not a real one.
   - [ ] Correct *"Nothing adds them up — the transcript is the record"*. Something adds them up now:
     the Header. Keep the sentence that follows it — the total is a lower bound — because it is why the
     Header shows `≥`, and describe the Header's four facts where the Conversations module is described.
-- [ ] `specs/system/architecture.md`: record the two new client seams — the custom screen element and
-  the read-by-id — and the rule that reads may cross documents and writes may not.
+- [ ] `specs/system/architecture.md`: record the three new client seams — the custom screen element, the
+  read-by-id, and cross-module navigation — and the rule that reads may cross documents and writes may
+  not. Include the docRef composition, since all three seams need it and no Thing carries one.
 - [ ] `README.md` around line 185: the navigation list loses *Open Questions*, and *"Start at Open
   Questions"* becomes *"Start at Conversations — the rows marked 🛑 are waiting for you."*
 - [ ] `import/models/CONVENTIONS.md`: its overview section documents `content.columns[]` entries as
