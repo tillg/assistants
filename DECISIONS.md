@@ -1248,3 +1248,52 @@ modules"*, and `specs/research/ASSISTANTS_VS_OPENCLAW.md` still describes `grant
 reading `tools[]`. The first becomes nine in the e2e phase; the second raises a question this session
 should not answer alone — **are research documents dated snapshots or living documents?** They read
 as snapshots of an argument made at a point in time, which is an argument for leaving them.
+
+## D-038 — Phase G: how the auth deny was proved, and what it could not prove
+
+*Decided 2026-08-14 01:15 CEST.*
+
+The load-bearing test of this whole change is *"the `runtime` identity is refused a write to
+`Operation_DM`"*. A passing deny test is exactly the kind of test that can pass for the wrong
+reason — a typo in the model name denies just as convincingly as a policy does — so the rule was
+proved to be in force four independent ways before the assertion was trusted:
+
+1. the `md5` of `childAuthorizationDefinition.json` is identical on the host and inside
+   `assistants_server`, and `grep -c Operation_DM` returns 3 in both;
+2. the server booted **after** the file's mtime, and logged
+   `AuthorizationAutoConfiguration … childAuthorizationDefinitions=[file:…]`;
+3. `git show 04882e4^:import/auth/childAuthorizationDefinition.json | grep -c Operation_DM` → `0`, and
+   the model appears in no other policy, so nothing pre-existing could produce the refusal;
+4. the refusal is **scoped**: the same `runtime` identity, in the same run, reads `Operation_DM` and
+   writes `Conversation_DM`, while the `human` identity succeeds on the byte-identical call.
+
+**What could not be done, and why**: there is no negative control. Demonstrating the test goes red
+without the rule would mean editing `import/auth/**` and restarting the stack mid-suite. The
+triangulation above is the strongest available substitute, and it is recorded here rather than
+assumed.
+
+**The victim is `bookkeeping.createAccount`, not `bookkeeping.postTransaction`.** The deny leg never
+lands so either would be safe; the **allow** leg does land, and a suite that opens even a short
+window in which the Operation that moves money is differently configured is not one to run against a
+live stack. `postTransaction` is asserted on in the read test instead.
+
+## D-039 — A pre-existing integration test was a time bomb, and is fixed here
+
+*Fixed 2026-08-14 01:20 CEST, outside phase G's scope.*
+
+`runtime/test/integration/watcher-queries.itest.ts`'s *"finds a scheduled Conversation by its due
+instant — scan 7's whole exactly-once guarantee"* seeds a Conversation under the **fixed**
+`assistantKey: "itest-scheduled"` and never deletes it (the tier's `Trash` refuses Conversations),
+then queries with **`pageSize: 5`**. Every run leaves one more row behind. On the sixth run the row
+the run just seeded falls off the end of the page and the test goes red — **and stays red for ever**.
+Today was run six, which is how it surfaced.
+
+**Decided**: give the seeded row a **per-run** Assistant key (the run's unique idempotency key), so
+the three queries match only the row this run created. The `exact_match` on `scheduledFor`, the
+neighbouring-instant negative and the skip-rule check are all unchanged — the assertion is preserved,
+not weakened.
+
+**Unrelated to this change**, and flagged rather than buried: it is twelve lines in a file phase G had
+no business touching, and it is easy to revert. **The six stale Conversations are still in the
+store** and the tier cannot delete them; they are inert (the Assistant key matches no Assistant) but
+they are there.

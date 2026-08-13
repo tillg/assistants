@@ -313,10 +313,14 @@ describe.skipIf(!THING_STORE_UP)("watcher queries against the live ThingStore", 
         // at all, because deleting a Runtime-owned document is how a suite strands one. It is inert —
         // scan 7 iterates over *Assistants* and no Assistant has this key, and it is `done`, so no
         // other scan matches it either.
+        // The Assistant key is per-run, because the row is per-run and none of them can ever be
+        // deleted: under one shared `itest-scheduled` the three queries below matched every slot
+        // every previous run had left behind, and on the sixth run the row this run seeded fell off
+        // the far end of the five-row page — a red suite that says nothing about the store.
         const key = unique("scan7-served");
         const due = "2031-03-29T01:30:00";
         const created = await things.create(SPECS.Conversation_DM, {
-            assistantKey: "itest-scheduled",
+            assistantKey: key,
             title: "itest scan 7",
             scheduledFor: due,
             status: "done",
@@ -328,7 +332,7 @@ describe.skipIf(!THING_STORE_UP)("watcher queries against the live ThingStore", 
 
         const served = await things.search(
             C,
-            and(eq(fieldPath(C, "assistantKey"), "itest-scheduled"), eq(fieldPath(C, "scheduledFor"), due)),
+            and(eq(fieldPath(C, "assistantKey"), key), eq(fieldPath(C, "scheduledFor"), due)),
             5,
         );
         expect(served.map((row) => row.docRef), "the served slot was not found by its due instant").toContain(
@@ -339,7 +343,7 @@ describe.skipIf(!THING_STORE_UP)("watcher queries against the live ThingStore", 
         const neighbour = await things.search(
             C,
             and(
-                eq(fieldPath(C, "assistantKey"), "itest-scheduled"),
+                eq(fieldPath(C, "assistantKey"), key),
                 eq(fieldPath(C, "scheduledFor"), "2031-03-30T01:30:00"),
             ),
             5,
@@ -351,7 +355,7 @@ describe.skipIf(!THING_STORE_UP)("watcher queries against the live ThingStore", 
         const unfinished = await things.search(
             C,
             and(
-                eq(fieldPath(C, "assistantKey"), "itest-scheduled"),
+                eq(fieldPath(C, "assistantKey"), key),
                 not(unset(fieldPath(C, "scheduledFor"))),
                 or(eq(fieldPath(C, "status"), "running"), eq(fieldPath(C, "status"), "waiting")),
             ),

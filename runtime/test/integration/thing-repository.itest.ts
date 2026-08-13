@@ -401,4 +401,192 @@ describe.skipIf(!THING_STORE_UP)("ThingRepository against the live ThingStore", 
             }
         });
     });
+
+    // The mitigation ADR-0019 rests on. An Operation is a Thing, so the catalogue that decides
+    // which Operations exist, which are switched on and which need the User's approval is now
+    // sitting in the same store the Runtime writes all day — and an Assistant that could edit it
+    // could untick `requiresApproval` on the Operation that moves money and then use it. Three
+    // guards inside the Runtime stand in front of that (WRITABLE_MODELS, READABLE_MODELS,
+    // TRIGGER_ELIGIBLE_MODELS), and all three are string arrays in the process the Assistant is
+    // steering. The store's refusal is the one that holds when they don't, so it is the one that
+    // has to be asserted against a live server.
+    //
+    // Each case runs the *same* call twice, as the two identities: that symmetry is what makes a
+    // -32059 evidence about the caller rather than about the payload.
+    describe("an Operation is the User's to write, and the store enforces it", () => {
+        /**
+         * The subject of the write pair: the catalogue Operation granted to no Assistant.
+         *
+         * `assistants.ts` withholds `bookkeeping.createAccount` from every Assistant on purpose, so
+         * pushing its fields around cannot change what a Turn running against this same stack is
+         * allowed to do — the same reason `bootstrap.itest.ts` picked it as its victim. The patch
+         * below is nevertheless the escalation *shape* (untick the approval), and it is a no-op in
+         * value: the seed leaves `requiresApproval` false, so the leg that does land re-writes the
+         * value that was already there and proves it landed through `notes` instead.
+         */
+        const VICTIM = "bookkeeping.createAccount";
+        let victimNotes = "";
+        let victimRequiresApproval = false;
+
+        async function victim(): Promise<{ docRef: string; data: Record<string, unknown> }> {
+            const found = await things.findByIdempotencyKey<Record<string, unknown>>(
+                SPECS.Operation_DM,
+                `operation:${VICTIM}`,
+            );
+            if (!found) {
+                throw new Error(
+                    `No Operation ${VICTIM} in the store. This tier needs a bootstrapped ` +
+                        "catalogue: run `just bootstrap` against the stack first.",
+                );
+            }
+            return { docRef: found.docRef, data: found.data };
+        }
+
+        beforeAll(async () => {
+            const current = await victim();
+            victimNotes = String(current.data["notes"] ?? "");
+            victimRequiresApproval = current.data["requiresApproval"] === true;
+        });
+
+        afterAll(async () => {
+            // Re-runnable, whatever a red case left behind: the two fields this block touches go
+            // back to the values it found, written as the User because that is who may.
+            const current = await victim();
+            await asUser.update(SPECS.Operation_DM, current.docRef, {
+                notes: victimNotes,
+                requiresApproval: victimRequiresApproval,
+            });
+        });
+
+        it("refuses to let the Runtime identity MODIFY an Operation in the catalogue", async () => {
+            const before = await victim();
+
+            const denied = await things
+                .update(SPECS.Operation_DM, before.docRef, {
+                    // The escalation the guard exists to stop, in miniature: an Assistant editing
+                    // the catalogue entry that decides whether it has to ask first.
+                    requiresApproval: false,
+                    notes: "written by the Runtime identity — this must never land",
+                })
+                .then(
+                    () => undefined,
+                    (error: unknown) => error as A12RpcError,
+                );
+
+            expect(denied).toBeInstanceOf(A12RpcError);
+            expect((denied as A12RpcError).rpcError.code).toBe(-32059);
+            expect((denied as A12RpcError).reason).toMatch(/Access Denied/i);
+
+            // The refusal is a refusal, not a partial write.
+            const after = await things.get<Record<string, unknown>>(
+                SPECS.Operation_DM,
+                before.docRef,
+            );
+            expect(after.data["notes"]).toBe(before.data["notes"]);
+            expect(after.data["requiresApproval"]).toBe(before.data["requiresApproval"]);
+        });
+
+        it("lets the User identity MODIFY the same Operation with the same call", async () => {
+            const before = await victim();
+            const marker = unique("operation:modify-allowed");
+
+            await asUser.update(SPECS.Operation_DM, before.docRef, {
+                requiresApproval: false,
+                notes: marker,
+            });
+
+            const after = await things.get<Record<string, unknown>>(
+                SPECS.Operation_DM,
+                before.docRef,
+            );
+            expect(after.data["notes"]).toBe(marker);
+            expect(after.data["key"]).toBe(VICTIM);
+            // Same Thing, edited — not a second one alongside it in the catalogue.
+            const stillOne = await things.search<Record<string, unknown>>(
+                SPECS.Operation_DM,
+                eq(path(SPECS.Operation_DM, "idempotencyKey"), `operation:${VICTIM}`),
+                5,
+            );
+            expect(stillOne.map((found) => found.docRef)).toEqual([before.docRef]);
+
+            await asUser.update(SPECS.Operation_DM, before.docRef, {
+                notes: victimNotes,
+                requiresApproval: victimRequiresApproval,
+            });
+        });
+
+        it("refuses to let the Runtime identity CREATE an Operation", async () => {
+            const denied = await things
+                .create(SPECS.Operation_DM, {
+                    ...PAYLOADS.Operation_DM,
+                    key: unique("runtime-may-not-create"),
+                    createdAt: LONG_AGO,
+                    idempotencyKey: unique("operation:create-denied"),
+                })
+                .then(
+                    (created) => {
+                        // Only reached when the guard is gone. Register it so a red run does not
+                        // leave a rogue Operation in the catalogue the Runtime reads every Turn.
+                        trash.add(created.docRef);
+                        return created;
+                    },
+                    (error: unknown) => error as A12RpcError,
+                );
+
+            expect(denied).toBeInstanceOf(A12RpcError);
+            expect((denied as A12RpcError).rpcError.code).toBe(-32059);
+            expect((denied as A12RpcError).reason).toMatch(/Access Denied/i);
+        });
+
+        it("lets the User identity CREATE an Operation with the same call", async () => {
+            const key = unique("operation:create-allowed");
+
+            const created = await asUser.create(SPECS.Operation_DM, {
+                ...PAYLOADS.Operation_DM,
+                key: unique("user-may-create"),
+                createdAt: LONG_AGO,
+                idempotencyKey: key,
+            });
+            trash.add(created.docRef);
+
+            expect(created.docRef.startsWith("Operation_DM/")).toBe(true);
+            const loaded = await things.get<Record<string, unknown>>(
+                SPECS.Operation_DM,
+                created.docRef,
+            );
+            expect(loaded.data["idempotencyKey"]).toBe(key);
+            // `enabled: false` in the payload, so the thing we just added to the live catalogue is
+            // offered to nobody between here and `trash.empty()`.
+            expect(loaded.data["enabled"]).toBe(false);
+        });
+
+        it("still lets the Runtime identity READ the catalogue", async () => {
+            // Deny the write too broadly and nothing runs at all: `advance()` reads the catalogue
+            // once at the top of *every* Turn, as this identity, and throws when it comes back
+            // empty. So the guard has to withhold writes without touching reads.
+            //
+            // This is the **store's** read right, and it is a different thing from the Runtime's
+            // own `READABLE_MODELS` (implementations.ts) — a distinction that is easy to read
+            // backwards. `READABLE_MODELS` governs what an *Assistant* may ask for through
+            // `thingstore.get` / `thingstore.search`, and it excludes `Operation_DM`, because the
+            // catalogue is the safety configuration constraining the reader. The Runtime's own
+            // read, asserted here, is not excluded and must not be: the two guards sit at
+            // different layers and answer different questions.
+            const catalogue = await things.search<Record<string, unknown>>(
+                // The literal call `advance().loadCatalogue()` makes: unconstrained, page 100.
+                SPECS.Operation_DM,
+                undefined,
+                100,
+            );
+            expect(catalogue.length).toBeGreaterThan(0);
+            const keys = catalogue.map((stored) => stored.data["key"]);
+            expect(keys).toContain("bookkeeping.postTransaction");
+            expect(keys).toContain(VICTIM);
+
+            // …and GET by docRef too, which is the other half of a read right.
+            const one = await victim();
+            const loaded = await things.get<Record<string, unknown>>(SPECS.Operation_DM, one.docRef);
+            expect(loaded.data["key"]).toBe(VICTIM);
+        });
+    });
 });
