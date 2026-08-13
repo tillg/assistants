@@ -1,5 +1,7 @@
 # An Assistant declares the Tools it may use
 
+> **Note, 2026-08-13.** What this ADR calls a *Tool* is now a **Granted Operation** ([ADR-0020](0020-tool-is-the-providers-word.md)), and the rule below has become a conjunction: an Operation is offered when it is **granted** *and* **enabled** in the catalogue *and* **implemented** in the Runtime ([ADR-0019](0019-an-operation-is-a-thing.md)). Both new conditions can only ever remove a capability. The filename and title are kept because they are cited from six files.
+
 Every Assistant's definition names the set of **Tools** — Operations of External Systems — that it is permitted to use. Nothing else is reachable. The alternative was to expose every Operation to every Assistant and rely on prompts and on the User's supervision to keep them in their lane.
 
 We rejected that because supervision is *review*, and review happens after the fact. A prompt saying "never send money" is probabilistic; a declaration is not. The declaration also doubles as documentation: reading an Assistant tells you what it can reach, which is otherwise buried in prose.

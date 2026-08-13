@@ -35,7 +35,7 @@ Spelling throughout the project is British English.
 [DECISIONS.md](DECISIONS.md) (decisions taken while building, with their alternatives and
 reversal costs) · [BUGS.md](BUGS.md) (43 reproduced defects from the 2026-08-09 hunt; each entry
 records whether it still stands) ·
-[docs/adr/](docs/adr/) (eighteen architecture decisions) ·
+[docs/adr/](docs/adr/) (twenty architecture decisions) ·
 [RESEARCH_INDEX.md](RESEARCH_INDEX.md) (the four research papers in
 [specs/research/](specs/research/), each with what it settled and what it left open: what
 Bookkeeping must provide and why Firefly III, how the agentic loop should work and why no workflow
@@ -466,11 +466,25 @@ This is one running vertical slice, not a finished system. What is honestly miss
   whatsoever, so Firefly is only as protected as the network path to it. Inside the compose network
   it is wide open, which is what lets the Runtime and `firefly-bootstrap` use it; the security
   argument is entirely that it publishes no host port. Give it one and authentication is gone.
+- **An Assistant can read every Model.** Writes are guarded — `WRITABLE_MODELS` is enforced in
+  `thingstore.create` and `.update`, and the store separately refuses the `runtime` identity any write
+  to `Assistant_DM` ([D-007a](DECISIONS.md)). Reads are not: `READABLE_MODELS` is declared beside it
+  and consulted nowhere, so `thingstore.get` and `.search` accept any Model the Runtime knows about,
+  including `Assistant_DM`, `Conversation_DM` and `RuntimeState_DM`. Nothing depends on it and no
+  prompt asks for it, but it is a guard that reads as present and is not.
 - **Email and Bank are Manual Connectors.** `email.send`, `email.fetch` and `bank.sendMoney` do not
   talk to anything; they raise an Open Question and the User does the work by hand and reports
   back. This is deliberate — ADR-0004 says the system must run end to end with every External
   System manual, and this is where that is proved — but it means no mail is fetched and no money
   moves.
+- **Operations are compiled in.** The seventeen of them live in `runtime/src/tools/tools.ts` — prose,
+  parameter schema, approval requirement and code, all in one place — so adding one, retiring one,
+  rewording the sentence a model reads, or switching one off is a code change and a deploy. There is
+  no per-Operation kill switch between `RuntimeState.paused`, which stops everything, and
+  `Assistant.enabled`, which stops one Assistant. Moving the catalogue into the ThingStore is a
+  planned change ([specs/changes/operations-as-things](specs/changes/operations-as-things/proposal.md));
+  adding Operations *dynamically* is not, and would need a generic Implementation, which is close
+  enough to an `exec` tool to deserve its own argument before anyone builds it.
 - **Text extraction is not implemented.** A Document's `extractedText` is supplied by whoever
   creates the Document: the demo loader, or the User pasting text into the create form.
   `document.requestText` is a Manual Connector. OCR and PDF parsing are a later change.
@@ -533,7 +547,7 @@ This is one running vertical slice, not a finished system. What is honestly miss
 │   ├── system/               the system as it stands: domain, architecture, functional
 │   ├── research/             the research papers, and the sources they were read from
 │   └── changes/              proposal, domain, architecture and plan, per change in flight
-├── docs/                     adr/ — eighteen architecture decision records; logo/ — design explorations
+├── docs/                     adr/ — twenty architecture decision records; logo/ — design explorations
 ├── assets/                   the logo and its derived files
 ├── buildSrc/, quality/       Gradle build logic and the Checkstyle configuration
 └── licenses/                 licence texts for the third-party notices

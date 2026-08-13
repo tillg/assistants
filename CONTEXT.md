@@ -9,7 +9,7 @@ Spelling and wording throughout the project are **British English**.
 ### Actors
 
 **Assistant**:
-An LLM-driven actor that performs work on Things on the User's behalf. Its definition is its prompts, its Skills, its Triggers and the set of Tools it may use. An Assistant is itself a Thing, with a Model and a ThingID; it is a template, and each of its runs is a Conversation.
+An LLM-driven actor that performs work on Things on the User's behalf. Its definition is its prompts, its Skills, its Triggers and the Operations it is granted. An Assistant is itself a Thing, with a Model and a ThingID; it is a template, and each of its runs is a Conversation.
 _Avoid_: Assistent, agent, bot
 
 **User**:
@@ -61,7 +61,7 @@ _Avoid_: Person, contact, counterparty, entity
 ### Running work
 
 **Conversation**:
-One run of one Assistant — its prompts, exchanges and tool calls — and a Thing in its own right. A Conversation spends most of its life waiting for another actor to respond: the LLM, the User, or a called tool.
+One run of one Assistant — its prompts, exchanges and tool calls — and a Thing in its own right. A Conversation spends most of its life waiting for another actor to respond: the LLM, the User, or an Operation it called.
 _Avoid_: session, thread, history, run
 
 **Turn**:
@@ -85,7 +85,7 @@ A Trigger configured on an Assistant that fires by the clock and gives birth to 
 _Avoid_: timer, cron job, timeout
 
 **Pending Tool Call**:
-A tool call that cannot complete inside the Turn that made it, because the Operation is human-paced — a Manual Connector, a question to the User, a call to another Assistant. The Conversation records the call and what it is now waiting for, and stops; the result arrives in a later life of the Conversation.
+A tool call that cannot complete inside the Turn that made it, because the Operation is human-paced — a Manual Connector, a question to the User, a call to another Assistant. The Conversation records the call and what it is now waiting for, and stops; the result arrives in a later life of the Conversation. It keeps the word *tool* because it is named for the call the LLM made, not for the capability behind it.
 _Avoid_: async call, deferred call, promise
 
 **wakeAt**:
@@ -103,7 +103,7 @@ _Avoid_: tool, capability, instruction set
 ### The Runtime
 
 **Runtime**:
-The component that watches for Triggers, gives birth to Conversations, drives the agentic loop, and continues a Conversation when the actor it was waiting for responds. It is deliberately not an External System: External Systems are what Assistants call, whereas the Runtime calls Assistants.
+The component that watches for Triggers, gives birth to Conversations, drives the agentic loop, and continues a Conversation when the actor it was waiting for responds. It is deliberately not an External System: External Systems are what Assistants call, whereas the Runtime calls Assistants. It offers exactly one Operation of its own — `assistant.call`, by which one Assistant reaches another — which is why the catalogue lists it among the Systems.
 _Avoid_: engine, orchestrator, scheduler, worker
 
 **Trigger Watcher**:
@@ -121,16 +121,24 @@ Anything the Assistants interact with that is not an Assistant and not a Thing �
 _Avoid_: service, integration, backend
 
 **Operation**:
-Something an External System can do, as the system defines it — `sendMoney`, `getNewMails`, `askUser`.
-_Avoid_: method, endpoint, action
+A capability one System offers, as that system defines it — `sendMoney`, `getNewMails`, `askUser`. Most belong to an External System, some to an Internal one, and one belongs to the Runtime itself. An Operation is a Thing, with a Model and a ThingID: the ThingStore holds the catalogue of them, and the User is the only actor who may write it. What lives in code is its **Implementation** — so the catalogue can describe an Operation, guard it and switch it off, and cannot make one exist. The LLM APIs call these *tools*; that word is used only where we are talking to them.
+_Avoid_: method, endpoint, action, tool
+
+**Implementation**:
+The code that performs one Operation. Not a Thing, because it is behaviour and not data. An Operation is offered to an Assistant only while an Implementation for it is registered; one whose Implementation has gone is *unimplemented*, which is a different state from being switched off, and the system says which.
+_Avoid_: handler, adapter, function
+
+**grant**:
+One row of an Assistant's grants, naming an Operation by its key — and, for `assistant.call`, naming the Assistant it may call. A field on the Assistant rather than a Thing of its own. Reading an Assistant's grants tells you everything it can reach.
+_Avoid_: permission, allowance, entitlement
+
+**Granted Operation**:
+An Operation made available to one Assistant: the Operation, the grant that names it and the Implementation that performs it, resolved together for the length of a Turn. An Operation is offered only when it is **granted**, **enabled** and **implemented** — and of those three conditions, two can only ever take a capability away. What an Assistant may reach is declared, not asked for in prose.
+_Avoid_: tool, function, capability, permission
 
 **Approval**:
-A property of an **Operation**: it either requires one or does not, and the Runtime refuses the call when it is missing. What satisfies it is an answered confirmation, raised by the Runtime rather than by the Assistant, bound to that Operation and to the arguments it was asked with — so a yes to one thing cannot authorise another, and an Assistant cannot talk its way past a check it is never asked about. Not a kind of Open Question: the question is the ordinary form, asked and answered the ordinary way. What is new is that something checks.
+A property of an **Operation**: it either requires one or does not, and the Runtime refuses the call when it is missing. What satisfies it is an answered confirmation, raised by the Runtime rather than by the Assistant, bound to that Operation and to the arguments it was asked with — so a yes to one thing cannot authorise another, and an Assistant cannot talk its way past a check it is never asked about. Not a kind of Open Question: the question is the ordinary form, asked and answered the ordinary way. What is new is that something checks. The requirement is recorded on the Operation Thing and is the **User's**: they may add one where the code demands none, and remove one it does demand. An Assistant can neither change it nor be asked about it — but it can ask the User to change it, which is the one route left open, deliberately, because it is the User's money.
 _Avoid_: permission, sign-off, confirmation gate, four-eyes
-
-**Tool**:
-An Operation made available to a particular Assistant. An Assistant may only use the Tools its definition grants it; what it may reach is declared, not asked for in prose.
-_Avoid_: function, capability, permission
 
 **Connector**:
 The translator that maps a foreign representation to and from Things for one External System.

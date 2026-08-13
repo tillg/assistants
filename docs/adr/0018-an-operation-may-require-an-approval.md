@@ -29,3 +29,11 @@ Four alternatives were considered and rejected.
 - The refusal uses `raiseQuestion` directly, never `escalate()`: a missing approval is the ordinary path, and escalating would let three unapproved bookings mark the Conversation `failed`. It sets no `wakeAt` — an unanswered approval waits, it does not lapse into a booking.
 - **The end-to-end fixture must be re-scripted.** Its model asks before booking, and that ask no longer counts. That it must change is the demonstration that it was proving the model's manners rather than the rule.
 - An approval can be missed by argument drift, producing a second question. Visible and safe; never a wrong booking.
+
+## Amendment, 2026-08-13 — [ADR-0019](0019-an-operation-is-a-thing.md)
+
+`requiresApproval` is no longer compiled in. It is a field on the Operation Thing, and the **User owns it in both directions**: they may require an approval where the code demands none, and remove one it does demand.
+
+What survives unchanged is the mechanism and its position — the check is on the Operation rather than the Assistant, the Runtime raises the question, the approval is bound to the arguments, consumed by the call it approves, and a no is terminal. What no longer holds is the sentence *"an Assistant cannot talk its way past a check it is never asked about"*, taken as a whole property of the build. The Assistant still cannot change the flag and is still never asked — but it can ask the **User** to change it, and a model that has read a hostile document may. The Runtime logs any requirement weaker than the code shipped with, naming the Operation, once per process; it does not override it.
+
+This was decided deliberately in favour of the User's sovereignty over their own money. Anyone reading this ADR alone should not come away believing the check is un-talk-past-able.
