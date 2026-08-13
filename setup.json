@@ -1,7 +1,7 @@
 {
   "serverPackage": {
-    "current": "com.mgmtp.assistants.server",
-    "alternative": "com.mgmtp.assistants.server"
+    "current": "com.grtnr.assistants.server",
+    "alternative": "com.grtnr.assistants.server"
   },
   "serverApplication": {
     "current": "AssistantsServerApplication",
@@ -12,12 +12,12 @@
     "alternative": "AssistantsInitApplication"
   },
   "projectProperties": {
-    "current": "mgmtp.assistants.server",
-    "alternative": "mgmtp.assistants.server"
+    "current": "grtnr.assistants.server",
+    "alternative": "grtnr.assistants.server"
   },
   "projectGroup": {
-    "current": "com.mgmtp.assistants",
-    "alternative": "com.mgmtp.assistants"
+    "current": "com.grtnr.assistants",
+    "alternative": "com.grtnr.assistants"
   },
   "projectName": {
     "current": "assistants",

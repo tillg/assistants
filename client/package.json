@@ -1,5 +1,5 @@
 {
-  "name": "@com.mgmtp.assistants/client",
+  "name": "@assistants/client",
   "description": "Assistants",
   "publishConfig": {
     "registry": "<YOUR_CLIENT_PUBLISH_CONFIG_REGISTRY>"

@@ -1,5 +1,5 @@
 {
-  "name": "@com.mgmtp.assistants/e2e",
+  "name": "@assistants/e2e",
   "description": "End to end test for Assistants",
   "author": "Till Gartner",
   "license": "EUPL-1.2",

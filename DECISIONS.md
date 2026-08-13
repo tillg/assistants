@@ -242,6 +242,29 @@ exclusion list (pointless).
 
 **Reversal cost**: Trivial.
 
+**Amended (2026-08-13)**: the original wording knows two kinds of file — mgm's and ours — but
+the sweep that finally corrected the notices found three, and the difference is legal, not
+cosmetic. EUPL Art. 5 requires *preserving* an upstream copyright notice, not replacing it, so a
+template file we have since edited must carry both names:
+
+| Origin | Count | Header |
+| --- | --- | --- |
+| Written here, mgm header copy-pasted in error | 21 | `(c) Till Gartner`, `EUPL-1.2` |
+| From the template, modified since | 30 | both copyrights, `EUPL-1.2` |
+| From the template, untouched since `f9b27ba` | 56 | left exactly as shipped |
+
+The split is mechanical — `git log f9b27ba..HEAD -- <file>` decides it — so it can be recomputed
+rather than remembered. `LICENSE`, `NOTICE` and `THIRD_PARTY_NOTICES` no longer describe the
+"mgm A12 Platform"; they describe Assistants, credit the template under *Portions of this work*,
+and disclaim mgm affiliation. A12 is dual-licensed (EUPL-1.2 or commercial) and we consume it
+unmodified, so nothing obliged us to any licence: we take the EUPL-1.2 option and drop the
+commercial half, which was never ours to offer.
+
+Three files sit on the boundary — `AssistantsServerApplication`, `MimeTypeValidator`,
+`AttachmentEventListener` are our application's classes but arrived with the template and were
+never edited, so they counted as untouched and kept mgm's header. Editing any of them moves it
+to the middle row.
+
 ---
 
 ## D-009 — What the grilling changed
@@ -406,7 +429,7 @@ of them is written down anywhere else.
 4. **An empty `repositoryPolicies: []`** in `childAuthorizationDefinition.json` fails the whole
    server's startup. The key has to be absent, not empty.
 5. **A dot in the Docker image group** makes Docker read the first path segment as a registry
-   hostname and try to resolve it over DNS. `com.mgmtp.assistants/frontend` is a DNS lookup;
+   hostname and try to resolve it over DNS. `com.grtnr.assistants/frontend` is a DNS lookup;
    `assistants/frontend` is a local image.
 6. **`docker compose` takes its project name from the directory**, not from any variable in the
    `--env-file`, so containers were `assistants_*` while volumes were `compose_*`.

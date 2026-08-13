@@ -104,7 +104,7 @@ tasks.register('runTypedAccessorGenerator', JavaExec) {
     mainClass = 'com.mgmtp.a12.kernel.md.document.typed_accessor_gen.TypedAccessorGenerator'
 
     def modelPath = rootProject.file('build/wcf-output/data/models')
-    def packagePrefix = 'com.mgmtp.assistants.server.typings'
+    def packagePrefix = 'com.grtnr.assistants.server.typings'
 
     doFirst {
         def documentModels = fileTree(dir: modelPath, include: ['**/*_DM.json', '**/*_CDM.json'])
@@ -129,7 +129,7 @@ processResources {
 }
 
 springBoot {
-    mainClass = 'com.mgmtp.assistants.server.AssistantsServerApplication'
+    mainClass = 'com.grtnr.assistants.server.AssistantsServerApplication'
     buildInfo {
         properties {
             version = project.version

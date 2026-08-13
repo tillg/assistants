@@ -30,16 +30,27 @@
  * LEGALLY INVALID. SEE THE RESPECTIVE LICENSE TEXT FOR DETAILS.
  */
 
-package com.mgmtp.assistants.server;
+package com.grtnr.assistants.server.attachment;
 
-import org.springframework.boot.SpringApplication;
+import com.mgmtp.a12.dataservices.common.exception.InvalidInputException;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
-import com.mgmtp.a12.dataservices.DataServicesApplication;
+import java.util.List;
 
-@DataServicesApplication(scanBasePackages = {DataServicesApplication.DATASERVICES_BASE_PACKAGE,
-        "com.mgmtp.assistants.server", "com.mgmtp.a12.rmc"})
-public class AssistantsServerApplication {
-    public static void main(String[] args) {
-        SpringApplication.run(AssistantsServerApplication.class, args);
+import static com.mgmtp.a12.dataservices.exception.ExceptionKeys.ATTACHMENT_INVALID_TYPE_ERROR_KEY;
+
+@Component
+public class MimeTypeValidator {
+    @Value("${grtnr.assistants.server.attachment.allowedMimeTypes:*}")
+    private List<String> allowedMimeTypes;
+
+    public void validateMimeType(String mimeType) {
+        String detectedMimeGroup = mimeType.substring(0, mimeType.indexOf('/') + 1) + '*';
+
+        if (!allowedMimeTypes.contains("*") && !allowedMimeTypes.contains(detectedMimeGroup)
+                && !allowedMimeTypes.contains(mimeType)) {
+            throw new InvalidInputException(ATTACHMENT_INVALID_TYPE_ERROR_KEY, "Invalid MIME type.");
+        }
     }
 }

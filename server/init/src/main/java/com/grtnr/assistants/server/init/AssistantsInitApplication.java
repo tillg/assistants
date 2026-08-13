@@ -30,24 +30,17 @@
  * LEGALLY INVALID. SEE THE RESPECTIVE LICENSE TEXT FOR DETAILS.
  */
 
-package com.mgmtp.assistants.server.event;
+package com.grtnr.assistants.server.init;
 
-import org.springframework.stereotype.Component;
+import com.mgmtp.a12.dataservices.DataServicesApplication;
+import com.mgmtp.a12.dataservices.init.app.InitAppApplication;
 
-import com.mgmtp.a12.dataservices.common.events.CommonDataServicesEventListener;
-import com.mgmtp.a12.dataservices.common.events.ContentTypeDetectedEvent;
-import com.mgmtp.assistants.server.attachment.MimeTypeValidator;
-
-@Component
-public class AttachmentEventListener {
-    private final MimeTypeValidator mimeTypeValidator;
-
-    public AttachmentEventListener(MimeTypeValidator mimeTypeValidator) {
-        this.mimeTypeValidator = mimeTypeValidator;
-    }
-
-    @CommonDataServicesEventListener
-    public void onContentTypeDetection(ContentTypeDetectedEvent event) {
-        mimeTypeValidator.validateMimeType(event.getDetectedMimeType());
+@DataServicesApplication(scanBasePackages = {
+        DataServicesApplication.DATASERVICES_BASE_PACKAGE,
+        "com.grtnr.assistants.server.init"
+})
+public class AssistantsInitApplication {
+    public static void main(String[] args) {
+        InitAppApplication.run(args, AssistantsInitApplication.class);
     }
 }

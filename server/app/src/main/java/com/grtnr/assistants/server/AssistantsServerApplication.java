@@ -30,17 +30,16 @@
  * LEGALLY INVALID. SEE THE RESPECTIVE LICENSE TEXT FOR DETAILS.
  */
 
-package com.mgmtp.assistants.server.init;
+package com.grtnr.assistants.server;
+
+import org.springframework.boot.SpringApplication;
 
 import com.mgmtp.a12.dataservices.DataServicesApplication;
-import com.mgmtp.a12.dataservices.init.app.InitAppApplication;
 
-@DataServicesApplication(scanBasePackages = {
-        DataServicesApplication.DATASERVICES_BASE_PACKAGE,
-        "com.mgmtp.assistants.server.init"
-})
-public class AssistantsInitApplication {
+@DataServicesApplication(scanBasePackages = {DataServicesApplication.DATASERVICES_BASE_PACKAGE,
+        "com.grtnr.assistants.server", "com.mgmtp.a12.rmc"})
+public class AssistantsServerApplication {
     public static void main(String[] args) {
-        InitAppApplication.run(args, AssistantsInitApplication.class);
+        SpringApplication.run(AssistantsServerApplication.class, args);
     }
 }
