@@ -172,7 +172,8 @@
                       {
                         "type": "Control",
                         "id": "ctrl_key",
-                        "elementRef": "f_key"
+                        "elementRef": "f_key",
+                        "readonly": true
                       },
                       {
                         "type": "Control",
@@ -194,12 +195,14 @@
                       {
                         "type": "Control",
                         "id": "ctrl_system",
-                        "elementRef": "f_system"
+                        "elementRef": "f_system",
+                        "readonly": true
                       },
                       {
                         "type": "Control",
                         "id": "ctrl_kind",
-                        "elementRef": "f_kind"
+                        "elementRef": "f_kind",
+                        "readonly": true
                       }
                     ]
                   }
@@ -294,7 +297,8 @@
                       {
                         "type": "Control",
                         "id": "ctrl_mutating",
-                        "elementRef": "f_mutating"
+                        "elementRef": "f_mutating",
+                        "readonly": true
                       },
                       {
                         "type": "Control",
@@ -394,7 +398,8 @@
                       {
                         "type": "Control",
                         "id": "ctrl_parameters",
-                        "elementRef": "f_parameters"
+                        "elementRef": "f_parameters",
+                        "readonly": true
                       }
                     ]
                   }
@@ -408,24 +413,8 @@
     "fieldConfiguration": {
       "field": [
         {
-          "elementRef": "f_key",
-          "readonly": true
-        },
-        {
-          "elementRef": "f_system",
-          "readonly": true
-        },
-        {
-          "elementRef": "f_kind",
-          "readonly": true
-        },
-        {
           "elementRef": "f_description",
           "exposition": "AREA"
-        },
-        {
-          "elementRef": "f_mutating",
-          "readonly": true
         },
         {
           "elementRef": "f_notes",
@@ -433,7 +422,6 @@
         },
         {
           "elementRef": "f_parameters",
-          "readonly": true,
           "exposition": "AREA"
         }
       ]

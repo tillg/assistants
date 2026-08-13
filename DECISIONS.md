@@ -1045,3 +1045,29 @@ which is now only half of what it is denied.
 
 **Still outstanding**: architecture.md wants the narrow-name caveat documented in the roles table and
 the permissions table as well. Those live outside `import/auth/` and are picked up in phase I.
+
+## D-030 — `readonly` goes on the Control, not in `fieldConfiguration`
+
+*Found in the browser and fixed 2026-08-14 00:40 CEST.*
+
+`Operation_FM` was authored with `"readonly": true` inside `content.fieldConfiguration.field[]` for
+the five code-owned fields (`Key`, `System`, `Kind`, `Mutating`, `Parameters`). Opening the form in
+the web application showed all five **editable** — `document.querySelectorAll('input')` reported
+`readOnly: false` on `a12-Key-f_key`, `a12-System-f_system` and `a12-Kind-f_kind`.
+
+`CONVENTIONS.md` already warns that `"readonly": true` in `fieldConfiguration` *"has no effect on an
+`EnumerationType` — put it on the Control instead"*. The measured behaviour here is broader than
+that note: these are `StringType`s and it had no effect on them either. `Conversation_FM` — the one
+genuinely read-only form in the repo, and the one that demonstrably works — puts `readonly` on the
+**Control**, every time.
+
+**Decided**: moved `readonly` onto the five Controls, and kept `fieldConfiguration` entries only
+where they still carry an `exposition` (`f_description`, `f_notes`, `f_parameters`). This also
+respects the "each `elementRef` at most once" rule, since `f_parameters` needs both and now gets its
+`readonly` from one place and its `AREA` from the other.
+
+**Still to confirm**: whether the fieldConfiguration form ever worked, or only fails in *create*
+mode. I saw it on a new document because the catalogue was empty until phase F. The assertion is
+re-checked against a seeded Operation in phase H; if `readonly` on the Control also fails to bind
+there, `CONVENTIONS.md`'s note needs widening from "EnumerationType" to "any field", which is a
+change to a document other people rely on and so is not being made on one data point.
