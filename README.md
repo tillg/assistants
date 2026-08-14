@@ -265,6 +265,28 @@ makes both of those cases unreachable.
 | `just pause` | Sets `RuntimeState.paused` — the global kill switch | An Assistant is doing something you did not expect |
 | `just resume` | Clears it | After you have looked |
 
+### Migrations
+
+`import/migrations/` holds SQL for the changes a model rename cannot make on its own. There is no
+recipe: each is a one-off, applied by hand against the Data Service's database, and each says in its
+own header when to run it and what happens if you do not.
+
+**There is one, and it is not optional if you are pulling onto an existing volume.**
+`2026-08-13-assistant-tools-to-grants.sql` renames the stored `Assistant.Tools` group to `Grants`.
+A12 does not treat a stored group its model no longer declares as absent — it fails the document's
+validation inside the query re-index the server runs at startup, and that aborts startup, so the
+**server never comes up**. It presents as a restart loop with no obvious cause. Run it after
+`just build && just up` has imported the new models, then restart the server:
+
+```bash
+docker exec -i assistants_postgres psql -U "$DATASERVICES_USERNAME" -d "$DATASERVICES_DB" \
+    < import/migrations/2026-08-13-assistant-tools-to-grants.sql
+docker restart assistants_server
+```
+
+It is idempotent — its `WHERE` clause matches only documents that still carry the old group — so
+running it on a fresh stack, or twice, does nothing.
+
 ### Tests
 
 | Recipe | What it does | When you want it |

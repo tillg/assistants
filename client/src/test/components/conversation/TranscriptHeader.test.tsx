@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 
 import { TranscriptHeader } from "../../../components/conversation/TranscriptHeader";
 import { readEntries } from "../../../components/conversation/entries";
+import { ICONS } from "../../../components/conversation/icons";
 import { OPEN_FOREIGN_FORM } from "../../../sagas/openForeignForm";
 
 import { Frame, recordingStore } from "./harness";
@@ -59,9 +60,20 @@ describe("TranscriptHeader", () => {
         expect(screen.getByTestId("transcript-blocked")).toHaveTextContent("🛑");
     });
 
+    it("hides the marker's glyph from a reader who is read to, as every other glyph is hidden", () => {
+        renderHeader(conversation({ Status: "waiting", WaitingFor: "user", CurrentQuestionId: "45e95914" }));
+
+        // The words already say it. Left in the accessible text the glyph is announced in front of
+        // them — "stop sign waiting for you" — which is noise, not information.
+        const blocked = screen.getByTestId("transcript-blocked");
+        expect(blocked).toHaveTextContent("waiting for you");
+        expect(blocked.querySelector("[aria-hidden='true']")).toHaveTextContent(ICONS.blocked);
+    });
+
     it("shows no marker when the Conversation is waiting on something else", () => {
         renderHeader(conversation({ Status: "waiting", WaitingFor: "tool" }));
 
+        expect(screen.getByTestId("transcript-state")).toHaveTextContent("turn 5/20");
         expect(screen.queryByTestId("transcript-blocked")).toBeNull();
     });
 
@@ -127,6 +139,7 @@ describe("TranscriptHeader", () => {
     it("has no parent link when nothing called this Conversation", () => {
         renderHeader(conversation({}));
 
+        expect(screen.getByTestId("transcript-who")).toHaveTextContent("accountant");
         expect(screen.queryByTestId("transcript-parent-link")).toBeNull();
     });
 

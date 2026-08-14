@@ -135,6 +135,22 @@ describe("clusterEntries", () => {
         expect(clusters).toHaveLength(2);
     });
 
+    it("still sees the pause that follows an instant it could not read", () => {
+        const clusters = clusterEntries([
+            entry(1, "2026-08-10T10:00:00"),
+            entry(2, "not-a-date", { kind: "note" }),
+            entry(3, "2026-08-20T10:00:00")
+        ]);
+
+        // The unreadable Entry joins the cluster it arrived in, which is the best that can be said about
+        // it. What must not happen is that it becomes the instant the ten-day gap after it is measured
+        // from: every later comparison would then answer "no separator due", and the pause — the
+        // Conversation's most characteristic feature — would vanish from the thread entirely.
+        expect(clusters).toHaveLength(2);
+        expect(clusters[0]?.items).toHaveLength(2);
+        expect(clusters[1]?.items).toHaveLength(1);
+    });
+
     it("labels each cluster from the instant it begins", () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date(2026, 7, 13, 23, 59, 0));

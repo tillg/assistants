@@ -4,6 +4,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { LoggerFactory } from "@com.mgmtp.a12.utils/utils-logging";
 
 import { PendingQuestion } from "../../../components/conversation/PendingQuestion";
+import { ICONS } from "../../../components/conversation/icons";
 import { OPEN_FOREIGN_FORM } from "../../../sagas/openForeignForm";
 
 import { Frame, recordingStore, serveDocuments } from "./harness";
@@ -92,5 +93,16 @@ describe("PendingQuestion", () => {
         expect(screen.queryByTestId("pending-question")).toBeNull();
         expect(screen.queryByTestId("pending-question-answer")).toBeNull();
         expect(screen.getAllByTestId("transcript-message")).toHaveLength(1);
+    });
+
+    it("keeps the glyph on that line out of the accessible text, whose words already say it", async () => {
+        serveDocuments({});
+
+        renderPending("45e95914");
+
+        await waitFor(() => expect(screen.getByTestId("transcript-message")).toBeInTheDocument());
+        const message = screen.getByTestId("transcript-message");
+        expect(message).toHaveTextContent("A question is pending, but it could not be read.");
+        expect(message.querySelector("[aria-hidden='true']")).toHaveTextContent(ICONS.blocked);
     });
 });

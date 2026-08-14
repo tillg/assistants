@@ -17,4 +17,13 @@ So the catalogue moves into the ThingStore. `Operation_DM` holds one Thing per O
 - **Bootstrap gains a third behaviour: re-apply what the code knows, never re-apply a decision.** `Assistant` is re-applied entirely, `RuntimeState` is left alone, and `Operation` is both — the mechanical mirror (`system`, `kind`, `parameters`, `mutating`) tracks the code, while the prose, `requiresApproval`, `enabled` and `notes` are created once and never touched again. A description improved in code therefore reaches only fresh installs; bootstrap reports the divergence by name so nobody has to discover it.
 - **A grant that resolves to nothing is now said out loud, to the model as well as the log.** Resolution returns what was dropped and why — never granted, switched off, unimplemented, unparseable — so a model calling a switched-off Operation is told it is switched off, rather than that it was never one of its tools.
 - `Assistant_DM`'s grant group is renamed, and stored Assistants read as grant-less until the next bootstrap re-seeds them. Recoverable, because Assistant seeds are re-applied in full; a grant added by hand in the web application and never written into a seed would not be. There are none.
+
+  **Amendment, 2026-08-14.** The consequence above is wrong, and the way it is wrong matters. A12
+  does **not** read a stored group its model no longer declares as absent — it fails the document's
+  validation, inside the query re-index the server runs at startup, and the batch failure aborts
+  startup. The server does not come up at all; it was diagnosed after **34 restart loops**. So the
+  blast radius is the whole stack rather than one Assistant's empty grant list, and the change ships
+  a migration for it: `import/migrations/2026-08-13-assistant-tools-to-grants.sql`, idempotent, run
+  after the new model is imported. The body above is left as written history, per the convention this
+  repo set on [ADR-0018](0018-an-operation-may-require-an-approval.md).
 - The catalogue answers *what exists*. **It does not answer who may.** That still means opening each Assistant. Computing the reverse index onto the Operation Thing was rejected — the only component positioned to do it is the Runtime, which this decision specifically forbids from writing `Operation_DM` — and the honest route, a read-side join in the web application, is a later change.

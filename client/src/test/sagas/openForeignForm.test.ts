@@ -1,8 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ActivityActions } from "@com.mgmtp.a12.client/client-core";
+import { LoggerFactory } from "@com.mgmtp.a12.utils/utils-logging";
 
-import { openForeignForm, openForeignFormWorker } from "../../sagas/openForeignForm";
+import {
+    OPEN_FOREIGN_FORM,
+    OpenForeignFormSaga,
+    openForeignForm,
+    openForeignFormWorker
+} from "../../sagas/openForeignForm";
 
 const REQUEST = openForeignForm({
     module: "OpenQuestion",
@@ -102,5 +108,51 @@ describe("openForeignFormWorker", () => {
 
         expect(dispatched).toHaveLength(2);
         expect(descriptorOf(dispatched[0])).toEqual({ module: "Conversation" });
+    });
+
+    it("swallows a jump that failed, because every jump after it still has to work", () => {
+        const warn = vi.spyOn(LoggerFactory.getLogger("PT/openForeignForm"), "warn").mockImplementation(() => {});
+        const saga = openForeignFormWorker(REQUEST);
+        saga.next();
+
+        // `takeEvery` forks the worker, and an error escaping a fork ends the parent that forked it. Let
+        // this one out and the saga is gone for the session: every later Answer, *about* and *called by*
+        // becomes a click that does nothing, with nothing on screen to say why.
+        expect(saga.throw(new Error("the activity map is gone")).done).toBe(true);
+        expect(warn).toHaveBeenCalledOnce();
+    });
+});
+
+/** The `takeEvery` the saga installs, as redux-saga frames it: a pattern, and the worker it forks. */
+function wiring(): { readonly matches: (action: unknown) => boolean; readonly worker: unknown } {
+    const effect = OpenForeignFormSaga().next().value as {
+        payload: { args: [(action: unknown) => boolean, unknown] };
+    };
+    return { matches: effect.payload.args[0], worker: effect.payload.args[1] };
+}
+
+/** The wiring itself, which every test above skips by driving the worker directly. */
+describe("OpenForeignFormSaga", () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it("forks the worker for its own action", () => {
+        const { matches, worker } = wiring();
+
+        expect(matches(REQUEST)).toBe(true);
+        expect(worker).toBe(openForeignFormWorker);
+    });
+
+    it("ignores everything else, including what is not an action at all", () => {
+        const { matches } = wiring();
+
+        // The predicate reads `.type` off whatever the store dispatched, and a store carries actions
+        // from the whole platform — so the non-objects have to be answered, not assumed away.
+        expect(matches({ type: "a12/somethingElse" })).toBe(false);
+        expect(matches({ type: `${OPEN_FOREIGN_FORM}/suffixed` })).toBe(false);
+        expect(matches(undefined)).toBe(false);
+        expect(matches(null)).toBe(false);
+        expect(matches("a string")).toBe(false);
     });
 });

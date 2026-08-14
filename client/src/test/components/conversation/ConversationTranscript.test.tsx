@@ -116,6 +116,35 @@ describe("ConversationTranscript", () => {
         expect(screen.queryAllByTestId("transcript-separator")).toHaveLength(0);
     });
 
+    it("gives every Bubble its own key, even where the document carried no Seq", () => {
+        const complaints = vi.spyOn(console, "error").mockImplementation(() => {});
+
+        renderTranscript(
+            conversationWith([
+                { At: "2026-07-23T15:09:00", Role: "assistant", Kind: "note", Text: "First." },
+                { At: "2026-07-23T15:09:01", Role: "assistant", Kind: "note", Text: "Second." }
+            ])
+        );
+
+        // Both Entries read as `seq: 0`, so a key built from `seq` collided. That is not a cosmetic
+        // warning: a Receipt holds open/closed in `useState`, and React reconciling the wrong child
+        // opens the wrong Receipt.
+        expect(complaints.mock.calls.map((call) => String(call[0])).filter((line) => line.includes("same key"))).toEqual(
+            []
+        );
+        expect(screen.getAllByTestId("transcript-bubble")).toHaveLength(2);
+    });
+
+    it("is reachable by keyboard, because it owns the scroll a reader has to move", () => {
+        renderTranscript(fixture);
+
+        // Nothing between the Bubbles takes focus, so without a stop of its own a reader who does not
+        // use a mouse sees the first screenful and no more (WCAG 2.1.1).
+        const box = screen.getByTestId("conversation-transcript");
+        expect(box).toHaveAttribute("tabindex", "0");
+        expect(box).toHaveAccessibleName("Conversation transcript");
+    });
+
     it("is a box of the modelled height that scrolls on its own", () => {
         render(
             <Frame>
@@ -147,6 +176,7 @@ describe("ConversationTranscript", () => {
 
         renderTranscript(fixture);
 
+        expect(screen.getAllByTestId("transcript-bubble")).toHaveLength(6);
         expect(screen.queryByTestId("pending-question")).toBeNull();
         expect(screen.queryByTestId("transcript-message")).toBeNull();
         expect(server.asked).toHaveLength(0);
