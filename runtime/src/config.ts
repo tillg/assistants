@@ -64,6 +64,12 @@ export interface Config {
     readonly leaseSeconds: number;
     readonly maxBirthsPerHour: number;
     readonly maxEscalations: number;
+    /**
+     * Sent to the provider only when set, so its own default stands otherwise. Exists because a
+     * local quantized model needs `0` to emit structured tool calls rather than markup as prose —
+     * see `OpenAiProvider`.
+     */
+    readonly llmTemperature: number | undefined;
     readonly llmMaxAttempts: number;
     readonly uiBaseUrl: string;
     /**
@@ -113,6 +119,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         leaseSeconds: number("LEASE_SECONDS", 120),
         maxBirthsPerHour: number("MAX_BIRTHS_PER_HOUR", 200),
         maxEscalations: number("MAX_ESCALATIONS", 3),
+        llmTemperature:
+            process.env["LLM_TEMPERATURE"] === undefined || process.env["LLM_TEMPERATURE"] === ""
+                ? undefined
+                : number("LLM_TEMPERATURE", 0),
         llmMaxAttempts: number("LLM_MAX_ATTEMPTS", 3),
         uiBaseUrl: optional("UI_BASE_URL", "http://localhost:8081"),
         // The household this system was written for is in Germany — every model is bilingual and the

@@ -216,7 +216,7 @@ function buildProvider(
 ): LlmProvider {
     switch (config.llmProvider) {
         case "openai":
-            return new OpenAiProvider(config.llmBaseUrl, config.llmApiKey);
+            return new OpenAiProvider(config.llmBaseUrl, config.llmApiKey, fetch, config.llmTemperature);
         case "anthropic":
             return new AnthropicProvider(config.llmBaseUrl, config.llmApiKey);
         case "scripted":

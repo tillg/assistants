@@ -26,18 +26,41 @@ interface OpenAiUsage {
     completion_tokens?: number;
 }
 
+/**
+ * The markup a Qwen-family model emits when its tool call is not parsed into `tool_calls`.
+ *
+ * Deliberately narrow: it must not match an Assistant legitimately *discussing* a tool call in
+ * prose. `<function=` and `<tool_call>` together with an opening angle bracket are the wire markers
+ * the parser itself looks for, so matching them means the gateway saw the same thing and gave up.
+ */
+const MALFORMED_TOOL_CALL = /<tool_call>|<function=/;
+
 export class OpenAiProvider implements LlmProvider {
     readonly name = "openai";
 
+    /**
+     * `temperature` is sent only when configured, so the provider's own default stands unless
+     * someone has a reason to override it.
+     *
+     * The reason that exists today is local, quantized models. Measured against a 4-bit Qwen3
+     * served over this same OpenAI-compatible API: at the default temperature it emits its
+     * tool-call markup as **plain assistant text** — `<function=thingstore__get>…` — with
+     * `finish_reason: "stop"`. The Runtime then reads a perfectly ordinary answer, ends the
+     * Conversation `answered`, and records the markup as the Result. Nothing errors, nothing is
+     * retried, and the Conversation looks successful having done nothing at all. At temperature 0
+     * the same model returns a structured `tool_calls` array.
+     */
     constructor(
         private readonly baseUrl: string,
         private readonly apiKey: string,
         private readonly fetchImpl: typeof fetch = fetch,
+        private readonly temperature?: number,
     ) {}
 
     async complete(request: LlmRequest): Promise<LlmResponse> {
         const body = {
             model: request.model,
+            ...(this.temperature === undefined ? {} : { temperature: this.temperature }),
             messages: request.messages.map((message) => {
                 if (message.role === "tool") {
                     return { role: "tool", content: message.content, tool_call_id: message.toolCallId };
@@ -98,8 +121,27 @@ export class OpenAiProvider implements LlmProvider {
             arguments: parseArguments(call.function.arguments),
         }));
 
+        const text = choice.message.content ?? "";
+
+        // A tool call the gateway failed to parse arrives as an ordinary answer, and that is the
+        // worst shape it could take: `finish_reason: "stop"`, no `tool_calls`, and markup where the
+        // prose should be. Measured against a 4-bit local model — it emits
+        // `<function=thingstore__get>…</tool_call>` as content, the Turn reads a perfectly good
+        // answer, the Conversation ends `answered`, and the markup becomes its Result. Nothing
+        // errors and nothing retries: a Conversation that did nothing looks like one that finished.
+        //
+        // Reported as an error instead, which is a shape the loop already knows how to carry: the
+        // model sees it on the next Turn and can call the Operation properly. ADR-0015 is the rule
+        // being kept here — nothing ends silently, least of all something that ended by accident.
+        if (toolCalls.length === 0 && MALFORMED_TOOL_CALL.test(text)) {
+            const message =
+                "The model emitted a tool call as text rather than as a structured call, so nothing was " +
+                "invoked. Call the Operation again through the tool interface.";
+            return { text, toolCalls: [], finishReason: "error", error: { message, transient: true } };
+        }
+
         return {
-            text: choice.message.content ?? "",
+            text,
             toolCalls,
             finishReason:
                 toolCalls.length > 0
