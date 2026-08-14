@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import { OpenAiProvider } from "../src/llm/openai.js";
+import { TransientLlmError } from "../src/llm/provider.js";
 import type { LlmRequest } from "../src/llm/provider.js";
 
 const REQUEST: LlmRequest = {
@@ -70,13 +71,9 @@ describe("the OpenAI-compatible provider", () => {
             }),
         );
 
-        const response = await provider.complete(REQUEST);
-
-        expect(response.finishReason).toBe("error");
-        expect(response.error?.message).toMatch(/as text rather than as a structured call/);
-        // Transient: the next Turn shows the model its own mistake, and it can call properly.
-        expect(response.error?.transient).toBe(true);
-        expect(response.toolCalls).toHaveLength(0);
+        // Transient, so the Turn retries it rather than escalating something the model can fix.
+        await expect(provider.complete(REQUEST)).rejects.toThrow(/as text rather than as a structured call/);
+        await expect(provider.complete(REQUEST)).rejects.toBeInstanceOf(TransientLlmError);
     });
 
     it("still reads an ordinary answer as an answer", async () => {

@@ -134,10 +134,15 @@ export class OpenAiProvider implements LlmProvider {
         // model sees it on the next Turn and can call the Operation properly. ADR-0015 is the rule
         // being kept here — nothing ends silently, least of all something that ended by accident.
         if (toolCalls.length === 0 && MALFORMED_TOOL_CALL.test(text)) {
-            const message =
-                "The model emitted a tool call as text rather than as a structured call, so nothing was " +
-                "invoked. Call the Operation again through the tool interface.";
-            return { text, toolCalls: [], finishReason: "error", error: { message, transient: true } };
+            // Thrown rather than returned, so `callLlmWithRetries` retries it inside the Turn. A
+            // malformed emission is exactly the failure a retry fixes — the same prompt at
+            // temperature 0 usually parses on the next attempt — and going straight to the User
+            // would escalate something the model can correct unaided. `llmMaxAttempts` bounds it,
+            // and a model that degrades every time still ends up in front of the User.
+            throw new TransientLlmError(
+                "The model emitted a tool call as text rather than as a structured call, so nothing " +
+                    "was invoked.",
+            );
         }
 
         return {
