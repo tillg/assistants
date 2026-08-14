@@ -139,6 +139,29 @@ describe("a grant the catalogue cannot honour", () => {
         expect(log.lines().join("\n")).toMatch(/JSON|token|position/i);
         log.restore();
     });
+
+    it.each(["null", "5", "true", '"x"'])(
+        "drops an Operation whose Parameters are the valid JSON %s, which is not a schema",
+        (parameters) => {
+            // Parsing was the whole guard, and all four of these parse. `null` was the one that
+            // killed a Conversation outright: `withCalleeBound` read `properties` off it, the
+            // TypeError left `advance()`, and nothing above it escalates — so the Conversation was
+            // retried every two seconds forever with the heartbeat green. The other three reached
+            // the provider as a `tools` entry whose parameters are a number, a boolean or a string.
+            const registry = registryWith(implementation("assistant.call", { mutating: true }));
+            const log = warnings();
+
+            const { granted, dropped } = registry.grantedTo(assistant(["assistant.call:accountant"]), [
+                operation("assistant.call", { parameters }),
+            ]);
+
+            expect(granted).toEqual([]);
+            expect(dropped).toEqual([{ key: "assistant.call:accountant", reason: "unparseable" }]);
+            // The reader is told what it got, not merely that it was wrong.
+            expect(log.lines().join("\n")).toMatch(/JSON object/);
+            log.restore();
+        },
+    );
 });
 
 describe("what the resolved Operation is made of", () => {
@@ -245,6 +268,26 @@ describe("the three properties that were each a bug once", () => {
 
         expect(granted.map((one) => one.name)).toEqual(["email.send"]);
         expect(dropped).toEqual([]);
+    });
+
+    it("collapses a duplicated assistant.call too, per callee", () => {
+        // The dedup check sat in the branch the callee-bound grants never take, so two grants
+        // naming one callee produced two functions of the same name in the provider's `tools`
+        // array — which OpenAI rejects outright, failing the whole Turn rather than the grant.
+        const registry = registryWith(call);
+        const log = warnings();
+
+        const { granted, dropped } = registry.grantedTo(
+            assistant(["assistant.call:accountant", "assistant.call:accountant", "assistant.call:auditor"]),
+            catalogue,
+        );
+
+        expect(granted.map((one) => one.name)).toEqual([
+            "assistant.call:accountant",
+            "assistant.call:auditor",
+        ]);
+        expect(dropped).toEqual([]);
+        log.restore();
     });
 
     it("leaves calleesOf alone: it is string work over the grants and needs no catalogue", () => {

@@ -133,6 +133,18 @@ const CASES = [
             }),
     },
     {
+        name: "Operation_DM's f_idempotencyKey losing its indexed annotation",
+        why: "every Operation is found by this field, so unindexed it answers nothing and `just bootstrap` creates seventeen duplicates on every run",
+        expect: /f_idempotencyKey|indexed/i,
+        break: (dir) =>
+            edit(dir, "operation/Operation_DM.json", (model) => {
+                const field = fieldById(model, "f_idempotencyKey");
+                field.annotations = (field.annotations ?? []).filter(
+                    (annotation) => annotation.name !== "indexed",
+                );
+            }),
+    },
+    {
         name: "a CustomScreenElement whose `exposes` names no such group",
         why: "the annotation is a coverage claim; a typo would silently cover nothing, which is worse than the warning it replaced",
         expect: /exposes|not a group/i,

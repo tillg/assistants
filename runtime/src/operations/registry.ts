@@ -178,6 +178,17 @@ export class OperationRegistry {
 
         const granted: GrantedOperation[] = [];
         const dropped: DroppedGrant[] = [];
+        /**
+         * Collapse duplicates on the **resolved** name — `assistant.call:accountant` for a bound
+         * callee, not the bare `assistant.call` two such grants share.
+         *
+         * The check used to sit in the non-`assistant.call` branch alone, so two grants naming one
+         * callee reached the provider as two identically named functions. OpenAI rejects that
+         * outright: the Turn fails, rather than the duplicate grant being quietly ignored.
+         */
+        const push = (operation: GrantedOperation) => {
+            if (!granted.some((existing) => existing.name === operation.name)) granted.push(operation);
+        };
         const drop = (key: string, reason: DroppedGrant["reason"], detail?: string) => {
             dropped.push({ key, reason });
             log.warn("a granted Operation was dropped", {
@@ -209,7 +220,21 @@ export class OperationRegistry {
             }
             let parameters: Record<string, unknown>;
             try {
-                parameters = JSON.parse(thing.parameters ?? "") as Record<string, unknown>;
+                // Parsing is not enough. `null`, `5`, `true` and `"x"` are all valid JSON and none
+                // of them is a parameter schema — and `null` is not merely useless: `withCalleeBound`
+                // reads `properties` off it, and the TypeError leaves `advance()` altogether. Nothing
+                // above it escalates, so the Conversation is retried on every scan forever while the
+                // heartbeat stays green, which is precisely the silent death ADR-0015 forbids. Same
+                // drop reason as a syntax error, because it is the same fault: this field is
+                // read-only in the form, so anything wrong with it came from a hand-edited document
+                // or a bad seed.
+                const parsed: unknown = JSON.parse(thing.parameters ?? "");
+                if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+                    throw new Error(
+                        `parameters are ${describeJson(parsed)}, and a parameter schema must be a JSON object`,
+                    );
+                }
+                parameters = parsed as Record<string, unknown>;
             } catch (error) {
                 drop(key, "unparseable", error instanceof Error ? error.message : String(error));
                 continue;
@@ -231,9 +256,9 @@ export class OperationRegistry {
                     drop(key, "self-call");
                     continue;
                 }
-                granted.push(withCalleeBound(operation, callee));
-            } else if (!granted.some((existing) => existing.name === operation.name)) {
-                granted.push(operation);
+                push(withCalleeBound(operation, callee));
+            } else {
+                push(operation);
             }
         }
         return { granted, dropped };
@@ -249,15 +274,12 @@ export class OperationRegistry {
     }
 
     /**
-     * Where the two vocabularies meet: Granted Operations in, the provider's `tools` array out.
-     * Past this point everything is the provider's.
+     * Resolve, then take the schemas. Convenient for a caller that wants nothing else — `advance()`
+     * is not one of them: it resolves once per Turn and calls {@link toolSchemas} on the result,
+     * so the advertised set and the executable set are literally the same list.
      */
     schemasFor(assistant: Assistant, catalogue: Operation[]): ToolSchema[] {
-        return this.grantedTo(assistant, catalogue).granted.map((operation) => ({
-            name: toolNameForLlm(operation.name),
-            description: operation.description,
-            parameters: operation.parameters,
-        }));
+        return toolSchemas(this.grantedTo(assistant, catalogue).granted);
     }
 
     /** The join itself: prose and approval from the Thing, behaviour from the Implementation. */
@@ -297,6 +319,25 @@ export class OperationRegistry {
                 : {}),
         };
     }
+}
+
+/**
+ * Where the two vocabularies meet: Granted Operations in, the provider's `tools` array out. Past
+ * this point everything is the provider's.
+ */
+export function toolSchemas(granted: GrantedOperation[]): ToolSchema[] {
+    return granted.map((operation) => ({
+        name: toolNameForLlm(operation.name),
+        description: operation.description,
+        parameters: operation.parameters,
+    }));
+}
+
+/** What the parsed value was, for the drop detail — the reader needs to know which JSON it got. */
+function describeJson(value: unknown): string {
+    if (value === null) return "null";
+    if (Array.isArray(value)) return "an array";
+    return `a ${typeof value}`;
 }
 
 /**

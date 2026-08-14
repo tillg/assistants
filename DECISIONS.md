@@ -1564,3 +1564,83 @@ plus five edited existing specs. Expect first-run breakage there; it will be rea
 4. Read the ⚠ entries above first: **D-027, D-033, D-034, D-041, D-042, D-046**. Those are the six
    places where I departed from something the artefacts had written down, rather than filling a gap
    they left.
+
+## D-049 — The adversarial review's most severe finding was a false positive
+
+*Checked 2026-08-14 03:30 CEST.*
+
+A review pass over the whole change set reported, as its top finding, that the `ASSISTANT_WRITE`
+policy's negation covers only the `String`/`DocumentV2` shapes, so a `DocumentUpdateResource` naming
+`Operation_DM` would be **permitted** — i.e. that the change's load-bearing mitigation had a hole and
+that D-029 certified coverage the boolean algebra did not deliver.
+
+**It does not.** Counting parenthesis depth rather than reading the expression by eye, the `!` opens
+at the first `.contains(` and closes at **character 545 of 545** — the last character of the rule. So
+the shape is already
+
+```
+hasAccessRight('ASSISTANT_WRITE') or !( X or (Y and Z) )
+```
+
+which is exactly the form the review proposed as the fix. Evaluating all six combinations:
+
+| resource shape | model | verdict |
+|---|---|---|
+| `String` | `Operation_DM` | DENY |
+| `DocumentV2` | `Operation_DM` | DENY |
+| `DocumentUpdateResource` | `Operation_DM` | **DENY** |
+| any of the three | `Invoice_DM` | PERMIT |
+
+**No change made.** Recording it because I came within one command of "fixing" a correct security
+rule into a different one, unverifiable, on a stack I cannot start — which would have been the worst
+outcome available. Two things stopped it: the permission classifier refused the scripted edit, and
+counting beat reading. The rest of that review's findings are being verified individually before any
+of them is acted on, for exactly this reason.
+
+## D-050 — Seven real defects the test suites did not catch
+
+*Found by adversarial review, reproduced and fixed 2026-08-14 03:35–03:50 CEST.*
+
+Unlike D-049, all seven of these reproduced. Each fix has a regression test that was **seen to fail
+first**. Runtime suite 162 → **171**.
+
+1. **A `Parameters` value that parses but is not an object killed a Conversation permanently.**
+   `"null"`, `"5"`, `"true"`, `"\"x\""` all survive `JSON.parse`, so the `unparseable` guard let them
+   through. For an `assistant.call` grant, `withCalleeBound` then dereferenced
+   `parameters["properties"]` → `TypeError` out of `grantedTo`, caught by `Watcher.runTurn` into a
+   log line — after which **the heartbeat is still stamped**. So the Conversation retried every scan
+   for ever, never escalated, and the stack reported healthy: exactly the silent death ADR-0015
+   exists to forbid. The parse now requires a non-null, non-array object.
+2. **Duplicate `assistant.call:<callee>` grants were not collapsed** — the dedup sat in the `else`
+   branch. Two identical function names reach the provider's `tools` array, which OpenAI rejects
+   outright, so *every* Turn of that Assistant would fail. architecture.md asserts duplicate
+   collapsing as a property that survives this change; it did not.
+3. **Bootstrap rewrote `UpdatedAt` on all seventeen Operations on every run**, and reported
+   `operationsUpdated: 17` for a no-op. That makes proposal.md's audit-trail argument — *"`__meta.creator`
+   and `updatedAt` record who weakened it and when"* — false as shipped, since after every `just dev`
+   the answer is "bootstrap, just now". Now compares the four mechanical fields and writes only on a
+   difference.
+4. **Drop warnings fired 2–3× per Turn**, because `grantedTo` was called once via `schemasFor`, again
+   in the tool-call loop, and again in `reconcile`. Fixed by **resolving once per Turn and passing the
+   result** rather than by deduplicating the log — dedup would hide a genuinely changing catalogue,
+   and one resolution makes architecture.md's *"the schemas offered to the LLM are derived from the
+   same call"* literally true instead of approximately true.
+5. **`Operation_DM` was missing from the validator's `WATCHER_FIELDS`.** Proved it mattered: stripping
+   all seven `indexed` annotations in a scratch copy still gave `0 error(s), 0 warning(s)`. Had
+   `f_idempotencyKey` ever lost the annotation, `findByIdempotencyKey` would return nothing and every
+   `just bootstrap` would create seventeen duplicate Operations — the exact hazard D-034 closed from
+   the UI side, left open from the model side.
+6. **A test that could not fail.** `bootstrap.test.ts` asserted `system` equalled the seed value after
+   a hand-edit that never touched `system` — true whether or not the mechanical mirror was re-applied.
+   The edit now writes a wrong value, and the test was proved to bite by disabling the mirror.
+7. **Two smaller ones**: a dropped `assistant.call:accountant` recorded the mangled
+   `assistant.call.accountant` on both the intent and the tool-result — the very mangling the
+   comment beside it claims was fixed, which the fix only covered when the Operation *resolved*, and
+   which the User can now see because the Receipt renders `toolName`. And `loadCatalogue`'s
+   hard cap of 100 was silent; a full page now warns, because past the ceiling a grant is dropped as
+   `absent` and the model is told the Operation does not exist.
+
+**What this says about the tiers**: 162 runtime tests, 78 integration and a clean `just check` did not
+catch any of these. Six of the seven are cases the artefacts describe correctly and the code got
+wrong — which is what an adversarial pass is for, and why it was worth doing while the browser was
+unavailable rather than waiting.

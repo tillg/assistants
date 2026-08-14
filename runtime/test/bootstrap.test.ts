@@ -161,6 +161,37 @@ describe("bootstrap", () => {
         expect(after.thingId).toBe(before.thingId);
     });
 
+    it("writes nothing on a re-run that changes nothing, so UpdatedAt still means something", async () => {
+        // `update()` stamps `updatedAt`, and the mirror was re-applied unconditionally — so every
+        // `just dev` moved the timestamp on all seventeen Operations and reported seventeen
+        // updates. `updatedAt` is what the audit trail rests on: it is meant to say when somebody
+        // weakened an approval, not when bootstrap last ran.
+        const harness = buildHarness([]);
+        clearCatalogue(harness.store);
+        await bootstrap(harness.things, harness.registry.all());
+        const before = await storedOperation(harness, VICTIM);
+        // Stamped by hand, below the store's one-second resolution, so the assertion cannot pass
+        // merely because the two runs fell in the same second.
+        const stamped = "2020-01-01T00:00:00";
+        const raw = await harness.store.getDocument(before.docRef);
+        await harness.store.modifyDocument(before.docRef, {
+            Operation: { ...(raw.document["Operation"] as Record<string, unknown>), UpdatedAt: stamped },
+        });
+        const writesBefore = harness.store.writes.length;
+
+        const result = await bootstrap(harness.things, harness.registry.all());
+
+        expect(result.operationsUpdated).toEqual([]);
+        expect(result.operationsCreated).toEqual([]);
+        expect((await storedOperation(harness, VICTIM)).data.updatedAt).toBe(stamped);
+        // Not one write against an Operation, rather than seventeen that changed nothing.
+        expect(
+            harness.store.writes
+                .slice(writesBefore)
+                .filter((write) => write.docRef.startsWith("Operation_DM/")),
+        ).toEqual([]);
+    });
+
     it("never re-applies the prose, and reports the divergence instead of resolving it", async () => {
         // The cost of the asymmetry, paid out loud. A developer who improves a description in the
         // seed does not reach a running system — and finds out from this list rather than by
@@ -195,6 +226,10 @@ describe("bootstrap", () => {
             requiresApproval: true,
             name: "Create an account (renamed by hand)",
             notes: "Switched off while the chart is being tidied.",
+            // Moved as well, and it is on the mechanical side of the line: without this the closing
+            // assertion held whether or not bootstrap re-applied anything, because creation had
+            // already written the seed's value and `update` merges.
+            system: "Typed into the wrong field",
         });
 
         await bootstrap(harness.things, harness.registry.all());

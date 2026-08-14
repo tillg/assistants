@@ -22,7 +22,7 @@ export interface BootstrapReport {
     created: string[];
     updated: string[];
     kept: string[];
-    /** Operations, by key. */
+    /** Operations, by key. `Updated` names the ones whose mirror actually changed, and no others. */
     operationsCreated: string[];
     operationsUpdated: string[];
     /**
@@ -46,7 +46,9 @@ export interface BootstrapReport {
  *   - An **Operation is half code and half decision**, and this is the half a reader will not guess:
  *     *bootstrap re-applies what the code knows and never re-applies a decision.* `system`, `kind`,
  *     `parameters` and `mutating` are the mechanical mirror of an Implementation, so they are
- *     rewritten on every run. `name`, `description`, `requiresApproval`, `enabled` and `notes` are
+ *     rewritten whenever they differ — and only then, because `updatedAt` is the audit trail and a
+ *     re-run that changes nothing must not move it. `name`, `description`, `requiresApproval`,
+ *     `enabled` and `notes` are
  *     the User's: written once, at creation, and never again — a kill switch that `just dev`
  *     disengages is not a kill switch.
  *
@@ -88,8 +90,20 @@ export async function bootstrap(
         };
         const existing = await things.findByIdempotencyKey<Operation>(SPECS.Operation_DM, key);
         if (existing) {
-            await things.update(SPECS.Operation_DM, existing.docRef, mirror);
-            operationsUpdated.push(implementation.name);
+            // Written only where the mirror actually differs. `update` stamps `updatedAt`, so an
+            // unconditional write moved the timestamp on all seventeen Operations on every run —
+            // and therefore on every `just dev`. That is the field the audit trail rests on: it is
+            // supposed to record who weakened an approval and when, not when bootstrap last ran.
+            // The report follows: `operationsUpdated` now names the Operations that changed.
+            const differs =
+                (existing.data.system ?? "") !== mirror.system ||
+                (existing.data.kind ?? "") !== mirror.kind ||
+                (existing.data.parameters ?? "") !== mirror.parameters ||
+                (existing.data.mutating ?? false) !== mirror.mutating;
+            if (differs) {
+                await things.update(SPECS.Operation_DM, existing.docRef, mirror);
+                operationsUpdated.push(implementation.name);
+            }
             if ((existing.data.description ?? "") !== seed.description) {
                 // The name the User sees in the catalogue — the stored one, which a rename may have
                 // moved away from the seed — with the key beside it, so whoever edited the seed

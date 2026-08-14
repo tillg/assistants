@@ -188,6 +188,63 @@ describe("the catalogue a Turn loads", () => {
 
         expect(reads).toBe(1);
     });
+
+    it("resolves the grants once per Turn, so one bad grant is one warning", async () => {
+        // `grantedTo` logs every drop, and it used to be called three times in a Turn — once for the
+        // schemas, once for the belt check, once by reconciliation — so a single mistyped grant put
+        // two or three identical lines in the log per Turn, per Conversation, forever. It is also
+        // what architecture.md means by "the schemas offered to the LLM are derived from the same
+        // call": one resolution, or the advertised set and the executable set are two answers.
+        const harness = buildHarness([
+            {
+                turn: 0,
+                toolCalls: [{ name: "thingstore__get", arguments: { model: "Party_DM", thingId: "p" } }],
+            },
+        ]);
+        const assistant = await harness.seedAssistant({
+            grants: [{ operationKey: "thingstore.get" }, { operationKey: "email.snd" }],
+        });
+        const docRef = await harness.birth({ assistant });
+        const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+        await harness.driver.advance(docRef);
+
+        const dropped = warnings.mock.calls
+            .map((call) => call.map(String).join(" "))
+            .filter((line) => line.includes("a granted Operation was dropped"));
+        warnings.mockRestore();
+        expect(dropped).toHaveLength(1);
+        expect(dropped[0]).toContain("email.snd");
+    });
+
+    it("says so when the catalogue fills a whole page, rather than truncating in silence", async () => {
+        // One page, and the store promises no order — so past the ceiling a Turn sees an arbitrary
+        // subset, and a grant naming one of the missing Operations is dropped as `absent`, which
+        // tells the model it does not exist.
+        const harness = buildHarness([{ text: "done.", finishReason: "answered" }]);
+        putCatalogue(
+            harness.store,
+            Array.from({ length: 100 - harness.catalogue.length }, (_, index) => ({
+                key: `filler.${index}`,
+                name: `Filler ${index}`,
+                system: "Runtime",
+                kind: "internal" as const,
+                description: "Created by hand.",
+                parameters: "{}",
+                mutating: false,
+                enabled: true,
+            })),
+        );
+        const assistant = await harness.seedAssistant();
+        const docRef = await harness.birth({ assistant });
+        const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+        await harness.driver.advance(docRef);
+
+        const lines = warnings.mock.calls.map((call) => call.map(String).join(" "));
+        warnings.mockRestore();
+        expect(lines.join("\n")).toMatch(/whole page/);
+    });
 });
 
 describe("what a failure tells the model", () => {
@@ -1488,6 +1545,40 @@ describe("recording tool names", () => {
         const conversation = await harness.conversation(docRef);
         const intent = (conversation.data.entries ?? []).find((entry) => entry.kind === "tool-intent");
         expect(intent?.toolName).toBe("assistant.call:accountant");
+    });
+
+    it("records the real name of a per-callee assistant.call that was dropped, too", async () => {
+        // The un-mangling only applied where the Operation resolved, and the likeliest reason it
+        // does not is the one this system exists to make visible: the User switched `assistant.call`
+        // off. The transcript then said `assistant.call.accountant` — a name no grant carries — so
+        // the record of a refused call named an Operation nobody could look up.
+        const harness = buildHarness([
+            {
+                assistant: "receptionist",
+                turn: 0,
+                toolCalls: [
+                    { name: "assistant__call__accountant", arguments: { prompt: "check this" } },
+                ],
+            },
+        ]);
+        await editOperation(harness, "assistant.call", { enabled: false });
+        const receptionist = await harness.seedAssistant({
+            key: "receptionist",
+            grants: [{ operationKey: "assistant.call:accountant" }],
+        });
+        const docRef = await harness.birth({ assistant: receptionist });
+        const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+        await harness.driver.advance(docRef);
+        warnings.mockRestore();
+
+        const entries = (await harness.conversation(docRef)).data.entries ?? [];
+        expect(entries.find((entry) => entry.kind === "tool-intent")?.toolName).toBe(
+            "assistant.call:accountant",
+        );
+        expect(entries.find((entry) => entry.kind === "tool-result")?.toolName).toBe(
+            "assistant.call:accountant",
+        );
     });
 });
 

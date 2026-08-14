@@ -32,10 +32,12 @@ import {
     operationFromLlm,
     OperationRegistry,
     toolNameForLlm,
+    toolSchemas,
     type DroppedGrant,
     type OperationContext,
     type GrantedOperation,
     type OperationOutcome,
+    type Resolution,
 } from "../operations/registry.js";
 
 export interface AdvanceDeps {
@@ -91,6 +93,9 @@ const TURN_GRANT_ON_ESCALATION = 5;
 const EMPTY_CATALOGUE =
     "The Operation catalogue is empty: no Operation_DM Thing exists, so no Assistant can be " +
     "offered anything and no Turn can be taken. Bootstrap has not run — run `just bootstrap`.";
+
+/** One page, unsorted: everything a Turn can see of the catalogue. See {@link LoopDriver.loadCatalogue}. */
+const CATALOGUE_PAGE_SIZE = 100;
 
 const REFUSED_PENDING_APPROVAL =
     "Refused pending approval, not queued. Nothing was booked and nothing is waiting to be. The " +
@@ -441,6 +446,13 @@ export class LoopDriver {
 
         // One read, and everything this Turn resolves comes out of it (ADR-0019).
         const catalogue = await this.loadCatalogue();
+        // One **resolution**, too. The three places that need it — the schemas offered to the model,
+        // the belt check on what it called, and reconciliation of an interrupted call — used to
+        // resolve the grants separately, which put two or three identical `warn` lines in the log
+        // per Turn for one mistyped grant, forever. Resolving once is also what makes
+        // architecture.md's "the schemas offered to the LLM are derived from the same call" true
+        // rather than approximately true.
+        const resolution = this.deps.registry.grantedTo(assistant.data, catalogue);
 
         // --- reconcile an interrupted Turn before starting a new one ----------------------
         //
@@ -450,7 +462,7 @@ export class LoopDriver {
         // sequence has moved on) — which is exactly how you book the same invoice twice.
         const unresolved = unresolvedIntent(conversation);
         if (unresolved) {
-            const outcome = await this.reconcile(stored, assistant, unresolved, catalogue);
+            const outcome = await this.reconcile(stored, assistant, unresolved, resolution);
             if (!outcome) {
                 // The intent gets a result even though nothing could answer it, for two reasons.
                 // `unresolvedIntent` would otherwise find it again on the next wake and escalate
@@ -507,7 +519,7 @@ export class LoopDriver {
 
         let response;
         try {
-            response = await this.callLlmWithRetries(assistant.data, conversation, catalogue);
+            response = await this.callLlmWithRetries(assistant.data, conversation, resolution);
         } catch (error) {
             await this.escalate(
                 stored,
@@ -550,7 +562,7 @@ export class LoopDriver {
         }
 
         // --- tool calls -------------------------------------------------------------------
-        const { granted, dropped } = this.deps.registry.grantedTo(assistant.data, catalogue);
+        const { granted, dropped } = resolution;
         /**
          * A Turn that ends `wants-tools` appends no `assistant` Entry at all — only one
          * `tool-intent` per call — so "the Turn's assistant Entry" names a row that does not exist
@@ -568,7 +580,15 @@ export class LoopDriver {
             // a name no Operation has. Recovery then looked it up, failed, and told the model the call
             // "did not take effect", when in fact the child Conversation had already been born.
             // The model's natural response is to call again: two Accountants on one invoice.
-            const operation = resolved?.name ?? operationFromLlm(call.name);
+            //
+            // A grant that was *dropped* has no resolved Operation to take the name from, and it is
+            // the likeliest case of all — the User switched `assistant.call` off — so the drop is
+            // consulted next, matched by wire name because that is the direction the mangling is
+            // total in. Only a call that matches nothing at all falls back to the reverse mapping.
+            const operation =
+                resolved?.name ??
+                dropped.find((candidate) => toolNameForLlm(candidate.key) === call.name)?.key ??
+                operationFromLlm(call.name);
 
             const seq = nextSeq(conversation);
             const idempotencyKey = `${stored.thingId}:${seq}`;
@@ -692,10 +712,24 @@ export class LoopDriver {
      * failure this system cannot afford, because the catalogue is where approvals are decided.
      */
     private async loadCatalogue(): Promise<Operation[]> {
-        const found = await this.deps.things.search<Operation>(SPECS.Operation_DM, undefined, 100);
+        const found = await this.deps.things.search<Operation>(
+            SPECS.Operation_DM,
+            undefined,
+            CATALOGUE_PAGE_SIZE,
+        );
         if (found.length === 0) {
             log.error(EMPTY_CATALOGUE);
             throw new Error(EMPTY_CATALOGUE);
+        }
+        if (found.length >= CATALOGUE_PAGE_SIZE) {
+            // One page, and the store promises no order — so past the ceiling *which* Operations a
+            // Turn can see is arbitrary, and a grant naming one of the missing ones is dropped as
+            // `absent`, which tells the model the Operation does not exist. That is a lie worth a
+            // line in the log rather than a silence: seventeen Implementations ship, so reaching
+            // this means Operations were created by hand and the page has to grow.
+            log.warn("the Operation catalogue filled a whole page; some Operations may be invisible", {
+                pageSize: CATALOGUE_PAGE_SIZE,
+            });
         }
         return found.map((stored) => stored.data);
     }
@@ -853,14 +887,12 @@ export class LoopDriver {
         stored: Stored<Conversation>,
         assistant: Stored<Assistant>,
         intent: Entry,
-        catalogue: Operation[],
+        resolution: Resolution,
     ): Promise<OperationOutcome | undefined> {
         const conversation = stored.data;
         const operation = intent.toolName ?? "";
         const key = intent.idempotencyKey ?? "";
-        const resolved = this.deps.registry
-            .grantedTo(assistant.data, catalogue)
-            .granted.find((candidate) => candidate.name === operation);
+        const resolved = resolution.granted.find((candidate) => candidate.name === operation);
 
         log.warn("reconciling an interrupted tool call", {
             conversationId: stored.thingId,
@@ -933,10 +965,10 @@ export class LoopDriver {
     private async callLlmWithRetries(
         assistant: Assistant,
         conversation: Conversation,
-        catalogue: Operation[],
+        resolution: Resolution,
     ) {
         const messages = buildMessages(assistant, conversation);
-        const tools = this.deps.registry.schemasFor(assistant, catalogue);
+        const tools = toolSchemas(resolution.granted);
         const model = assistant.llmModel || "gpt-4o-mini";
 
         let lastError: unknown;

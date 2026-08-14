@@ -76,6 +76,9 @@ const WATCHER_FIELDS = {
         "f_createdAt",
     ],
     OpenQuestion_DM: ["f_conversationId", "f_answeredAt", "f_idempotencyKey"],
+    // Bootstrap finds every Operation by this one field. Unindexed it answers nothing, which reads
+    // as "not created yet" — so `just bootstrap` would create seventeen duplicates, every run.
+    Operation_DM: ["f_idempotencyKey"],
     RuntimeState_DM: ["f_singletonKey", "f_heartbeatAt"],
     Document_DM: ["f_createdAt", "f_idempotencyKey", "f_createdByConversationId"],
     Invoice_DM: ["f_createdAt", "f_idempotencyKey", "f_createdByConversationId", "f_invoiceNumber"],
