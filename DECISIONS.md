@@ -1521,3 +1521,46 @@ Four things an implementer needs that no artefact contained, now recorded: `expr
 inside a `kontext`; `ExpressionColumn` takes `id`/`width`/`name`/`expression` and has **no**
 `sortable`; and an absent value renders an empty cell rather than throwing, because the overview
 engine's getter is `getAssignedObject(…) ?? null`.
+
+---
+
+# Where this session stopped
+
+## Done, verified, committed and pushed
+
+| Tier | Result |
+|---|---|
+| `just test-runtime` | **162 passed** |
+| `just test-client` | **401 passed** |
+| `just test-integration` | **78 passed** |
+| `just test-models` | **29 models, 0 errors, 0 warnings** |
+| validator selftest | **13 checks, 0 not enforced** |
+| `just check` | clean (typecheck, lint, prettier, models, docs) |
+| `scripts/check-docs.mjs` | 28 recipes, 21 ADRs, 0 problems |
+
+Verified **in the browser** before the outage: the Operations catalogue (17 seeded, correct Systems
+and Kinds, six columns), the read-only split on a seeded Operation, the Add button's removal, the
+renamed *Granted operations* section rendering its values, the Conversation transcript rendering as
+a thread, and the pinned header holding when the box is scrolled to its bottom.
+
+## Not done — one cause
+
+**Browser verification of UI phases D–F, `just test-e2e`, and `operations-as-things` phase J's
+full-stack run.** All blocked by D-045: the stack's host port forwarding broke VM-wide, the fix is a
+Rancher Desktop restart, and neither this session nor the peer session managing the machine may take
+that unilaterally — the peer's classifier blocked the narrower equivalent, so acting on their
+say-so would be permission laundering. **It needs you.**
+
+Two e2e specs are written and have **never executed**:
+`e2e/tests/base/8-operations-catalogue.spec.ts` (the catalogue and its kill switch) and
+`e2e/tests/base/9-conversation-transcript.spec.ts` (the thread, the marker, the pending question),
+plus five edited existing specs. Expect first-run breakage there; it will be real findings, not noise.
+
+## What to do when you are back
+
+1. Restart Rancher Desktop (or `rdctl shutdown` then start). Volumes persist.
+2. `just build && just up && just wait && just bootstrap`.
+3. `just test-e2e` — and treat what it finds as a to-do list, not a regression.
+4. Read the ⚠ entries above first: **D-027, D-033, D-034, D-041, D-042, D-046**. Those are the six
+   places where I departed from something the artefacts had written down, rather than filling a gap
+   they left.

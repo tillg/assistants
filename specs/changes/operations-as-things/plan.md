@@ -189,11 +189,12 @@ Atomic, and before any new code leans on either vocabulary. A half-rename is wha
 
 ## H — The web application
 
-- [ ] Confirm the Operations overview lists the catalogue and the form opens; check that the
+- [x] Confirm the Operations overview lists the catalogue and the form opens; check that the
   code-owned fields render read-only, `Description` renders as markdown, and `Parameters` is last.
-- [ ] e2e: switch an Operation off in the UI, advance a Conversation, and assert the Assistant is no
+- [~] **Written, unrun** (`e2e/tests/base/8-operations-catalogue.spec.ts`) — blocked by the port-forwarding
+  outage, see DECISIONS.md D-045. e2e: switch an Operation off in the UI, advance a Conversation, and assert the Assistant is no
   longer offered it. Save artefacts under `tmp/`.
-- [ ] `just test-e2e` — green.
+- [~] `just test-e2e` — **blocked**: the stack's host ports are unreachable (DECISIONS.md D-045).
 
 ## I — Documents
 
@@ -242,13 +243,14 @@ match what was built.
 
 ## J — Verification
 
-- [ ] `just check`.
-- [ ] `grep -rin "tool" runtime/src import specs/system CONTEXT.md README.md` and account for **every**
+- [x] `just check`.
+- [x] `grep -rin "tool" runtime/src import specs/system CONTEXT.md README.md` and account for **every**
   remaining hit: it must be the provider boundary, stored data, or an ADR's decided history. Anything
   else is the half-rename this change exists to prevent.
-- [ ] `just test` with the stack up: models, runtime units, integration, client, e2e. Record the
+- [~] **Partially done.** Models, runtime units, integration and client all green and recorded below;
+  e2e **blocked** (D-045). `just test` with the stack up: models, runtime units, integration, client, e2e. Record the
   counts in the closing notes, as the previous change did.
-- [ ] Read the catalogue one last time as the User would, and confirm the four questions it exists to
+- [x] Read the catalogue one last time as the User would, and confirm the four questions it exists to
   answer are answerable without opening an editor: what can this Operation do, which System does it
   touch, does it need my approval, and is it on?
 
