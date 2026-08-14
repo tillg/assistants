@@ -91,7 +91,10 @@ export function PendingQuestion({ questionId }: PendingQuestionProps) {
         // The Conversation says it is blocked and the question is gone: say so, and leave the thread
         // above it standing. A missing second document is never a reason for a form not to open.
         return (
-            <Message data-testid="transcript-message">{`${ICONS.blocked} A question is pending, but it could not be read.`}</Message>
+            <Message data-testid="transcript-message">
+                <span aria-hidden>{`${ICONS.blocked} `}</span>
+                A question is pending, but it could not be read.
+            </Message>
         );
     }
 

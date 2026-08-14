@@ -184,7 +184,12 @@ export function TranscriptHeader({ document, entries }: TranscriptHeaderProps) {
 
             <Slot data-testid="transcript-state">
                 {isBlocked(head) && (
-                    <Blocked data-testid="transcript-blocked">{`${ICONS.blocked} waiting for you`}</Blocked>
+                    <Blocked data-testid="transcript-blocked">
+                        {/* The glyph repeats the words beside it, so a reader who is read to hears
+                            "stop sign waiting for you" unless it is hidden — as every other glyph is. */}
+                        <span aria-hidden>{`${ICONS.blocked} `}</span>
+                        waiting for you
+                    </Blocked>
                 )}
                 {head.finishReason !== "" && <span>{head.finishReason}</span>}
                 <span>{`turn ${head.turnCount}/${head.maxTurns}`}</span>

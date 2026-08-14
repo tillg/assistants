@@ -1,4 +1,4 @@
-import type { PropsWithChildren } from "react";
+import { useState, type PropsWithChildren } from "react";
 import { Provider } from "react-redux";
 import { ThemeProvider } from "styled-components";
 import type { Store } from "redux";
@@ -80,10 +80,17 @@ export function serveDocuments(documents: Readonly<Record<string, object>>): { r
     });
 }
 
-/** Wraps a component in the theme and the store it is rendered under in the application. */
+/**
+ * Wraps a component in the theme and the store it is rendered under in the application.
+ *
+ * The fallback store is built once and kept, not evaluated in the JSX: a fresh store on every render
+ * would make `Provider` re-subscribe on each one and would throw away what the last render recorded,
+ * which is precisely the promise this file makes about it.
+ */
 export function Frame({ store, children }: PropsWithChildren<{ readonly store?: Store }>) {
+    const [fallback] = useState(() => recordingStore().store);
     return (
-        <Provider store={store ?? recordingStore().store}>
+        <Provider store={store ?? fallback}>
             <ThemeProvider theme={getBaseTheme()}>{children}</ThemeProvider>
         </Provider>
     );

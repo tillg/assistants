@@ -1,3 +1,4 @@
+import { useState } from "react";
 import styled from "styled-components";
 
 import type { TranscriptEntry } from "./entries";
@@ -11,6 +12,11 @@ import { speakerFor, type Shape, type Side } from "./speaker";
  * `speaker.ts`, which is domain.md's table as code — nothing here re-derives who said something, and in
  * particular nothing reads `role`: `prompt` and `answer` are both `role: user` and only one of them is
  * the human.
+ *
+ * A Speaker the table marks `collapsed` shows its label and nothing else until it is asked for. That is
+ * the `system` prompt and the Runtime's briefing: each is a page of text read once, and left expanded
+ * either of them buries the dialogue it introduces. The disclosure is the Receipt's, in meta clothing —
+ * a thread has one way of putting something away, not two.
  *
  * Text renders as pre-wrapped plain text. Entry prose is written by a model, not authored as markdown,
  * and mounting a Lexical editor per Bubble to read a thread of a hundred would cost far more than the
@@ -68,6 +74,17 @@ const Label = styled.span`
     font-style: italic;
 `;
 
+/** A collapsed meta line is its own control: the label is what one clicks, so it carries no chrome. */
+const Disclosure = styled.button`
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+`;
+
 const Footnote = styled.div`
     margin-top: 0.25rem;
     font-size: 0.75em;
@@ -79,9 +96,14 @@ export interface BubbleProps {
 }
 
 export function Bubble({ entry }: BubbleProps) {
+    const [open, setOpen] = useState(false);
     const role = speakerFor(entry.kind, entry.toolName);
     const icon = iconFor(role.speaker);
     const recorded = (entry.promptTokens ?? 0) + (entry.completionTokens ?? 0);
+    const text = entry.text !== undefined && entry.text !== "" ? entry.text : undefined;
+    // Nothing to put away is nothing to disclose: an `approval-request` carries no text by design, and a
+    // label with a toggle behind it that reveals an empty box would be a control that does nothing.
+    const collapsible = role.collapsed && text !== undefined;
 
     return (
         <Row
@@ -90,12 +112,22 @@ export function Bubble({ entry }: BubbleProps) {
             data-seq={entry.seq}
             data-kind={entry.kind}
             data-side={role.side}
-            data-speaker={role.speaker}>
+            data-speaker={role.speaker}
+            data-collapsed={collapsible && !open}>
             <Body $shape={role.shape} $side={role.side} $warning={role.warning}>
                 {icon !== undefined && <Icon aria-hidden>{icon}</Icon>}
                 <div>
-                    {role.label !== undefined && <Label>{role.label}</Label>}
-                    {entry.text !== undefined && entry.text !== "" && <Text>{entry.text}</Text>}
+                    {collapsible && (
+                        <Disclosure
+                            type="button"
+                            aria-expanded={open}
+                            data-testid="transcript-bubble-toggle"
+                            onClick={() => setOpen((was) => !was)}>
+                            <Label>{role.label}</Label>
+                        </Disclosure>
+                    )}
+                    {!collapsible && role.label !== undefined && <Label>{role.label}</Label>}
+                    {text !== undefined && (open || !collapsible) && <Text>{text}</Text>}
                     {recorded > 0 && (
                         <Footnote data-testid="transcript-cost-footnote">
                             {`${format(entry.promptTokens ?? 0)} + ${format(entry.completionTokens ?? 0)} tokens`}

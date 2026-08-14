@@ -1,6 +1,7 @@
 import { call, put, select, takeEvery, type SagaGenerator } from "typed-redux-saga";
 
 import { ActivityActions, ActivitySagas, ActivitySelectors } from "@com.mgmtp.a12.client/client-core";
+import { LoggerFactory } from "@com.mgmtp.a12.utils/utils-logging";
 
 /**
  * Opening a form that belongs to another navigation module.
@@ -24,6 +25,8 @@ import { ActivityActions, ActivitySagas, ActivitySelectors } from "@com.mgmtp.a1
  * `instance` is a **docRef**, `<Model>/<ThingID>`, not the bare ThingID a Thing carries (ADR-0002: a
  * ThingID identifies and nothing more), because the form's load constrains `/__meta/docRef` to it.
  */
+
+const logger = LoggerFactory.getLogger("PT/openForeignForm");
 
 export const OPEN_FOREIGN_FORM = "assistants/openForeignForm";
 
@@ -57,23 +60,37 @@ export function* OpenForeignFormSaga(): SagaGenerator<void> {
     yield* takeEvery(isOpenForeignForm, openForeignFormWorker);
 }
 
+/**
+ * The jump itself — and it swallows its own failures, which is the one thing about it that is not
+ * obvious.
+ *
+ * `takeEvery` *forks* this worker, and an error escaping a fork tears down the parent that forked it. So
+ * a single failed jump would not fail once: it would end `OpenForeignFormSaga` for the rest of the
+ * session, and every later **Answer**, *about* and *called by* would become a click that does nothing at
+ * all, with nothing on screen to say why. A navigation that could not be made is worth a log line; it is
+ * never worth the navigation that comes after it.
+ */
 export function* openForeignFormWorker(action: OpenForeignFormAction): SagaGenerator<void> {
     const { module, documentModel, thingId, masterModule } = action.payload;
 
-    const openActivities = Object.keys(yield* select(ActivitySelectors.topLevelActivities()));
-    if (openActivities.length > 0) {
-        yield* put(ActivityActions.cancelRequested({ activityIds: openActivities }));
-        if (!(yield* call(ActivitySagas.waitForResponseCancelRequested))) {
-            return;
+    try {
+        const openActivities = Object.keys(yield* select(ActivitySelectors.topLevelActivities()));
+        if (openActivities.length > 0) {
+            yield* put(ActivityActions.cancelRequested({ activityIds: openActivities }));
+            if (!(yield* call(ActivitySagas.waitForResponseCancelRequested))) {
+                return;
+            }
         }
-    }
 
-    const master = ActivityActions.create({ activityDescriptor: { module: masterModule } });
-    yield* put(master);
-    yield* put(
-        ActivityActions.create({
-            activityDescriptor: { module, instance: `${documentModel}/${thingId}`, model: documentModel },
-            initiatingActivityId: master.payload.activity.id
-        })
-    );
+        const master = ActivityActions.create({ activityDescriptor: { module: masterModule } });
+        yield* put(master);
+        yield* put(
+            ActivityActions.create({
+                activityDescriptor: { module, instance: `${documentModel}/${thingId}`, model: documentModel },
+                initiatingActivityId: master.payload.activity.id
+            })
+        );
+    } catch (error) {
+        logger.warn(`Could not open ${module}'s form for ${documentModel}/${thingId}.`, error);
+    }
 }

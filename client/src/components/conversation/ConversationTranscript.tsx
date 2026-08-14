@@ -19,8 +19,18 @@ import { clusterEntries, readEntries } from "./entries";
  * It reads the document the form engine already holds, and holds nothing itself.
  */
 
-/** Exported because the question form's degraded state is the same box with nothing in it. */
-export const TranscriptBox = styled.section<{ $height?: number }>`
+/**
+ * Exported because the question form's degraded state is the same box with nothing in it.
+ *
+ * It is focusable, and that is a consequence of owning the scroll rather than a decoration: the thread
+ * holds no focusable element between its Bubbles, so without a tab stop of its own a reader who does not
+ * use a mouse can never reach the scrollbar and can only ever see the first screenful (WCAG 2.1.1). The
+ * name is what makes a `<section>` a region, and so a stop worth landing on rather than an unlabelled
+ * one.
+ */
+export const TranscriptBox = styled.section.attrs({ tabIndex: 0, "aria-label": "Conversation transcript" })<{
+    $height?: number;
+}>`
     display: flex;
     flex-direction: column;
     height: ${({ $height }) => ($height === undefined ? "32rem" : `${$height}px`)};
@@ -63,17 +73,23 @@ export function ConversationTranscript({ document, height, showPendingQuestion =
         <TranscriptBox $height={height} data-testid="conversation-transcript">
             <TranscriptHeader document={document} entries={entries} />
             <Thread>
-                {clusters.map((cluster) => (
-                    <Fragment key={cluster.separator + String(cluster.items.length)}>
+                {/*
+                 * Keyed by position rather than by `seq` or by the separator's words, because neither is
+                 * unique: an Entry whose document carried no `Seq` reads as 0, and an instant nothing can
+                 * parse labels its cluster with the empty string. Two of either collide, and a colliding
+                 * key is not a cosmetic warning here — a Receipt holds its open/closed in `useState`, so
+                 * React reconciling the wrong one opens the wrong Receipt. Position is unique by
+                 * construction, and stable for everything already on screen: Entries are only ever
+                 * appended, and a `tool-result` arriving fills the Receipt its call already opened.
+                 */}
+                {clusters.map((cluster, position) => (
+                    <Fragment key={position}>
                         <Separator data-testid="transcript-separator">{cluster.separator}</Separator>
-                        {cluster.items.map((item) =>
+                        {cluster.items.map((item, index) =>
                             item.type === "receipt" ? (
-                                <Receipt
-                                    key={`receipt-${item.intent?.seq ?? "?"}-${item.result?.seq ?? "?"}`}
-                                    receipt={item}
-                                />
+                                <Receipt key={index} receipt={item} />
                             ) : (
-                                <Bubble key={`entry-${item.entry.seq}`} entry={item.entry} />
+                                <Bubble key={index} entry={item.entry} />
                             )
                         )}
                     </Fragment>

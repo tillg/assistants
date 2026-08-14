@@ -94,7 +94,12 @@ export function clusterEntries(entries: readonly TranscriptEntry[]): Cluster[] {
             items = [];
         }
         items.push(item);
-        previous = at;
+        if (!Number.isNaN(at.getTime())) {
+            // An instant nothing can read must not become the one the next gap is measured from. It
+            // would answer "no separator due" for ever after, and the pause it swallowed is the
+            // Conversation's most characteristic feature — a thread that waits ten days has to say so.
+            previous = at;
+        }
     }
     if (items.length > 0) {
         clusters.push({ separator: separatorLabel(anchorOf(items[0]!).at), items });
@@ -151,8 +156,9 @@ function anchorOf(item: TranscriptItem): TranscriptEntry {
     return item.type === "entry" ? item.entry : (item.intent ?? item.result!);
 }
 
+/** `previous` is only ever a readable instant, so an unreadable `at` is the one case with no answer. */
 function isSeparatorDue(previous: Date | undefined, at: Date): boolean {
-    if (previous === undefined || Number.isNaN(previous.getTime()) || Number.isNaN(at.getTime())) {
+    if (previous === undefined || Number.isNaN(at.getTime())) {
         return false;
     }
     return at.toDateString() !== previous.toDateString() || at.getTime() - previous.getTime() >= SEPARATOR_GAP_MS;
