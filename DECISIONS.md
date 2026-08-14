@@ -1644,3 +1644,29 @@ first**. Runtime suite 162 → **171**.
 catch any of these. Six of the seven are cases the artefacts describe correctly and the code got
 wrong — which is what an adversarial pass is for, and why it was worth doing while the browser was
 unavailable rather than waiting.
+
+## D-051 — I broke HEAD with `git add -A`, and how it was caught
+
+*Broken 02:46, caught and repaired 02:52 on 2026-08-14.*
+
+**What happened.** An agent verifying review findings was doing the right thing: it `git stash`ed its
+source fixes to prove each regression test failed without them. My commit `b6fda9a` ran `git add -A`
+inside that window, so it swept up **the tests without the fixes they test**. `HEAD` then carried
+eleven tests that could not pass. I did not notice because I ran `just test-client` (green, 417)
+against the *working tree* moments before committing — and the working tree was fine; only the index
+was wrong.
+
+**How it was caught**: the agent's own report, which flagged it before I did. **How it was verified**:
+not by trusting either of us, but by `git clone`ing HEAD into a scratch directory and running the
+suite there — 48 files, 417 tests, green after the repair commit `66d3472`.
+
+**The lesson, and it is mine.** `git add -A` is unsafe while any agent has the tree open. It had
+already caused two smaller versions of this earlier in the session — one agent's in-progress doc
+edits swept into a runtime commit, another's phase-E files into a phase-F one — both harmless, which
+is precisely why the pattern survived to do real damage. **Commit explicit paths, or quiesce the
+agents first.** Where I did name paths (the runtime fixes, the phase-G tests) nothing went wrong.
+
+**Worth keeping**: a green test run proves the *working tree*, and a commit publishes the *index*.
+Those are different things, and the difference is invisible exactly when a second writer is active.
+Verifying a clean clone is cheap and is the only check that actually answers "is what I pushed
+correct".
