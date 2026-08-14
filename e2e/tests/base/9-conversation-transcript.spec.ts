@@ -37,9 +37,11 @@
 import { expect, test, type Page } from "../../fixtures";
 import { OpenQuestionPage } from "../../pages/OpenQuestionPage";
 import { OverviewPage } from "../../pages/OverviewPage";
+import { DataType } from "../../types";
 import { AppTestID, TestID } from "../../types/testIds";
 import { createArrivingDocument, RECEPTIONIST, waitForRaisedQuestion, type RaisedQuestion } from "../../utils/agents";
 import { AGENT_TIMEOUT_MS } from "../../utils/config";
+import { getByLabelWithOptionalAsterisk } from "../../utils/locators";
 import { ThingStore } from "../../utils/thingstore";
 
 const MODULE = "Conversations";
@@ -218,6 +220,9 @@ test.describe("Conversation transcript", () => {
         // different act, not a step inside a conversation, so its own module is the master.
         const form = page.getByRole("form").first();
         await expect(form).toBeVisible({ timeout: 15_000 });
-        await expect(form).toContainText(arrived.title);
+        // `toContainText` cannot see this: a Document's Title lives in an input's *value*, which is
+        // not text content. Asserting the field is also the stronger claim — it says we landed on
+        // this Document, not merely on a page that happens to quote its text somewhere.
+        await expect(getByLabelWithOptionalAsterisk(form, "Title", DataType.String)).toHaveValue(arrived.title);
     });
 });

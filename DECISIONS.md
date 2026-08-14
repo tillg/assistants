@@ -1670,3 +1670,61 @@ agents first.** Where I did name paths (the runtime fixes, the phase-G tests) no
 Those are different things, and the difference is invisible exactly when a second writer is active.
 Verifying a clean clone is cheap and is the only check that actually answers "is what I pushed
 correct".
+
+## D-052 — The first e2e run: no regressions, and one real defect in the new specs
+
+*Run 2026-08-14 06:37 CEST, against the scripted provider. **29 passed, 6 failed.***
+
+All six failures were in the two specs that had **never executed**
+(`8-operations-catalogue`, `9-conversation-transcript`). Every pre-existing spec passed, including
+`2-navigation` and `7-forms-open` with the new *Operations* module in their lists, `5-localization`
+on the new landing page, `3-crud`, `4-markdown-editor` and `6-favicon`. **No regressions from either
+change** — which is the result that mattered most and the one the suite could not give me all night.
+
+### The defect: `data-testid` versus `data-role`
+
+Five of the six were one cause. `e2e/playwright.config.ts` sets `testIdAttribute: "data-role"`,
+because that is what A12's platform stamps and `TestID` is a list of the platform's values. The new
+transcript components emitted the React-conventional **`data-testid`**. So `getByTestId(...)` asked
+for `data-role="conversation-transcript"`, found nothing, and five specs failed with *"element(s) not
+found"* against elements that were on the page the whole time — I had confirmed the transcript
+rendering in the browser myself hours earlier.
+
+**Fixed by following A12's convention**, on the user's explicit steer: the components now stamp
+`data-role`, and `client/vitest.setup.ts` configures RTL's `testIdAttribute` to match, so the two
+test tiers look for the same attribute. One attribute, one way to find an element — a component can
+no longer satisfy its unit tests while being unreachable from a spec.
+
+I had first written a `byAppTestId()` bridge that located `data-testid` by CSS while leaving the
+components alone. The user's instruction — *"we definitely want to use the A12 convention if
+possible"* — is the better answer: the bridge would have left two attributes and two idioms in a
+suite that had deliberately standardised on one.
+
+## D-053 — ⚠ I caused the second e2e failure, and then chased it for twenty minutes
+
+*2026-08-14 06:40–07:00 CEST.*
+
+The sixth failure was `8-operations-catalogue`'s `beforeAll`: `Keycloak login as admin failed:
+HTTP 401`. Keycloak had logged the true cause plainly — `error="user_temporarily_disabled"`, its
+brute-force lockout — and I read past it.
+
+I then built an elaborate and **entirely wrong** theory: that `e2e/fixtures/users.json` had drifted
+from `.env`. The evidence was a length comparison showing the fixture's passwords were 15 characters
+and `.env`'s were 5 or 17. **`[object Object]` is fifteen characters.** The fixture's values are
+`{username, password}` objects, not strings, and my throwaway parser was stringifying them. Every
+manual token request I made therefore sent `password=[object Object]` — which is what kept the
+lockout alive and made three more users look broken, and which produced the "all four users fail"
+symptom I took as confirmation.
+
+I committed the wrong fix (`3e855a9`), flattening the fixture to strings, and only caught it when the
+next diff showed `password changed: false` for all four: the passwords had been correct all along.
+Reverted in `e5e096f`; `users.json` is byte-identical to its original.
+
+**What I should have done**: believed the log. `user_temporarily_disabled` is not ambiguous, it named
+the mechanism, and it was in the first place I looked. Instead I treated it as one clue among several
+and went looking for a more interesting explanation.
+
+**What generalises**: a diagnostic script written in thirty seconds is not evidence, and mine was
+load-bearing for a commit. If a measurement produces a suspiciously round number — four values all
+exactly 15 — check the measurement before building on it. And retrying an auth failure by hand costs
+more than it looks: each attempt extended the lockout I was trying to diagnose.
