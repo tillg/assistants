@@ -29,6 +29,15 @@ import type { TestUsername } from "../types";
 
 import { KEYCLOAK_CLIENT_ID, KEYCLOAK_REALM, KEYCLOAK_URL, THINGSTORE_URL } from "./config";
 
+/**
+ * How long to wait out a quick-login lockout, and how many times.
+ *
+ * `minimumQuickLoginWaitSeconds` is 60 in the realm, so one wait of just over a minute clears it;
+ * two attempts is therefore one retry, which is all a collision needs.
+ */
+const QUICK_LOGIN_WAIT_MS = 65_000;
+const QUICK_LOGIN_ATTEMPTS = 2;
+
 export type A12Document = Record<string, unknown>;
 
 export interface Constraint {
@@ -96,27 +105,56 @@ export class ThingStore {
         return store;
     }
 
+    /**
+     * Get a token, retrying past Keycloak's **quick-login** lockout.
+     *
+     * The realm sets `quickLoginCheckMilliSeconds: 1000` with `minimumQuickLoginWaitSeconds: 60`,
+     * so two logins **as the same user within one second** are treated as a credential-stuffing
+     * burst and the user is disabled for a minute — *even when both logins succeed*. That is not a
+     * hypothetical: specs run in parallel workers, several call `ThingStore.connect("admin")` in
+     * their `beforeAll`, and Playwright starts them together. The result is a 401 in whichever spec
+     * lost the race, reported as `invalid_grant` / "Invalid user credentials", which reads as a
+     * wrong password and is nothing of the kind. It cost a wrong commit to learn that.
+     *
+     * Retrying is the right fix rather than weakening the realm: the protection is doing its job on
+     * a pattern that is genuinely suspicious anywhere but here. Waiting it out costs a minute in the
+     * rare collision and nothing the rest of the time.
+     */
     async login(): Promise<void> {
         const url = `${KEYCLOAK_URL.replace(/\/+$/, "")}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token`;
-        const response = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-            body: new URLSearchParams({
-                grant_type: "password",
-                client_id: KEYCLOAK_CLIENT_ID,
-                username: this.username,
-                password: this.password
-            })
-        });
-        if (!response.ok) {
-            const text = await response.text().catch(() => "");
-            throw new Error(`Keycloak login as ${this.username} failed: HTTP ${response.status} ${text.slice(0, 200)}`);
+        let lastFailure = "";
+
+        for (let attempt = 1; attempt <= QUICK_LOGIN_ATTEMPTS; attempt += 1) {
+            const response = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+                body: new URLSearchParams({
+                    grant_type: "password",
+                    client_id: KEYCLOAK_CLIENT_ID,
+                    username: this.username,
+                    password: this.password
+                })
+            });
+
+            if (response.ok) {
+                const payload = (await response.json()) as { access_token?: string };
+                if (!payload.access_token) {
+                    throw new Error(`Keycloak accepted ${this.username} but returned no access_token`);
+                }
+                this.token = payload.access_token;
+                return;
+            }
+
+            lastFailure = `HTTP ${response.status} ${(await response.text().catch(() => "")).slice(0, 200)}`;
+            // Only a 401 is worth waiting out. Anything else — a wrong client, an unreachable
+            // Keycloak — will not improve in sixty seconds and should fail now, loudly.
+            if (response.status !== 401 || attempt === QUICK_LOGIN_ATTEMPTS) {
+                break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, QUICK_LOGIN_WAIT_MS));
         }
-        const payload = (await response.json()) as { access_token?: string };
-        if (!payload.access_token) {
-            throw new Error(`Keycloak accepted ${this.username} but returned no access_token`);
-        }
-        this.token = payload.access_token;
+
+        throw new Error(`Keycloak login as ${this.username} failed: ${lastFailure}`);
     }
 
     private async rpc<T>(id: string, method: string, params: Record<string, unknown>): Promise<T> {

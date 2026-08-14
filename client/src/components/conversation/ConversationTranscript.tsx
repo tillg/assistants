@@ -84,7 +84,17 @@ export function ConversationTranscript({ document, height, showPendingQuestion =
                  */}
                 {clusters.map((cluster, position) => (
                     <Fragment key={position}>
-                        <Separator data-role="transcript-separator">{cluster.separator}</Separator>
+                        {/*
+                         * Only when it has words to say. `separatorLabel` answers the empty string for
+                         * an instant nothing can parse, and an empty Separator is a div with no content
+                         * and therefore no height — invisible to a reader and, worse, *present* to
+                         * anything looking for one. A spec asserting the thread shows separators found
+                         * this: the element resolved and was `hidden`, which reads as a broken
+                         * transcript rather than as a cluster that could not date itself.
+                         */}
+                        {cluster.separator !== "" && (
+                            <Separator data-role="transcript-separator">{cluster.separator}</Separator>
+                        )}
                         {cluster.items.map((item, index) =>
                             item.type === "receipt" ? (
                                 <Receipt key={index} receipt={item} />

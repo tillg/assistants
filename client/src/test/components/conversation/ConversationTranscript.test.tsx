@@ -108,6 +108,19 @@ describe("ConversationTranscript", () => {
         ]);
     });
 
+    it("writes no separator for a cluster whose instant nothing can read", () => {
+        // An empty Separator is a div with no content and therefore no height: invisible to a
+        // reader, and present to anything looking for one. An end-to-end spec asserting the thread
+        // shows separators resolved the element and reported it `hidden`, which reads as a broken
+        // transcript rather than as a cluster that could not date itself.
+        renderTranscript(
+            conversationWith([{ Seq: 1, At: "not-a-date", Role: "assistant", Kind: "assistant", Text: "Undateable." }])
+        );
+
+        expect(screen.getByTestId("transcript-bubble")).toBeInTheDocument();
+        expect(screen.queryAllByTestId("transcript-separator")).toHaveLength(0);
+    });
+
     it("renders a Conversation with no Entries as a header and nothing else", () => {
         renderTranscript(conversationWith([]));
 
