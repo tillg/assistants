@@ -27,24 +27,11 @@
 
 import { expect, type Page } from "../fixtures";
 import { DataType } from "../types";
-import { TestID } from "../types/testIds";
+import { AppTestID, TestID } from "../types/testIds";
 import type { RaisedQuestion } from "../utils/agents";
-import { getByLabelWithOptionalAsterisk } from "../utils/locators";
 
 import { FormPage } from "./FormPage";
 import { OverviewPage } from "./OverviewPage";
-
-/**
- * Enough of a prompt to tell two of this Conversation's questions apart, and not more.
- *
- * The overview truncates the prompt column, so matching the whole thing would match nothing. The
- * first line is where both writers put the heading — *"**Book this invoice?**"*, *"**Approval
- * needed.**"* — and markdown asterisks are dropped because the cell renders text, not markdown.
- */
-function distinguishingText(prompt: string): string {
-    const firstLine = prompt.split("\n").find((line) => line.trim() !== "") ?? prompt;
-    return firstLine.replaceAll("*", "").trim().slice(0, 40);
-}
 
 export class OpenQuestionPage extends FormPage {
     private readonly overview: OverviewPage;
@@ -55,41 +42,56 @@ export class OpenQuestionPage extends FormPage {
     }
 
     /**
-     * Open one particular question in the Open Questions overview.
+     * Open one particular question, the way the User now reaches it: through its Conversation.
      *
-     * Deep links are off in this application (`deepLinking.onlyWelcomePage`), so the row has to be
-     * found in the table — and every run's question carries the same prompt, so the only thing
-     * that tells them apart is the Conversation that raised it. `conversationId` is an indexed
-     * String, and the overview's search becomes a server-side `simple_search` over exactly those.
+     * *Open Questions* is no longer a menu entry, so the route is Conversations → the row that is
+     * waiting → **Answer** on the Pending Question Bubble. Deep links are off in this application
+     * (`deepLinking.onlyWelcomePage`), so the row still has to be found in a table.
      *
-     * **One Conversation can now own more than one row.** A booking raises two questions — the one
-     * the Assistant chose to ask and the approval the Runtime demands (ADR-0018) — and the answered
-     * one does not leave this view, because the overview's "pending" query model keys on `AnsweredAt`
-     * while the Runtime's `isAnswered` counts any filled answer field, and a User (and this suite)
-     * leaves the timestamp empty. So the conversation narrows the search and the **prompt** picks the
-     * row, using the first line of the question the Runtime or the Assistant actually wrote.
+     * **The row is addressed by the question's own ThingID**, because `Conversation.currentQuestionId`
+     * is an indexed field on the document this overview lists — so the overview's full-text search
+     * becomes a server-side `simple_search` that hits it, exactly as the old route's search hit
+     * `OpenQuestion.conversationId`. It identifies **one** row by construction: a question is the
+     * current question of at most one Conversation.
+     *
+     * Two routes that look plausible and are not. The Conversation's *own* ThingID is unfindable —
+     * it is the docRef, not data, and no field or column carries it. *(subject, assistant)* is
+     * unfindable too, and that one is worth spelling out because it is what this change's
+     * architecture note proposed: a called Assistant's Conversation inherits its caller's subject
+     * only if the calling model passes `subjectThingId` to `assistant.call`, and the scripted model
+     * does not — so the accountant's Conversation, which is the one that raises both of the invoice
+     * slice's questions, has an empty `subjectThingId`.
+     *
+     * **No prompt disambiguation any more.** It existed because the old overview listed an answered
+     * question beside an unanswered one for the same Conversation. A Conversation has one
+     * `currentQuestionId`, so the pending question is unique inside it and there is nothing to tell
+     * apart.
      */
     async openQuestion(question: RaisedQuestion) {
         await this.gotoHome();
-        await this.clickMenuItem("Open Questions");
+        await this.clickMenuItem("Conversations");
 
-        await this.overview.search(question.conversationThingId);
+        await this.overview.search(question.thingId);
 
-        const all = this.page.getByTestId(TestID.TABLE_BODY_ROW);
-        await expect(all, `searching for conversation ${question.conversationThingId}`).not.toHaveCount(0);
-        const rows = all.filter({ hasText: distinguishingText(question.prompt) });
-        await expect(
-            rows,
-            `one row for conversation ${question.conversationThingId} whose prompt starts "${distinguishingText(question.prompt)}"`
-        ).toHaveCount(1);
+        const rows = this.page.getByTestId(TestID.TABLE_BODY_ROW);
+        await expect(rows, `one Conversation whose current question is ${question.thingId}`).toHaveCount(1);
         await rows.first().click();
         await this.finishedLoading();
 
+        // The Conversation form, with the thread that leads up to the question.
+        const transcript = this.page.getByTestId(AppTestID.CONVERSATION_TRANSCRIPT);
+        await expect(transcript).toBeVisible();
+        await expect(transcript.getByTestId(AppTestID.TRANSCRIPT_WHO)).toContainText(question.assistantKey);
+
+        await transcript.getByTestId(AppTestID.PENDING_QUESTION_ANSWER).click();
+        await this.finishedLoading();
+
         await this.toBeVisible();
-        // The right row, not merely a row: the form's Conversation is the one that is waiting.
-        await expect(getByLabelWithOptionalAsterisk(this.form, "Conversation", DataType.String)).toHaveValue(
-            question.conversationThingId
-        );
+        // The right screen, not merely a form: the Answer Surface carries its Conversation's own
+        // header, read across documents by `ConversationId`. The `Conversation` Control that used
+        // to be asserted here is now inside the collapsed *Details* section, and a collapsed A12
+        // `Section` does not render its children at all — so there is nothing in the DOM to read.
+        await expect(this.page.getByTestId(AppTestID.TRANSCRIPT_WHO)).toContainText(question.assistantKey);
     }
 
     /** Answer it exactly as a User does: confirm or refuse, say something, save. No timestamp. */

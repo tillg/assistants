@@ -69,6 +69,35 @@ export enum TestID {
     TYPOGRAPHY_SECTION = "typography-section"
 }
 
+/**
+ * Test ids this application emits itself, from `client/src/components/conversation/`.
+ *
+ * `TestID` above is A12's — the platform stamps those, and a rename there is a platform upgrade.
+ * These are ours, so they are kept apart: the list below is the contract between the transcript
+ * components and the specs, and nothing in the framework will keep it true for us.
+ */
+export enum AppTestID {
+    CONVERSATION_TRANSCRIPT = "conversation-transcript",
+    PENDING_QUESTION = "pending-question",
+    PENDING_QUESTION_ANSWER = "pending-question-answer",
+    PENDING_QUESTION_OPTIONS = "pending-question-options",
+    TRANSCRIPT_ABOUT = "transcript-about",
+    TRANSCRIPT_ABOUT_LINK = "transcript-about-link",
+    TRANSCRIPT_BLOCKED = "transcript-blocked",
+    TRANSCRIPT_BUBBLE = "transcript-bubble",
+    TRANSCRIPT_COST = "transcript-cost",
+    TRANSCRIPT_COST_FOOTNOTE = "transcript-cost-footnote",
+    TRANSCRIPT_HEADER = "transcript-header",
+    TRANSCRIPT_MESSAGE = "transcript-message",
+    TRANSCRIPT_PARENT_LINK = "transcript-parent-link",
+    TRANSCRIPT_RECEIPT = "transcript-receipt",
+    TRANSCRIPT_RECEIPT_BODY = "transcript-receipt-body",
+    TRANSCRIPT_RECEIPT_TOGGLE = "transcript-receipt-toggle",
+    TRANSCRIPT_SEPARATOR = "transcript-separator",
+    TRANSCRIPT_STATE = "transcript-state",
+    TRANSCRIPT_WHO = "transcript-who"
+}
+
 export enum CustomDataTestID {
     NOTIFICATION_HEADER = "[data-testid=notification-header]"
 }

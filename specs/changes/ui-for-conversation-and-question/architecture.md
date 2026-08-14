@@ -234,6 +234,62 @@ language (`@com.mgmtp.a12.expression/expression-core`) interprets four node type
 `string`, `field`, `group` and **`case`** — and `formatCase` matches a single field with `equal` /
 `not_equal` and renders its children when it matches.
 
+**The column, verbatim.** This is what `Conversation_OM`'s `content.columns[]` carries, and it is the
+string an implementer pastes:
+
+```json
+{
+  "id": "col_blocked",
+  "label": [
+    { "locale": "en", "text": "Blocked" },
+    { "locale": "de", "text": "Blockiert" }
+  ],
+  "width": 1,
+  "name": "Blocked",
+  "expression": "kontext(Conversation) {\n    case [WaitingFor] = \"user\" { \"🛑\" }\n}"
+}
+```
+
+Four things about that string are not guessable from the type, and each of them is a way to get it
+wrong:
+
+- **`expression` is a *string*, not a node tree.** `string` / `field` / `group` / `case` are the AST
+  that `ExpressionBuilder.build()` produces by ANTLR-parsing it (`expression-core`'s `Expression.g4`);
+  there is no JSON form of an expression in a model file.
+- **It addresses elements by `name`, not by `id`** — `Conversation` and `WaitingFor`, not
+  `group_conversation` and `f_waitingFor` — and a field is only reachable inside a `kontext(...)`,
+  because the interpreter resolves the case's path against the group it is standing in. The overview
+  engine passes `rootPath: []`, so the outermost `kontext` names the DM's root group.
+- **`case` takes no parentheses and its body is mandatory.** The grammar is
+  `case [<Field>] <=|!=> "<string>" { <elements> }`. One `case` is all there is: `formatCase` matches a
+  single field, so an expression column cannot AND two conditions — which is why
+  [domain.md](domain.md) defines **Blocked** on that one field.
+- **`ExpressionColumn` requires `id`, `width`, `name` and `expression`, and has no `sortable`,
+  `preferredSorting` or `elementRef`** (`overviewengine-core/src/main/overview-model.ts:149-158, 206-216`).
+  `name` is metadata the engine never reads; `label` is optional and singular, as on every column.
+
+**The glyph survives, and this is now measured rather than hoped for.** The WCF converter writes the
+emoji through to `build/wcf-output/data/models/Conversation_OM.json` byte for byte, `just test-models`
+is green with no warnings, and `ExpressionBuilder.build()` on the shipped parser yields a `string` node
+whose content is the four-byte 🛑. `CONVENTIONS.md`'s `ZeichenNichtImZeichensatz` rule is about a
+`StringType` **field's data**, and a model file is not document data — so the fallback to a plain word
+was not needed. Driving the shipped `ExpressionInterpreter` over the built column gives, for
+`WaitingFor` in turn:
+
+| `WaitingFor` | renders |
+|---|---|
+| `"user"` | `🛑` |
+| `"assistant"`, `"tool"` | *(nothing)* |
+| `""` | *(nothing)* |
+| absent | *(nothing)* |
+
+The last row is the one worth having checked. `formatCase` **throws** *"Expression: Case condition does
+not resolve to a field"* when its value getter returns `undefined` — but the overview engine's own
+getter is `DocumentUtils.getValue(document, path)`, which is `getAssignedObject(…) ?? null`
+(`overviewengine-core/…/models/internal/utils/document-utils.ts:40-45`), and `null` is a legal field
+value that `normalizeComparableValue` folds together with `""`. So a Conversation with no `WaitingFor`
+at all renders an empty cell rather than breaking the table.
+
 One case is all there is: `formatCase` matches **one** field, so an expression column cannot AND two
 conditions. `WaitingFor == "user"` renders 🛑, anything else renders nothing — and that is why
 [domain.md](domain.md) defines **Blocked** on that one field. `Status` need not be tested and
@@ -245,9 +301,9 @@ annotation, which the overview engine requires of anything an expression touches
 Cost: expression columns are not sortable. Acceptable — the marker is for scanning, and `Waiting for`
 remains as a sortable reference column beside it.
 
-**This is the one place an emoji enters a model file**, and the one thing in this change that could be
-rejected by the model checker rather than by a compiler. The plan verifies it before anything depends
-on it, and the fallback is a plain-text marker with the glyph supplied by the client.
+**This is the one place an emoji enters a model file**, and it was the one thing in this change that
+could have been rejected by the model checker rather than by a compiler. It was not — see the table
+above — so the fallback to a plain-text marker with the glyph supplied by the client was never taken.
 
 ### Seam 4 — reading one Thing by id
 
@@ -517,8 +573,8 @@ subject is what happens when a fact has two homes. Derivation costs one expressi
 |---|---|---|
 | `initialActivity` | landing on a module with no menu entry, or on nothing | phase C's first check is that the application opens on Conversations |
 | `OpenQuestionModule` without a `menu` | scene unreachable → answering impossible | e2e navigates to it the new way, through a Conversation, in the same phase |
-| `OpenQuestionPage.openQuestion` (e2e) | its route through the *Open Questions* menu disappears, **and so does the field it searched** | a Conversation row is addressed by *(subject, assistant)* instead — see below. Rewritten in the same phase as the AM change, so the invoice slice never goes red for a reason other than a real one |
-| `2-navigation.spec.ts` | asserts eight modules including *Open Questions* | its row goes; the spec's purpose — every menu entry opens and renders — is unchanged |
+| `OpenQuestionPage.openQuestion` (e2e) | its route through the *Open Questions* menu disappears, **and so does the field it searched** | a Conversation row is addressed by the question's own ThingID instead — see below. Rewritten in the same phase as the AM change, so the invoice slice never goes red for a reason other than a real one |
+| `2-navigation.spec.ts` | asserts every menu entry, *Open Questions* among them | its row goes; the spec's purpose — every menu entry opens and renders — is unchanged |
 | `7-forms-open.spec.ts` | its `MODULES` list includes *Open Questions* and it navigates by `clickMenuItem`, so it cannot reach that form at all any more | the row goes; the question form's opening moves to the new transcript spec and the invoice slice, which reach it the way the User now does |
 | `5-localization.spec.ts` | both locale tests assert the **welcome page's** title is *Open questions* / *Offene Fragen* | the landing page changed, so the expectation changes with it — a behavioural assertion, not a rename |
 | `2-restart.spec.ts` | `loginFreshly` waits for the *Open Questions* menu **link** as its the-app-is-up signal | it waits for *Conversations* instead |
@@ -536,12 +592,28 @@ field, and no Conversation column or field carries a Conversation's own id: it i
 The titles do not help either — `watcher.ts:280` puts the first eight characters of the *subject's* id in
 one, `watcher.ts:807` writes *"…: scheduled <instant>"*, `services.ts:192` writes *"… (called by …)"*.
 
-So a Conversation row is addressed by the pair the Runtime already keeps unique: **`subjectThingId` +
-`assistantKey`**. `conversationExistsFor(assistantKey, subjectThingId)` (`watcher.ts:872`) is the
-birth-dedup guard, so at most one Conversation exists per pair — and a called Assistant inherits its
-caller's subject (`services.ts:90`), so every Conversation in one Document's tree is found by searching
-that Document's ThingID. Both fields are indexed, `Assistant key` is already a column, and nothing has to
-be added to any model.
+So a Conversation row is addressed by **the question's own ThingID**: `Conversation.currentQuestionId`
+is indexed, so the overview's full-text search reaches it exactly as the old route's search reached
+`OpenQuestion.conversationId`, and it identifies **one** row by construction — a question is the
+current question of at most one Conversation. `RaisedQuestion.thingId` already carries it, so nothing
+is added to any model and nothing is added to that interface either.
+
+> **Corrected during phase E.** This section first proposed the pair `subjectThingId` + `assistantKey`,
+> on the grounds that `conversationExistsFor(assistantKey, subjectThingId)` (`watcher.ts:872`) is the
+> birth-dedup guard and that a called Assistant inherits its caller's subject. The second half is
+> false for Conversations. `services.ts:90` is the **OpenQuestion**'s inheritance
+> (`input.subjectThingId ?? input.conversation.data.subjectThingId`); a *Conversation* born by
+> `assistant.call` takes its subject from `args["subjectThingId"]` — what the calling model chose to
+> pass (`implementations.ts:633`) — and the scripted model passes none
+> (`runtime/fixtures/llm-script.json`). Both of the invoice slice's questions are raised inside the
+> **accountant's** Conversation, which is exactly such a child, so its `subjectThingId` is empty and
+> the pair addresses nothing. `e2e/utils/agents.ts`'s own `conversationsFor` had been saying so all
+> along: it finds children by `ParentConversationId`, not by subject.
+>
+> The original reasoning for rejecting an id-based address — *"no Conversation field or column carries
+> a Conversation's own id"* — is still true, and still the reason the Conversation's own ThingID cannot
+> be searched. What it missed is the **inverse** link: the Conversation carries the *question's* id,
+> indexed, and that is the one being looked for.
 
 The second half of the old route disappears entirely. It needed the prompt to tell two questions of one
 booking apart, because the overview listed the answered one alongside the unanswered one. A Conversation

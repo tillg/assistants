@@ -1422,3 +1422,102 @@ stack runs the scripted provider, which records no tokens.
   localisation is being removed in a separate change anyway.
 - **`vitest.setup.ts` gained a no-op `ResizeObserver` stub.** jsdom has none and the rich-text editor
   asks for one on mount. A test-environment gap, not a product change.
+
+## D-045 — The stack's host port forwarding broke, and I did not restart Rancher Desktop
+
+*Encountered 2026-08-14 02:50 CEST. **Not a code problem** — recorded so the state is legible.*
+
+Every `127.0.0.1` port the stack publishes started answering `000` — 8081 frontend, 8082 server,
+8084 firefly-proxy, 8089 keycloak — **and so did another project's containers that I never touched**
+(`w12-free-*`, up two days, on `0.0.0.0`). That last fact is what ruled my changes out.
+
+Where it actually is:
+
+| Layer | State |
+|---|---|
+| The apps | **alive** — nginx listening on `0.0.0.0:8081` inside its container; `w12-free-backend-1` answers `401` to `curl localhost:8080` *inside itself* |
+| `docker-proxy` in the VM | **alive**, bound for every mapping |
+| `lima-guestagent` in the VM | **running**, pid 4266 |
+| `limactl` on macOS | **holding** `127.0.0.1:8081` and `:8082` (`lsof`) |
+| The vsock/SSH hop between them | **wedged** — this is the break |
+
+Host socket open, guest listener open, nothing in between. Restarting a container does not fix it;
+neither does `just down && just up` (both tried).
+
+**Decided: do not restart Rancher Desktop.** The fix is almost certainly `rdctl shutdown` + start,
+which is non-destructive — volumes persist. But it restarts **two other agents' containers**, I had
+already told the peer session managing this machine that I would not do it without them, and going
+back on that after saying it is worse than waiting. Escalated with the diagnosis; continuing on
+everything that does not need ports.
+
+**A red herring worth writing down**, because it looks alarming in the logs and is not the cause:
+the frontend's nginx logs `[emerg] io_setup() failed (38: Function not implemented)` on every worker
+start. That is non-fatal — nginx falls back when file-AIO returns `ENOSYS` — and the worker goes on
+to listen normally. The container also runs under `qemu-x86_64` emulation, because the image is
+`linux/amd64` on an arm64 host.
+
+**What this blocks**: browser verification of UI phases D–F, `just test-e2e` (including the phase H
+kill-switch spec), and `operations-as-things` phase J's full-stack run. Everything else is green and
+pushed.
+
+## D-046 — ⚠ The plan's way of addressing a Conversation row does not work
+
+*Found and corrected 2026-08-14 03:05 CEST, phase E.*
+
+`architecture.md`'s *Addressing one Conversation row* section — added earlier in this very session,
+in the commit that opened it — says to find a Conversation by the pair **(subject, assistant)**, on
+the grounds that *"a called Assistant inherits its caller's subject (`services.ts:90`)"*.
+
+**That citation is about the wrong object.** `services.ts:90` is the **OpenQuestion**'s inheritance.
+A *Conversation* born by `assistant.call` takes its subject from `args["subjectThingId"]`
+(`implementations.ts:633`) — whatever the model chose to pass — and `runtime/fixtures/llm-script.json`
+passes none. Both invoice-slice questions are raised inside the **accountant's** Conversation, which
+is exactly such a child, so its `subjectThingId` is `""` and the pair matches nothing.
+`e2e/utils/agents.ts` had been saying so all along: its `conversationsFor` finds children by
+`ParentConversationId`, never by subject.
+
+**Decided**: address the row by **`question.thingId`** instead. `Conversation.currentQuestionId` is
+indexed, so the overview's `simple_search` reaches it, and it identifies exactly one row by
+construction — a Conversation has one current question. The plan's rejection of an id-based address
+was right about the Conversation's *own* id (nothing carries it) and simply missed the inverse link.
+
+**Consequence**: `subjectThingId` was **not** added to `RaisedQuestion` — `thingId` was already
+there. `e2e/utils/agents.ts` is unchanged. Both `plan.md` and `architecture.md` now carry the
+correction with its evidence.
+
+## D-047 — A collapsed `Section` renders no children at all
+
+*Found 2026-08-14 03:05 CEST.*
+
+Beyond D-041 (`collapsible` ignored on `MultiColumnSection`), the `Section` renderer does something
+a page object has to know: when collapsed it **does not render its children into the DOM**
+(`section.js:37-40`) — it is not merely hidden. So `OpenQuestion_FM`'s `Conversation` Control, now
+inside the collapsed *Details* section, is **absent** on landing, and `OpenQuestionPage`'s old
+`toHaveValue(conversationThingId)` assertion would have failed for a reason nothing in the change
+would have explained. Replaced with a header check on `transcript-who`. Both facts are now in
+`CONVENTIONS.md`.
+
+## D-048 — The 🛑 survives a model file, and the expression is now written down
+
+*Settled 2026-08-14 03:00 CEST — phase A's spike, run at last.*
+
+```
+kontext(Conversation) {
+    case [WaitingFor] = "user" { "🛑" }
+}
+```
+
+The glyph survives: `just test-models` green, and the WCF converter writes it byte-for-byte into
+`build/wcf-output/data/models/Conversation_OM.json`. With the browser unavailable, it was verified by
+driving the **shipped** `ExpressionBuilder` and `ExpressionInterpreter` over the **built** column:
+`"user"` → 🛑; `"assistant"`, `"tool"`, `""` and absent → empty. No fallback needed.
+
+`CONVENTIONS.md`'s `ZeichenNichtImZeichensatz` rule turns out to be about a `StringType` field's
+**data**; a model file is not document data, which is why the emoji is fine here and would not be in
+a Title.
+
+Four things an implementer needs that no artefact contained, now recorded: `expression` is an
+**ANTLR string, not a JSON node tree**; it addresses elements by **`name`, not `id`**, and only
+inside a `kontext`; `ExpressionColumn` takes `id`/`width`/`name`/`expression` and has **no**
+`sortable`; and an absent value renders an empty cell rather than throwing, because the overview
+engine's getter is `getAssignedObject(…) ?? null`.

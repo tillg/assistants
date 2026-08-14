@@ -100,6 +100,14 @@ _Avoid_: prompt, request, task, suggestion — and never "approval", which is so
 Instructions for the LLM — judgement, procedure or knowledge, written as markdown — belonging to exactly one Assistant. Skills are never shared between Assistants; an Assistant that needs another's capability calls that Assistant.
 _Avoid_: tool, capability, instruction set
 
+**Transcript**:
+A Conversation's `entries[]` as the User reads them — a thread, in order, under a header that names the Assistant and what the run is about and does not scroll away. It is a *rendering* of the intent log ([ADR-0012](docs/adr/0012-a-conversation-is-an-intent-log.md)), never a second copy of it: nothing is stored for it and nothing but the Conversation feeds it, except the pending question, which is read from its own Thing so that an approval — whose Entry carries no words at all — still shows what it is asking.
+_Avoid_: chat, log, history, feed
+
+**Blocked**:
+The state of a Conversation that is waiting on the **User** specifically, as against waiting on a tool or on another Assistant. It is derived from `waitingFor` and never stored: it is what the 🛑 in the Conversations overview marks, and what the User is scanning that list for.
+_Avoid_: stuck, pending, paused (which is the global switch), suspended (which is any wait)
+
 ### The Runtime
 
 **Runtime**:

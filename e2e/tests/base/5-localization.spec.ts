@@ -28,8 +28,8 @@ test.describe("Test language switching", () => {
         await page.getByTestId(TestID.LIST_ITEM_TEXT).filter({ hasText: "English (EN)" }).click();
         const languagePopupTrigger = page.getByTestId(TestID.POPUP_TRIGGER_ELEMENT).filter({ hasText: "EN" }).first();
         await expect(languagePopupTrigger).toBeVisible();
-        // The welcome page is the first module of the application model: Open Questions.
-        await expect(page.getByTestId(TestID.CONTENTBOX_TITLE)).toHaveText("Open questions");
+        // The welcome page is the application model's `initialActivity`: Conversations.
+        await expect(page.getByTestId(TestID.CONTENTBOX_TITLE)).toHaveText("Conversations");
     });
 
     test("should display in German", async () => {
@@ -37,6 +37,6 @@ test.describe("Test language switching", () => {
         await page.getByTestId(TestID.LIST_ITEM_TEXT).filter({ hasText: "German (DE)" }).click();
         const languagePopupTrigger = page.getByTestId(TestID.POPUP_TRIGGER_ELEMENT).filter({ hasText: "DE" }).first();
         await expect(languagePopupTrigger).toBeVisible();
-        await expect(page.getByTestId(TestID.CONTENTBOX_TITLE)).toHaveText("Offene Fragen");
+        await expect(page.getByTestId(TestID.CONTENTBOX_TITLE)).toHaveText("Konversationen");
     });
 });

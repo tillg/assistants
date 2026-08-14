@@ -209,8 +209,10 @@ that is not a real one.
   `content.initialActivity.descriptor.module` to `Conversation`. Leave both flows and all scenes.
 - [ ] Add the 🛑 `ExpressionColumn` to `Conversation_OM` (phase A settled its form), with
   `rowActionGroup.actions` untouched and the `Waiting for` reference column kept beside it.
-- [ ] `e2e/tests/base/2-navigation.spec.ts`: drop the *Open Questions* row from `MODULES`. Seven
-  entries remain, each still checked against a column only its own overview declares.
+- [ ] `e2e/tests/base/2-navigation.spec.ts`: drop the *Open Questions* row from `MODULES`. Eight
+  entries remain — the count is eight rather than seven because `operations-as-things` added an
+  *Operations* module after this plan was written — each still checked against a column only its own
+  overview declares.
 - [ ] `e2e/tests/base/7-forms-open.spec.ts`: drop `"Open Questions"` from its `MODULES` list. It
   navigates by `clickMenuItem`, so with no menu entry it cannot reach that form at all — leaving the
   string in is a test that can only fail. The question form's *"opens without a post-processing error"*
@@ -229,12 +231,14 @@ that is not a real one.
   Searching the conversation's own ThingID **cannot** work any more: it was findable only because
   `OpenQuestion.ConversationId` was an indexed field on the document the old overview listed, and no
   Conversation field or column carries a Conversation's own id.
-  - [ ] Search the **subject** ThingID — indexed, and inherited by a called Assistant
-    (`services.ts:90`), so every Conversation in one Document's tree matches. Narrow the rows by the
-    existing `Assistant key` column. `conversationExistsFor(assistantKey, subjectThingId)`
-    (`watcher.ts:872`) is the Runtime's birth-dedup guard, so that pair identifies exactly one row.
-  - [ ] Add `subjectThingId` to `RaisedQuestion` in `e2e/utils/agents.ts` — one line, read from the
-    Conversation body `waitForRaisedQuestion` already has in hand. `assistantKey` is there already.
+  - [ ] ~~Search the **subject** ThingID, narrowed by the `Assistant key` column.~~ **Settled
+    otherwise in phase E**: a Conversation born by `assistant.call` takes its subject from what the
+    calling model passed, and the scripted model passes none, so the accountant's Conversation — which
+    raises both of the invoice slice's questions — has an empty `subjectThingId`. Search
+    `question.thingId` instead: `Conversation.currentQuestionId` is indexed and identifies exactly one
+    row. See architecture.md's *Addressing one Conversation row*.
+  - [ ] ~~Add `subjectThingId` to `RaisedQuestion` in `e2e/utils/agents.ts`.~~ Not needed —
+    `RaisedQuestion.thingId` is the id the new address searches, and it was there already.
   - [ ] Then press **Answer** on the Pending Question Bubble and assert the question form as it does
     today. **Delete the prompt-disambiguation**: `distinguishingText` and the two-rows-per-conversation
     reasoning existed because the old overview listed an answered question beside an unanswered one. A
@@ -245,7 +249,8 @@ that is not a real one.
   - [ ] Add the test IDs the page object needs to `e2e/types/testIds.ts` and to the components:
     the transcript, a bubble, a receipt, the pending question, the answer button, the blocked marker,
     the header and its *about* link.
-- [ ] New `e2e/tests/base/8-conversation-transcript.spec.ts`: on a Conversation with entries, the form
+- [ ] New `e2e/tests/base/9-conversation-transcript.spec.ts` — **9**, because `operations-as-things`
+  took `8-operations-catalogue.spec.ts`: on a Conversation with entries, the form
   shows bubbles and **no** `table-body-row` for Entries; a blocked Conversation shows the marker in the
   overview and an unblocked one does not; the pending question's words are on the Conversation form;
   the header is visible, and **still visible** after the transcript is scrolled to its last Entry; its

@@ -35,7 +35,7 @@ Spelling throughout the project is British English.
 [DECISIONS.md](DECISIONS.md) (decisions taken while building, with their alternatives and
 reversal costs) · [BUGS.md](BUGS.md) (43 reproduced defects from the 2026-08-09 hunt; each entry
 records whether it still stands) ·
-[docs/adr/](docs/adr/) (twenty architecture decisions) ·
+[docs/adr/](docs/adr/) (twenty-one architecture decisions) ·
 [RESEARCH_INDEX.md](RESEARCH_INDEX.md) (the four research papers in
 [specs/research/](specs/research/), each with what it settled and what it left open: what
 Bookkeeping must provide and why Firefly III, how the agentic loop should work and why no workflow
@@ -182,10 +182,10 @@ history rather than as a work queue.
 Then:
 
 - **<http://localhost:8081>** — the A12 web application. It redirects to Keycloak; log in as
-  `human` / `human`. The navigation has one entry per Thing: Open Questions, Documents, Invoices,
-  Processes, Parties, Assistants, Operations, Conversations, Runtime. Start at **Open Questions** —
-  that is the User's actual inbox. **Assistants** is where you read and edit a prompt, in the
-  markdown editor; **Operations** is the catalogue of what any Assistant can be granted.
+  `human` / `human`. The navigation has eight entries: Documents, Invoices, Processes, Parties,
+  Assistants, Operations, Conversations, Runtime. Start at **Conversations** — the rows marked 🛑 are
+  waiting for you. **Assistants** is where you read and edit a prompt, in the markdown editor;
+  **Operations** is the catalogue of what any Assistant can be granted.
 - **<http://localhost:8084>** — Firefly III, the books, behind oauth2-proxy. The same
   `human` / `human` through the same Keycloak, and if you are already signed in at 8081 it lets you
   straight through. `just firefly-token` prints the personal access token the bootstrap container
@@ -198,7 +198,8 @@ Then:
   `/actuator/health` is the liveness endpoint `just wait` polls.
 
 To watch an Assistant work, `just logs runtime`. A Conversation's transcript is also stored on the
-Conversation Thing and visible in the UI, though as a data grid rather than a transcript view.
+Conversation Thing and reads as a thread in the UI, under a header that says which Assistant, about
+what, where it stands and what it has cost — and it carries the pending question, if there is one.
 
 ### The language model
 
@@ -528,15 +529,17 @@ This is one running vertical slice, not a finished system. What is honestly miss
   `document.requestText` is a Manual Connector. OCR and PDF parsing are a later change.
 - **No compaction, forking or steering** of Conversations. `maxTurns` (default 20) is the only
   bound on a long one, and reaching it raises an Open Question.
-- **The transcript renders as a data grid.** A Conversation's entries are a read-only inline repeat
-  in the ordinary A12 form. It is readable, but it is a table, not a transcript view.
-  `just logs runtime` is the better debugging surface.
+- **The transcript does not update while a Conversation runs.** It renders the document the form
+  loaded, so a Conversation the Runtime is driving is stale on screen until you reload.
+  `just logs runtime` is still the better surface for watching one live.
 - **The end-to-end suite covers the slice, and writes to whatever stack it is pointed at.**
   `cd e2e && npx playwright test --list` is the authority on what it runs. Today: login as all four
   users, every module opened from the menu, Party CRUD, the Receptionist's prompt round-tripped
   through the markdown editor, localisation, the favicon, a row opened in each of the eight modules,
-  the whole invoice slice (an arriving Document → an Open Question → an answer → the booking checked
-  in Firefly) and surviving a restart of the Runtime and the store. Because it creates and deletes
+  the Operations catalogue and its kill switch, a Conversation's transcript and the 🛑 that marks a
+  blocked one, the whole invoice slice (an arriving Document → an Open Question answered through its
+  Conversation → the booking checked in Firefly) and surviving a restart of the Runtime and the
+  store. Because it creates and deletes
   Things, point it at a development stack only.
 - **Parties have no proper Authority.** CONTEXT.md assigns people to an address book. There is no
   address book External System, so the ThingStore holds them provisionally — a small, recorded
@@ -585,7 +588,7 @@ This is one running vertical slice, not a finished system. What is honestly miss
 │   ├── system/               the system as it stands: domain, architecture, functional
 │   ├── research/             the research papers, and the sources they were read from
 │   └── changes/              proposal, domain, architecture and plan, per change in flight
-├── docs/                     adr/ — twenty architecture decision records; logo/ — design explorations
+├── docs/                     adr/ — twenty-one architecture decision records; logo/ — design explorations
 ├── assets/                   the logo and its derived files
 ├── buildSrc/, quality/       Gradle build logic and the Checkstyle configuration
 └── licenses/                 licence texts for the third-party notices

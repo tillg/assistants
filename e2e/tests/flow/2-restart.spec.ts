@@ -62,7 +62,7 @@ async function loginFreshly(browser: Browser, username: string, password: string
     await page.fill("#username", username);
     await page.fill("#password", password);
     await page.press("#password", "Enter");
-    await expect(page.getByRole("link", { name: "Open Questions" })).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByRole("link", { name: "Conversations" })).toBeVisible({ timeout: 60_000 });
     return page;
 }
 

@@ -179,8 +179,34 @@ prompts editable in the ordinary UI as ADR-0003 requires. See
 **Constraint**: `lexical` must resolve to a single instance shared with `widgets-core`, or
 Lexical's `$`-functions break. Verified in the build with `npm ls lexical`.
 
-There is no custom client code beyond this. The User answers an Open Question by opening it in the
-ordinary A12 instance form and saving it (D-005).
+The transcript is the second piece, and the last. `Conversation.entries[]` renders as a message
+thread rather than as an inline repeat, which needs three client seams the markdown editor did not —
+all three of them platform seams, nothing forked and no engine replaced:
+
+| Seam | What it is | Where |
+|---|---|---|
+| **A custom screen element** | `formModelMap.CustomScreenElement`, dispatched on a `widget` annotation exactly as the markdown Control is. The form engine hands the component `config.renderOptions.state.data.document`, so the Transcript needs no data flow of its own for the document its form is already on. An optional `exposes: <groupId>` annotation is the ADR-0008 coverage claim that replaces the repeat, and `import/validate-models.mjs` both honours it and errors when it names a group the bound Document Model does not have | `client/src/components/CustomScreenElements.tsx` |
+| **A read by id** | `useThingById(model, thingId)` — one document, read through `dataservices-access`, no write, no activity, no dirty state, no polling. It fails soft: no id, a deleted Thing or a failed request renders a message line, never a broken form | `client/src/components/conversation/useThingById.ts` |
+| **Cross-module navigation** | `openForeignForm` — cancel every top-level activity and honour the veto, push a master activity for `masterModule`, then push the detail with `initiatingActivityId`. A saga rather than a click handler, because the teardown is an asynchronous handshake whose answer may be *no*. The teardown is not optional: an activity leaves the map only on cancel, commit or `resetState`, and a leaked one breaks the master-detail layout and vetoes module removal at logout | `client/src/sagas/openForeignForm.ts` |
+
+All three need the same composition, and it is worth stating once because no Thing carries it: an
+activity descriptor's `instance`, and a document read, both want a **docRef** — `<Model>/<ThingID>` —
+while `Conversation.currentQuestionId`, `Conversation.subjectThingId` and `OpenQuestion.conversationId`
+all hold **bare ThingIDs**. [ADR-0002](../../docs/adr/0002-thingid-identifies-only.md) is why: a
+ThingID identifies and nothing more. So the composition is always the caller's, never the field's, and
+a bare id passed where a docRef belongs returns zero rows rather than an error. A descriptor also needs
+`model` — the Document Model id — or no data provider claims the load.
+
+**Reads may cross documents; writes may not.** The Conversation form reads the pending question, the
+question's form reads its Conversation, and neither writes the other. An answer is written by the form
+engine through `OpenQuestion_FM` and by nothing else — a second writer for one act is exactly what
+[ADR-0006](../../docs/adr/0006-one-authority-per-fact.md) exists to prevent, and it is why answering
+stayed on the question's own form rather than moving into the Transcript
+([ADR-0021](../../docs/adr/0021-a-question-is-answered-in-its-conversation.md)).
+
+There is no custom client code beyond these two. The User answers an Open Question by opening it in
+the ordinary A12 instance form and saving it (D-005) — reached now through its Conversation rather
+than from a menu.
 
 **If a Thing is ever reached outside the web application — a messenger, a push notification, mail —
 it hooks `raiseQuestion` and nothing else.** Every Open Question in the system passes through that
@@ -681,8 +707,8 @@ recipe table.
   is the one failure the User cannot otherwise detect.
 - `just pause` / `just resume` toggle `RuntimeState.paused`, the global kill switch.
 - `just logs runtime` is the debugging surface for the agentic loop. A Conversation's transcript
-  is also stored on the Conversation Thing, though it renders as a data grid rather than a
-  transcript view.
+  is also stored on the Conversation Thing, and renders as a thread on its form — with the pending
+  question, if there is one, as its last bubble.
 
 ### Bootstrap versus demo data
 

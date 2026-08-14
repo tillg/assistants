@@ -13,11 +13,20 @@ machine identity, the **Runtime**, and the test identities the end-to-end tier u
 
 The User's actual inbox, and the feature the rest exists to serve.
 
-An **Open Questions** module lists every question no one has answered — a plain overview over one
-Model, filtered `undefined_match(answeredAt)`. That filter is ADR-0004's demand that "awaiting the
-User must be a queryable state", satisfied literally, and it is also `OpenQuestionPending_QeM`.
+**A question is answered inside its Conversation** (ADR-0021). There is no separate inbox of
+questions: the **Conversations** module is the landing page, a Conversation waiting on the User is
+marked **🛑** in its overview, and opening one shows the thread that leads up to the question with the
+question itself as the last bubble, carrying an **Answer** button. An open question is always the end
+of a Conversation, so a list of Conversations is already a list of questions — sorted by the thing they
+are about rather than by the fact that they are questions.
 
-Opening a row shows the question and an answer control decided by its **kind**:
+*Answer* opens the question's own form, with the Conversations list still beside it. That form carries
+the same header and the same transcript above its answer controls, so the two screens read as one
+thread continuing. Saving does not navigate — `CRUD::SAVE` never does, here or anywhere in this
+application — and within about two seconds the Runtime has moved the Conversation on and the 🛑 has
+cleared from the list already on screen. The User leaves by the form's own *Cancel*.
+
+The question form shows the question and an answer control decided by its **kind**:
 
 | Kind | The User does | Filled in |
 |---|---|---|
@@ -47,11 +56,21 @@ Saving the form is the whole of the interaction. There is no button that calls t
 nothing in the web application that knows the Runtime exists — the Runtime notices the answer on
 its next scan, within about two seconds.
 
+**Three models are kept unreachable on purpose.** The `OpenQuestionOverview` scene, `OpenQuestion_OM`
+and `OpenQuestionPending_QeM` — the plain overview over unanswered questions, filtered
+`undefined_match(answeredAt)`, which is ADR-0004's *"awaiting the User must be a queryable state"*
+satisfied literally — all still exist and nothing navigates to them. They stay because an Assistant
+that can say *"here is the list of open questions"* — a `ui.showList`-shaped Operation putting the User
+in front of an overview — would need an overview scene to put them in front of. No such Operation
+exists, and until one does those three models are read by nobody and covered by no test.
+
 ### Browsing and editing Things
 
-Nine navigation modules, one per Model: **Open Questions**, **Documents**, **Invoices**,
-**Processes**, **Parties**, **Assistants**, **Operations**, **Conversations**, **Runtime**. Each is
-an ordinary A12 master-detail: an overview of scalars, and a form for one row.
+Eight navigation modules: **Documents**, **Invoices**, **Processes**, **Parties**, **Assistants**,
+**Operations**, **Conversations**, **Runtime**, and **Conversations** is the landing page. Each is
+an ordinary A12 master-detail: an overview of scalars, and a form for one row. `OpenQuestion` is the
+ninth Model with a module and the one without a menu entry — its form is reached through a
+Conversation, as above.
 
 Four are freely editable by the User — `Party`, `Document`, `Invoice`, `Process`. Creating an
 `Invoice` or a `Document` by hand is a supported way in; so is pasting extracted text into a
@@ -146,11 +165,18 @@ What to expect from one, because none of it is obvious:
 
 - The **Conversations** module shows every run: which Assistant, what it is about — or which
   `scheduledFor` instant it was born to serve — its status, what it is waiting for, its turn count,
-  and its `entries[]`: the full transcript, as a read-only inline repeat. It is readable, but it is a
-  data grid, not a transcript view.
+  and its `entries[]` as a **thread**: the Assistant on one side, the User on the other, tool calls as
+  receipts between them, day and gap separators, and a pending question as the last bubble. A row
+  waiting on the User carries **🛑**.
+- **The thread carries a header, and the header does not scroll away**, because forty Entries down
+  *who* and *about what* are exactly what a reader has stopped being able to see. Four facts, pinned:
+  the Assistant and the Conversation's title; a link to the subject Thing, or the instant a Schedule
+  was serving, and a link to the calling Conversation when there is one; the status and what it waits
+  on, 🛑 when that is the User and the finish reason when it is over; and what it has cost, in tokens
+  and in turns taken against the cap.
 - Each Entry carries what the Turn that wrote it cost, as prompt and completion tokens, on the first
-  Entry that Turn wrote. Nothing adds them up — the transcript is the record, and a Turn that errored
-  records nothing, so the total is a lower bound.
+  Entry that Turn wrote. The header adds them up — and renders the figure with a **≥**, because a Turn
+  that errored records nothing, so the total is a lower bound.
 - `just logs runtime` is the better debugging surface.
 - The **Runtime** module shows the singleton: the watermark, the pause flag, the births-per-hour
   counter, the heartbeat and the last error.
@@ -199,14 +225,14 @@ sequenceDiagram
     A->>BK: listAccounts, getBudgetReport
     A->>TS: ui.askUser (confirm) — "book €96.50 to Expenses:Health?"
     Note over A,TS: waiting. Nothing runs. Days may pass.<br/>Restarts change nothing.
-    U->>UI: opens Open Questions, confirms
+    U->>UI: opens the Conversation marked 🛑, confirms
     UI->>TS: answeredAt + confirmed saved
     RT->>TS: scan 2 — answered
     RT->>A: continue the same Conversation
     A->>RT: postTransaction
     Note over RT: the Assistant's own question authorises nothing.<br/>Refused before Firefly is reached (ADR-0018).
     RT->>TS: raise the approval question — "Book €96.50 from …?"
-    U->>UI: confirms the exact posting
+    U->>UI: opens it again — still 🛑 — and confirms the exact posting
     RT->>A: scan 2 — continue again
     A->>BK: postTransaction, keyed and tagged thing:<id>
     A->>TS: append a step to the Process; finish
@@ -269,7 +295,7 @@ is stale, and `just ps` shows it.
 
 | Output | Where |
 |---|---|
-| **Open Questions** | The web application's inbox |
+| **Open Questions** | The web application's inbox — a 🛑 in the Conversations list, answered on the question's own form |
 | **Things** — Invoices, Parties, Process steps | The ThingStore, visible in the UI |
 | **Transactions** | Firefly III, tagged `thing:<thingId>` with a deep link in `external_url` |
 | **Transcripts** | `Conversation.entries[]`, and `just logs runtime` |
@@ -393,8 +419,8 @@ This is one running vertical slice, not a finished system.
   structural decision the User makes.
 - **No compaction, forking or steering** of Conversations. `maxTurns` (default 20) is the only
   bound on a long one, and reaching it raises an Open Question.
-- **The transcript renders as a data grid**, not a transcript view. A proper viewer would be
-  custom client code, which D-005 exists to avoid.
+- **No live update while a Conversation runs.** The transcript reads the document the form loaded;
+  a Conversation the Runtime is driving will be stale on screen until the User reloads.
 - **No cross-document links inside markdown.** The lifted editor has none, and inventing a link
   syntax is its own change.
 

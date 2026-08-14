@@ -12,11 +12,14 @@
  */
 
 /**
- * Every module in `AssistantsAppModel_AM` is reachable and renders.
+ * Every menu entry in `AssistantsAppModel_AM` is reachable and renders.
  *
  * Each module is checked against a column heading only *its* overview model declares, so the
  * test fails if the menu opens the wrong scene — which a bare "a table appeared" assertion would
  * happily accept.
+ *
+ * `OpenQuestionModule` is deliberately absent: it has no `menu`, so there is no entry to click.
+ * Its form is still a scene, reached through a Conversation — see `OpenQuestionPage`.
  */
 
 import { expect, test } from "../../fixtures";
@@ -24,7 +27,6 @@ import { BasePage } from "../../pages/BasePage";
 import { TestID } from "../../types/testIds";
 
 const MODULES: Array<{ menu: string; column: string }> = [
-    { menu: "Open Questions", column: "Question" },
     { menu: "Documents", column: "Classification" },
     { menu: "Invoices", column: "Invoice number" },
     { menu: "Processes", column: "Kind" },

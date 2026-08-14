@@ -12,12 +12,18 @@
  * guard was inert. Naming a value couples a structural guard to the demo fixtures, and an overview
  * shows only its first page, so any particular value can also fall off the end. A skip here now
  * means the overview is genuinely empty.
+ *
+ * **One module is missing from a list that documents itself as covering every module.** The Open
+ * Question form has no menu entry to reach it from — `OpenQuestionModule` lost its `menu`, and this
+ * spec navigates by `clickMenuItem` — so naming it here would be a test that can only fail. Its
+ * *"opens without a post-processing error"* coverage moved to `9-conversation-transcript.spec.ts`
+ * and `flow/1-invoice-slice.spec.ts`, both of which reach that form the way the User now does:
+ * through the **Answer** button on a Conversation's Pending Question Bubble.
  */
 import { expect, test } from "../../fixtures";
 import { BasePage } from "../../pages/BasePage";
 
 const MODULES: readonly string[] = [
-    "Open Questions",
     "Documents",
     "Invoices",
     "Processes",

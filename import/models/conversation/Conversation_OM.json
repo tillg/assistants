@@ -39,6 +39,22 @@
   "content": {
     "columns": [
       {
+        "id": "col_blocked",
+        "label": [
+          {
+            "locale": "en",
+            "text": "Blocked"
+          },
+          {
+            "locale": "de",
+            "text": "Blockiert"
+          }
+        ],
+        "width": 1,
+        "name": "Blocked",
+        "expression": "kontext(Conversation) {\n    case [WaitingFor] = \"user\" { \"🛑\" }\n}"
+      },
+      {
         "id": "col_createdAt",
         "label": [
           {

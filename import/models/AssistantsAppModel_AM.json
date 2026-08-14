@@ -33,24 +33,6 @@
     "modules": [
       {
         "name": "OpenQuestionModule",
-        "menu": {
-          "name": "OpenQuestion",
-          "label": [
-            {
-              "locale": "en",
-              "text": "Open Questions"
-            },
-            {
-              "locale": "de",
-              "text": "Offene Fragen"
-            }
-          ],
-          "initialActivity": {
-            "descriptor": {
-              "module": "OpenQuestion"
-            }
-          }
-        },
         "flows": [
           {
             "name": "OpenQuestionFlow",
@@ -909,7 +891,7 @@
     ],
     "initialActivity": {
       "descriptor": {
-        "module": "OpenQuestion"
+        "module": "Conversation"
       }
     }
   }

@@ -232,12 +232,56 @@ Repeating groups render through `InlineRepeat` with `groupRef` and `repeatOvervi
 - **Money** → `{"elementRef": "f_amount", "suffix": {"text": [{"locale": "en", "text": "EUR"}, {"locale": "de", "text": "EUR"}]}}`
   (note: in an **OM** the same `suffix` is a *direct array*, without the `text` wrapper).
 
-Two traps:
+Three traps:
 
 - **Each `elementRef` may appear at most once** in `fieldConfiguration.field[]`. Duplicates cause a
   runtime "Post processing for model failed" that the model checker does not catch.
 - `"readonly": true` in `fieldConfiguration` has no effect on an `EnumerationType` — put it on the
   Control instead.
+- **`collapsible` / `initiallyCollapsed` work on a `Section` and nowhere else.** Both
+  `FormModel.Section` and `FormModel.MultiColumnSection` declare them
+  (`formengine-core/src/models/internal/form-model.ts:498-537`), but only the `Section` renderer reads
+  them — `multi-column-section.js` never mentions either, so setting them there converts, validates,
+  and silently does nothing. A section that must collapse is therefore a **`Section` wrapping a
+  `ControlGrid`**, never a `MultiColumnSection`. A `ControlGrid` cannot be collapsed on its own, so
+  hiding *some* of a section's controls means splitting the section rather than collapsing it.
+  Note also that a collapsed `Section` **does not render its children at all** (`section.js:37-40`) —
+  they are absent from the DOM, not merely hidden, which is what an e2e assertion has to expect.
+
+### `CustomScreenElement` — where a developer puts something the modeller cannot
+
+When modelling runs out — a message thread, a chart — `FormModel.CustomScreenElement` is the
+platform's placeholder, and `client/src/appsetup.ts` maps it to a React component exactly as it maps
+`Control`. It has **no `elementRef`**: it is `IdNamed`, `Annotated`, `Stylable`, plus an optional
+`reference` (a *model* reference) and an optional `height`. Which component renders it is decided by an
+annotation, as the markdown editor's Control is:
+
+```json
+{
+  "type": "CustomScreenElement",
+  "id": "custom_transcript",
+  "name": "ConversationTranscript",
+  "height": 640,
+  "annotations": [
+    { "name": "widget", "value": "conversation-transcript" },
+    { "name": "exposes", "value": "f_entries" }
+  ]
+}
+```
+
+- **`widget` is required** and selects the component. Its permitted values are
+  `WidgetAnnotationValue` in `client/src/components/widgetAnnotation.ts`; an unknown or absent value
+  renders nothing rather than breaking the form.
+- **`exposes` is optional** and names a group **of the Document Model this form is bound to**. Its
+  only reader is `import/validate-models.mjs`: it marks that group and every field under it as
+  referenced, so ADR-0008's coverage check is satisfied by the custom element the way it was satisfied
+  by the `InlineRepeat` it replaced. It is an **error** if it names a group the bound DM does not
+  have — without that half a typo would silence the warnings and cover nothing.
+- Put `exposes` **only where the claim is true.** `OpenQuestion_FM`'s element carries `widget` alone,
+  because it renders another document's Entries and `OpenQuestion_DM` has no such group.
+- `height` is not cosmetic where the component owns a scrolling box: `position: sticky` needs a scroll
+  ancestor, and if the only one is the form engine's own container a pinned header drifts away with
+  the page.
 
 Forms end with a footer box carrying Cancel (`scope: HIDDEN_IN_READONLY_MODE`) and Save
 (`event: "CRUD::SAVE"`, `validation: "full"`, `scope: HIDDEN_IN_READONLY_MODE`), plus an Edit
@@ -252,7 +296,48 @@ button (`scope: HIDDEN_IN_EDIT_MODE`). A **read-only** form (Conversation) omits
 ```
 
 `content.columns[]` entries are `{id, label[], width, elementRef, sortable, preferredSorting}`.
-Keep overviews to scalars — never a column into a repeating group. Include a `rowActionGroup` — **always**, even when it has no actions. The A12 overview engine
+Keep overviews to scalars — never a column into a repeating group.
+
+### The second kind of column: `ExpressionColumn`
+
+`OverviewModel.Column` is a union, and the other arm a project reaches for is
+`ExpressionColumn` — for a cell that is **derived** rather than read: a marker, a merge of two fields,
+a formatting instruction. It has `name` and `expression` and **no `elementRef`**, and it **cannot be
+sortable** (`overviewengine-core/src/main/overview-model.ts:149-158, 206-216` — `id`, `width`, `name`
+and `expression` are required; `sortable` and `preferredSorting` are not on it at all). Keep the plain
+reference column beside it where sorting matters.
+
+```json
+{
+  "id": "col_blocked",
+  "label": [{ "locale": "en", "text": "Blocked" }, { "locale": "de", "text": "Blockiert" }],
+  "width": 1,
+  "name": "Blocked",
+  "expression": "kontext(Conversation) {\n    case [WaitingFor] = \"user\" { \"🛑\" }\n}"
+}
+```
+
+Four things about `expression`, each of them a way to get it wrong:
+
+1. **It is a string in a little language, not a JSON node tree.** `@com.mgmtp.a12.expression` parses
+   it with ANTLR. The forms that matter: `"literal"`, `[FieldName]`, `kontext(<Group>[, delimiter =
+   "<s>"]) { … }`, and `case [<Field>] <=|!=> "<value>" { … }` — no parentheses on `case`, and its
+   body is mandatory.
+2. **It addresses elements by `name`, never by `id`** — `Conversation` and `WaitingFor`, not
+   `group_conversation` and `f_waitingFor` — and a field is only reachable inside a `kontext`. The
+   overview engine starts at an empty path, so the outermost `kontext` names the DM's root group.
+3. **Everything the expression touches must carry `{"name": "indexed", "value": "true"}`.** This is
+   query rule 3 again, and the overview engine requires it of an expression's fields.
+4. **One `case` matches one field.** There is no AND, so a derived marker has to key on a single
+   field — which is a constraint on the Document Model, not a formatting detail.
+
+A non-matching, empty **or absent** value renders an empty cell rather than throwing: the engine's
+value getter is `getAssignedObject(…) ?? null`, and `null` folds together with `""`. And the emoji is
+fine here — `ZeichenNichtImZeichensatz` (above) is about a `StringType` **field's data**, and a model
+file is not document data. Verified end to end: the WCF converter round-trips 🛑 byte for byte and the
+shipped interpreter renders it.
+
+Include a `rowActionGroup` — **always**, even when it has no actions. The A12 overview engine
 reads `content.rowActionGroup.actions` unguarded, so omitting the key throws
 `Cannot read properties of undefined (reading 'actions')` and the table does not render at all.
 Where the User should not delete rows (`Conversation`, `OpenQuestion`, `RuntimeState` — all
