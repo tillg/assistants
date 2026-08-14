@@ -92,8 +92,7 @@ export function PendingQuestion({ questionId }: PendingQuestionProps) {
         // above it standing. A missing second document is never a reason for a form not to open.
         return (
             <Message data-testid="transcript-message">
-                <span aria-hidden>{`${ICONS.blocked} `}</span>
-                A question is pending, but it could not be read.
+                <span aria-hidden>{`${ICONS.blocked} `}</span>A question is pending, but it could not be read.
             </Message>
         );
     }

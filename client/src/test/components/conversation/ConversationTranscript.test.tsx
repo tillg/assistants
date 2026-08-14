@@ -129,9 +129,9 @@ describe("ConversationTranscript", () => {
         // Both Entries read as `seq: 0`, so a key built from `seq` collided. That is not a cosmetic
         // warning: a Receipt holds open/closed in `useState`, and React reconciling the wrong child
         // opens the wrong Receipt.
-        expect(complaints.mock.calls.map((call) => String(call[0])).filter((line) => line.includes("same key"))).toEqual(
-            []
-        );
+        expect(
+            complaints.mock.calls.map((call) => String(call[0])).filter((line) => line.includes("same key"))
+        ).toEqual([]);
         expect(screen.getAllByTestId("transcript-bubble")).toHaveLength(2);
     });
 
