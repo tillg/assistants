@@ -40,7 +40,7 @@ function renderContext(document: object) {
     return render(
         <Frame>
             <QuestionContext document={document} height={480} />
-            <textarea data-testid="answer-controls" defaultValue="" />
+            <textarea data-role="answer-controls" defaultValue="" />
         </Frame>
     );
 }

@@ -70,7 +70,7 @@ export function ConversationTranscript({ document, height, showPendingQuestion =
     const pending = showPendingQuestion && currentQuestionId !== "";
 
     return (
-        <TranscriptBox $height={height} data-testid="conversation-transcript">
+        <TranscriptBox $height={height} data-role="conversation-transcript">
             <TranscriptHeader document={document} entries={entries} />
             <Thread>
                 {/*
@@ -84,7 +84,7 @@ export function ConversationTranscript({ document, height, showPendingQuestion =
                  */}
                 {clusters.map((cluster, position) => (
                     <Fragment key={position}>
-                        <Separator data-testid="transcript-separator">{cluster.separator}</Separator>
+                        <Separator data-role="transcript-separator">{cluster.separator}</Separator>
                         {cluster.items.map((item, index) =>
                             item.type === "receipt" ? (
                                 <Receipt key={index} receipt={item} />

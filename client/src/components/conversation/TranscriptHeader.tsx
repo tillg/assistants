@@ -128,18 +128,18 @@ export function TranscriptHeader({ document, entries }: TranscriptHeaderProps) {
     const subject = subjectDescriptor(head.subjectModel, head.subjectThingId);
 
     return (
-        <Band data-testid="transcript-header">
-            <Who data-testid="transcript-who">
+        <Band data-role="transcript-header">
+            <Who data-role="transcript-who">
                 <span aria-hidden>{ICONS.assistant}</span>
                 <span>{head.assistantKey}</span>
                 <Title>{head.title}</Title>
             </Who>
 
-            <Slot data-testid="transcript-about">
+            <Slot data-role="transcript-about">
                 {subject !== undefined && (
                     <Link
                         type="button"
-                        data-testid="transcript-about-link"
+                        data-role="transcript-about-link"
                         onClick={() =>
                             dispatch(
                                 openForeignForm({
@@ -166,7 +166,7 @@ export function TranscriptHeader({ document, entries }: TranscriptHeaderProps) {
                 {head.parentConversationId !== "" && (
                     <Link
                         type="button"
-                        data-testid="transcript-parent-link"
+                        data-role="transcript-parent-link"
                         onClick={() =>
                             dispatch(
                                 openForeignForm({
@@ -182,9 +182,9 @@ export function TranscriptHeader({ document, entries }: TranscriptHeaderProps) {
                 )}
             </Slot>
 
-            <Slot data-testid="transcript-state">
+            <Slot data-role="transcript-state">
                 {isBlocked(head) && (
-                    <Blocked data-testid="transcript-blocked">
+                    <Blocked data-role="transcript-blocked">
                         {/* The glyph repeats the words beside it, so a reader who is read to hears
                             "stop sign waiting for you" unless it is hidden — as every other glyph is. */}
                         <span aria-hidden>{`${ICONS.blocked} `}</span>
@@ -195,7 +195,7 @@ export function TranscriptHeader({ document, entries }: TranscriptHeaderProps) {
                 <span>{`turn ${head.turnCount}/${head.maxTurns}`}</span>
             </Slot>
 
-            <Cost data-testid="transcript-cost">{`${formatRecordedCost(recordedCost(entries))} recorded`}</Cost>
+            <Cost data-role="transcript-cost">{`${formatRecordedCost(recordedCost(entries))} recorded`}</Cost>
         </Band>
     );
 }

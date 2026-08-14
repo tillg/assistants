@@ -79,12 +79,12 @@ export function Receipt({ receipt }: ReceiptProps) {
     const operation = intent?.toolName ?? result?.toolName ?? "";
 
     return (
-        <Row data-testid="transcript-receipt" data-open={open}>
+        <Row data-role="transcript-receipt" data-open={open}>
             <Body>
                 <Toggle
                     type="button"
                     aria-expanded={open}
-                    data-testid="transcript-receipt-toggle"
+                    data-role="transcript-receipt-toggle"
                     onClick={() => setOpen((was) => !was)}>
                     <span aria-hidden>{ICONS.tool}</span>
                     <Operation>{operation}</Operation>
@@ -92,7 +92,7 @@ export function Receipt({ receipt }: ReceiptProps) {
                     {result === undefined && <Aside>no result</Aside>}
                 </Toggle>
                 {open && (
-                    <Detail data-testid="transcript-receipt-body">
+                    <Detail data-role="transcript-receipt-body">
                         <Caption>arguments</Caption>
                         <Code>{intent?.toolArgs ?? "—"}</Code>
                         <Caption>result</Caption>

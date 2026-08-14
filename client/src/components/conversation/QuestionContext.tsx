@@ -51,16 +51,16 @@ export function QuestionContext({ document, height }: QuestionContextProps) {
     }
 
     return (
-        <TranscriptBox $height={height} data-testid="conversation-transcript">
-            <Band data-testid="transcript-header">
-                <Who data-testid="transcript-who">
+        <TranscriptBox $height={height} data-role="conversation-transcript">
+            <Band data-role="transcript-header">
+                <Who data-role="transcript-who">
                     <span aria-hidden>{ICONS.assistant}</span>
                     <span>{question.assistantKey}</span>
                     <Kind>{question.kind}</Kind>
                 </Who>
             </Band>
             <Body>
-                <Message data-testid="transcript-message">
+                <Message data-role="transcript-message">
                     {question.conversationId === ""
                         ? "This question names no conversation, so there is no thread to show."
                         : `This question's conversation (${question.conversationId}) could not be read.`}

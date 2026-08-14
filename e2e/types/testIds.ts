@@ -73,8 +73,15 @@ export enum TestID {
  * Test ids this application emits itself, from `client/src/components/conversation/`.
  *
  * `TestID` above is A12's — the platform stamps those, and a rename there is a platform upgrade.
- * These are ours, so they are kept apart: the list below is the contract between the transcript
+ * These are ours, so they are kept apart as a **list**: it is the contract between the transcript
  * components and the specs, and nothing in the framework will keep it true for us.
+ *
+ * They are **not** kept apart as an attribute. Our components stamp `data-role`, exactly as the
+ * platform does, because `playwright.config.ts` sets `testIdAttribute: "data-role"` — so that is
+ * what `getByTestId` asks for, and one attribute means one way to find an element. Emitting the
+ * React-conventional `data-testid` here instead is silent rather than noisy: the locator simply
+ * never matches, which is how five transcript specs failed with "element(s) not found" against
+ * elements that were on the page the whole time.
  */
 export enum AppTestID {
     CONVERSATION_TRANSCRIPT = "conversation-transcript",

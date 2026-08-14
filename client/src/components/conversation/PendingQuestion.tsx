@@ -91,7 +91,7 @@ export function PendingQuestion({ questionId }: PendingQuestionProps) {
         // The Conversation says it is blocked and the question is gone: say so, and leave the thread
         // above it standing. A missing second document is never a reason for a form not to open.
         return (
-            <Message data-testid="transcript-message">
+            <Message data-role="transcript-message">
                 <span aria-hidden>{`${ICONS.blocked} `}</span>A question is pending, but it could not be read.
             </Message>
         );
@@ -100,7 +100,7 @@ export function PendingQuestion({ questionId }: PendingQuestionProps) {
     const question = readOpenQuestion(read.document);
 
     return (
-        <Row data-testid="pending-question">
+        <Row data-role="pending-question">
             <Body>
                 <Icon aria-hidden>{ICONS.blocked}</Icon>
                 <div>
@@ -113,7 +113,7 @@ export function PendingQuestion({ questionId }: PendingQuestionProps) {
                         onMarkdownChange={noop}
                     />
                     {question.options.length > 0 && (
-                        <Options data-testid="pending-question-options">
+                        <Options data-role="pending-question-options">
                             {question.options.map((option) => (
                                 <li key={option.value}>{option.label}</li>
                             ))}
@@ -121,7 +121,7 @@ export function PendingQuestion({ questionId }: PendingQuestionProps) {
                     )}
                     <Answer
                         type="button"
-                        data-testid="pending-question-answer"
+                        data-role="pending-question-answer"
                         onClick={() =>
                             dispatch(
                                 openForeignForm({

@@ -108,7 +108,7 @@ export function Bubble({ entry }: BubbleProps) {
     return (
         <Row
             $side={role.side}
-            data-testid="transcript-bubble"
+            data-role="transcript-bubble"
             data-seq={entry.seq}
             data-kind={entry.kind}
             data-side={role.side}
@@ -121,7 +121,7 @@ export function Bubble({ entry }: BubbleProps) {
                         <Disclosure
                             type="button"
                             aria-expanded={open}
-                            data-testid="transcript-bubble-toggle"
+                            data-role="transcript-bubble-toggle"
                             onClick={() => setOpen((was) => !was)}>
                             <Label>{role.label}</Label>
                         </Disclosure>
@@ -129,7 +129,7 @@ export function Bubble({ entry }: BubbleProps) {
                     {!collapsible && role.label !== undefined && <Label>{role.label}</Label>}
                     {text !== undefined && (open || !collapsible) && <Text>{text}</Text>}
                     {recorded > 0 && (
-                        <Footnote data-testid="transcript-cost-footnote">
+                        <Footnote data-role="transcript-cost-footnote">
                             {`${format(entry.promptTokens ?? 0)} + ${format(entry.completionTokens ?? 0)} tokens`}
                         </Footnote>
                     )}
