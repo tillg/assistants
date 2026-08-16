@@ -167,7 +167,7 @@ function isSeparatorDue(previous: Date | undefined, at: Date): boolean {
 function readEntry(fields: Record<string, unknown>): TranscriptEntry {
     return {
         seq: asNumber(fields["Seq"]) ?? 0,
-        at: asString(fields["At"]) ?? "",
+        at: asInstant(fields["At"]),
         role: asString(fields["Role"]) ?? "",
         kind: asString(fields["Kind"]) ?? "",
         ...optional("text", asString(fields["Text"])),
@@ -192,6 +192,24 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function asString(value: unknown): string | undefined {
     return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * An instant, from either shape the same field arrives in.
+ *
+ * The ThingStore's JSON gives `At` as the string A12 stores — `2026-08-16T13:07:16`. The **form
+ * engine** does not: it parses a `DateTimeType` into a JavaScript `Date` before the document
+ * reaches a component. So the same Entry is a string in the captured fixture and a `Date` in the
+ * running application, and reading it with `asString` alone silently yielded `""` — which made
+ * every instant unreadable, every separator empty, and therefore **no separator ever appeared in
+ * the real application**, while the unit tests over the fixture passed. Found end to end, because
+ * only the end-to-end tier sees the shape the form engine actually hands over.
+ */
+function asInstant(value: unknown): string {
+    if (value instanceof Date) {
+        return Number.isNaN(value.getTime()) ? "" : value.toISOString();
+    }
+    return asString(value) ?? "";
 }
 
 function asNumber(value: unknown): number | undefined {

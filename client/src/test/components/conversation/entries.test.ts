@@ -14,6 +14,24 @@ function entry(seq: number, at: string, rest: Partial<TranscriptEntry> = {}): Tr
 }
 
 describe("readEntries", () => {
+    it("reads the instant whether the form engine parsed it or not", () => {
+        // The store's JSON gives a string; the **form engine** hands the component a `Date`. The
+        // fixture only ever carries the first, so this is the case that made every separator in
+        // the running application empty while the suite stayed green.
+        const parsed = readEntries({
+            Conversation: {
+                Entries: [
+                    { Seq: 1, At: new Date("2026-08-16T13:07:16Z"), Role: "user", Kind: "prompt", Text: "go" },
+                    { Seq: 2, At: "2026-08-16T13:07:20", Role: "assistant", Kind: "assistant", Text: "done" }
+                ]
+            }
+        });
+
+        expect(parsed[0]!.at).toBe("2026-08-16T13:07:16.000Z");
+        expect(parsed[1]!.at).toBe("2026-08-16T13:07:20");
+        expect(separatorLabel(parsed[0]!.at)).not.toBe("");
+    });
+
     it("reads the fixture's Entries in seq order", () => {
         expect(readEntries(fixture).map((read) => read.seq)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
     });
