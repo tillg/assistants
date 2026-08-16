@@ -55,11 +55,20 @@ export class OpenAiProvider implements LlmProvider {
         private readonly apiKey: string,
         private readonly fetchImpl: typeof fetch = fetch,
         private readonly temperature?: number,
+        private readonly maxTokens: number = 4096,
     ) {}
 
     async complete(request: LlmRequest): Promise<LlmResponse> {
         const body = {
             model: request.model,
+            // Bounded, as the Anthropic provider has always bounded it. Omitting it means the
+            // gateway's own default applies, and a local server's default is 32768 — at the ~47
+            // tokens/second a quantized model manages, one completion can generate for eleven
+            // minutes. The Turn does not fail; it simply does not return, the scan that owns it
+            // never finishes, and the Runtime stops stamping its heartbeat and reports unhealthy
+            // while working perfectly well. Measured: eight Conversations wedged one scan for over
+            // ten minutes. A Turn that needs more than this has lost the thread anyway.
+            max_tokens: this.maxTokens,
             ...(this.temperature === undefined ? {} : { temperature: this.temperature }),
             messages: request.messages.map((message) => {
                 if (message.role === "tool") {

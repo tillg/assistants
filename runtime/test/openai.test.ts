@@ -55,6 +55,21 @@ describe("the OpenAI-compatible provider", () => {
         expect(sent["temperature"]).toBe(0);
     });
 
+    it("bounds the completion, as the Anthropic provider always has", async () => {
+        // Without this the gateway's default applies. A local server defaults to 32768, which at a
+        // quantized model's speed is minutes of generation inside one Turn — long enough to wedge
+        // the scan that owns it and stop the Runtime's heartbeat.
+        let sent: Record<string, unknown> = {};
+        const provider = new OpenAiProvider("http://gateway/v1", "key", gateway(
+            { message: { content: "fine" }, finish_reason: "stop" },
+            (body) => (sent = body),
+        ));
+
+        await provider.complete(REQUEST);
+
+        expect(sent["max_tokens"]).toBe(4096);
+    });
+
     it("refuses to read a tool call emitted as text as though it were an answer", async () => {
         // The exact shape a 4-bit Qwen3 produced: HTTP 200, `stop`, no `tool_calls`, markup as
         // content. Read as an answer it ends the Conversation `answered` having done nothing.
