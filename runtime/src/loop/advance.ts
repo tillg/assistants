@@ -521,11 +521,17 @@ export class LoopDriver {
         try {
             response = await this.callLlmWithRetries(assistant.data, conversation, resolution);
         } catch (error) {
+            // The User reads this one as an Open Question, so it says what happened rather than
+            // where. The stack goes to the log, where the person who needs it is looking.
+            log.error("the language model could not be reached", {
+                conversationId: stored.thingId,
+                error: describeError(error),
+            });
             await this.escalate(
                 stored,
                 assistant,
                 "error",
-                `The language model could not be reached: ${describeError(error)}`,
+                `The language model could not be reached: ${describeForModel(error)}`,
             );
             return { status: conversation.status ?? "waiting", turnsRun: 0, note: "llm unreachable" };
         }
@@ -978,10 +984,21 @@ export class LoopDriver {
             } catch (error) {
                 lastError = error;
                 if (!(error instanceof TransientLlmError)) throw error;
+                // `describeForModel`, not `describeError`: this Entry has three readers and a stack
+                // trace serves none of them. It goes back to the model on the next Turn, where it
+                // costs tokens and cannot be acted on; and since the transcript became something a
+                // human reads, it is now shown to the **User** — who is owed a sentence about what
+                // went wrong, not `/app/src/llm/openai.ts:151:19`. The stack is logged instead, so
+                // an operator loses nothing.
+                log.warn("a transient model error", {
+                    assistant: assistant.key,
+                    attempt,
+                    error: describeError(error),
+                });
                 appendEntry(conversation, {
                     role: "system",
                     kind: "error",
-                    text: `Transient model error on attempt ${attempt}: ${describeError(error)}`,
+                    text: `Transient model error on attempt ${attempt}: ${describeForModel(error)}`,
                 });
                 if (attempt < this.deps.llmMaxAttempts) {
                     await sleep(250 * 2 ** (attempt - 1));
