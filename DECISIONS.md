@@ -1728,3 +1728,75 @@ and went looking for a more interesting explanation.
 load-bearing for a commit. If a measurement produces a suspiciously round number — four values all
 exactly 15 — check the measurement before building on it. And retrying an auth failure by hand costs
 more than it looks: each attempt extended the lockout I was trying to diagnose.
+
+## D-054 — Testing against a real LLM found four defects no other tier could
+
+*2026-08-16, driving live Documents through the Assistants against a local
+`Qwen3-Coder-30B-A3B-Instruct-4bit`.*
+
+The scripted provider is deterministic by design, which is what makes the e2e tier trustworthy — and
+also what makes it blind to everything below. Each of these was found by watching real Conversations,
+and each has a regression test.
+
+1. **`openai.ts` sent no `max_tokens`; `anthropic.ts` always sent 4096.** With no bound the gateway's
+   own default applies, and a local server's is 32768 — at ~47 tokens/second that is eleven minutes
+   of generation inside one Turn. The Turn does not fail, it simply never returns: the scan that owns
+   it never finishes, the heartbeat stops, and the Runtime reports **unhealthy while working
+   perfectly well**. Measured: eight live Conversations wedged one scan for over ten minutes, and
+   only 2 of 8 invoices were extracted. With the bound, **6 of 6**.
+2. **A tool call emitted as text was read as an answer.** The model returns HTTP 200,
+   `finish_reason: "stop"`, no `tool_calls`, and Qwen's `<function=…>` markup as content. The Turn
+   read a perfectly ordinary answer, ended the Conversation `answered`, and recorded the markup as
+   its Result — a Conversation that did nothing looking exactly like one that finished. Now a
+   `TransientLlmError`, so the Turn retries; `llmMaxAttempts` still bounds it.
+3. **`LLM_TEMPERATURE`, sent only when set.** The same model needs `0` to emit structured tool calls
+   at all. At its default it degrades as in (2) on most Turns.
+4. **The transcript printed JS stack traces to the User.** Two paths wrote `describeError` — which
+   returns `error.stack` — into an Entry and into an escalation's Open Question. `/app/src/llm/
+   openai.ts:151:19` and four async frames, rendered in the thread. `describeForModel` already
+   existed for exactly this and its own comment already made the argument. Tolerable when Entries
+   were a data grid nobody read; not now.
+
+**What the live model got right**, which is the other half of the result: it read German invoice text
+and produced correct structured data — amount, number, both dates, issuer, recipient — through the
+new catalogue path, for six invoices out of six. And when it called a bare `assistant.call`, my phase
+E belt message told it *"…is not granted to you. Available: … assistant.call:accountant"* and it
+**self-corrected on the next Turn**. That message existing is why the run continued.
+
+## D-055 — ⚠ The form engine hands over a `Date`, and no separator ever rendered
+
+*Found 2026-08-16 in the browser, fixed the same hour.*
+
+`Conversation.Entries[].At` is a **string** in the ThingStore's JSON and a parsed JavaScript **`Date`**
+by the time A12's form engine gives the document to a component. `readEntries` used `asString` for
+both, so `at` was always `""`, every instant was unreadable, every separator label was empty — and
+therefore **no separator ever appeared in the running application**.
+
+Every tier missed it, and the reason is worth keeping: `client/src/test/fixtures/conversation.json`
+was captured from the **store**, so the unit tests exercise the store's shape and pass. Only the tier
+that sees what the form engine actually hands over could catch it. It surfaced as an e2e failure
+first reported as *"element(s) not found"*, which I nearly dismissed as a selector problem.
+
+`asInstant` now accepts both, and a unit test asserts both shapes in one case.
+
+**The general lesson**: a fixture captured from one layer is not a fixture for the layer above it.
+`entries.ts` reads eleven fields; only `At` is a `DateTimeType`, which is why only the separator
+broke rather than the whole transcript.
+
+## D-056 — The e2e suite is green: 39 passed
+
+*2026-08-16.* Four rounds, each finding something real:
+
+| Run | Result | Fixed |
+|---|---|---|
+| 1 | 29 passed, 6 failed | `data-testid` → `data-role`; the components now follow A12's convention |
+| 2 | 35 passed, 2 failed | an empty `<Separator>` rendered as a height-less div; `toContainText` cannot see an input's value |
+| 3 | 34 passed, 1 failed | the `Date`/string mismatch above |
+| 4 | **39 passed** | the login jitter below |
+
+**The Keycloak lockout, twice.** The realm sets `quickLoginCheckMilliSeconds: 1000`, so two logins as
+the same user inside one second are a credential-stuffing burst and the user is disabled for a
+minute — *even when both succeed*. Parallel workers each call `ThingStore.connect("admin")` in
+`beforeAll`, so they collide. My first fix waited the lockout out; the wait must exceed 60 seconds
+and a `beforeAll` only gets a 60-second budget, so the hook died before the retry could land and one
+failure became another. Jitter over a window wider than the check means the burst never forms.
