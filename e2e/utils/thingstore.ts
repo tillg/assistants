@@ -30,13 +30,22 @@ import type { TestUsername } from "../types";
 import { KEYCLOAK_CLIENT_ID, KEYCLOAK_REALM, KEYCLOAK_URL, THINGSTORE_URL } from "./config";
 
 /**
- * How long to wait out a quick-login lockout, and how many times.
+ * Avoiding Keycloak's quick-login lockout, rather than waiting it out.
  *
- * `minimumQuickLoginWaitSeconds` is 60 in the realm, so one wait of just over a minute clears it;
- * two attempts is therefore one retry, which is all a collision needs.
+ * The realm sets `quickLoginCheckMilliSeconds: 1000`, so two logins **as the same user inside one
+ * second** are treated as a credential-stuffing burst and the user is disabled for a minute — even
+ * when both succeed. Specs run in parallel workers and several call `ThingStore.connect("admin")`
+ * in their `beforeAll`, which Playwright starts together, so the collision is close to certain.
+ *
+ * Waiting the lockout out was the first fix and it was the wrong one: the wait has to exceed
+ * `minimumQuickLoginWaitSeconds` (60), and a `beforeAll` only gets the 60-second budget
+ * `playwright.config.ts` grants a test — so the hook died before the retry could land. Spreading
+ * the logins over a window wider than the check instead means the burst never forms. The retry
+ * stays as a safety net, with a wait that fits inside the budget it runs in.
  */
-const QUICK_LOGIN_WAIT_MS = 65_000;
-const QUICK_LOGIN_ATTEMPTS = 2;
+const QUICK_LOGIN_JITTER_MS = 2_500;
+const QUICK_LOGIN_WAIT_MS = 15_000;
+const QUICK_LOGIN_ATTEMPTS = 3;
 
 export type A12Document = Record<string, unknown>;
 
@@ -116,13 +125,17 @@ export class ThingStore {
      * lost the race, reported as `invalid_grant` / "Invalid user credentials", which reads as a
      * wrong password and is nothing of the kind. It cost a wrong commit to learn that.
      *
-     * Retrying is the right fix rather than weakening the realm: the protection is doing its job on
-     * a pattern that is genuinely suspicious anywhere but here. Waiting it out costs a minute in the
-     * rare collision and nothing the rest of the time.
+     * The realm is left alone — the protection is doing its job on a pattern that is genuinely
+     * suspicious anywhere but here. Jitter (above) is what prevents the burst; the retry below is
+     * only a safety net, bounded to fit inside the 60-second budget a `beforeAll` gets.
      */
     async login(): Promise<void> {
         const url = `${KEYCLOAK_URL.replace(/\/+$/, "")}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token`;
         let lastFailure = "";
+
+        // Spread across a window wider than the realm's one-second check, so parallel workers do
+        // not arrive together in the first place.
+        await new Promise((resolve) => setTimeout(resolve, Math.random() * QUICK_LOGIN_JITTER_MS));
 
         for (let attempt = 1; attempt <= QUICK_LOGIN_ATTEMPTS; attempt += 1) {
             const response = await fetch(url, {
