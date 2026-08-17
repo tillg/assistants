@@ -15,17 +15,48 @@ import { FireflyError } from "../connectors/firefly.js";
 import type { FireflyConnector, PostingSplit } from "../connectors/firefly.js";
 import type { OperationContext, OperationImplementation, OperationOutcome } from "./registry.js";
 import { isAnswered } from "../watcher/watcher.js";
+import { readTextLayer } from "../readers/textLayer.js";
+import { NULL_VISION_READER, type VisionReader } from "../llm/vision.js";
 import {
     isTriggerEligible,
     type Assistant,
     type Conversation,
+    type DocumentThing,
     type OpenQuestion,
     type ThingModel,
 } from "../domain/types.js";
 
+/**
+ * The half of the Content Store client the two document readers use.
+ *
+ * Narrower than {@link ContentStoreClient} on purpose: these Operations read bytes and never write
+ * any, so the type they take says so — and a test can hand them a function rather than a client.
+ */
+export interface AttachmentDownloader {
+    download(attachmentId: string): Promise<Buffer>;
+}
+
+/** The caps `document.readScan` refuses over, from {@link Config}. */
+export interface VisionLimits {
+    visionMaxPages: number;
+    visionMaxBytes: number;
+}
+
 export interface OperationDeps {
     things: ThingRepository;
     firefly: FireflyConnector;
+    /**
+     * The Content Store, for the two readers.
+     *
+     * Optional because the Runtime does not build one yet — `services.ts` constructs no
+     * {@link ContentStoreClient}, and threading one in is that file's change rather than this one's.
+     * Absent, both readers say so in words instead of failing obscurely on a missing method.
+     */
+    content?: AttachmentDownloader;
+    /** The `vision` profile's reader, or the null one — which is the shipped default. */
+    vision?: VisionReader;
+    /** Defaults matching `config.ts`, so a caller that has no Config still gets bounded reads. */
+    limits?: VisionLimits;
     /** Raise an Open Question and return its ThingID. Shared by askUser and every Manual Connector. */
     raiseQuestion(input: {
         context: OperationContext;
@@ -57,6 +88,19 @@ const EXACT_MATCH_MAX_LENGTH = 100;
 
 /** The store refuses a `pageSize` above this, so it is a hard ceiling and not a preference. */
 const PAGE_SIZE_MAX = 100;
+
+/**
+ * A calendar date, and nothing else — the shape every date argument on the Bookkeeping Operations is
+ * documented to take. Anchored at both ends deliberately: an unanchored pattern would accept a date
+ * with something appended to it, which is exactly the trailing junk this refuses.
+ */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The most transactions one call will fetch. A ceiling rather than a default, because the Operation
+ * is `clientReadable` and its answer is assembled in memory in the process that runs the scan loop.
+ */
+const TRANSACTIONS_LIMIT_MAX = 200;
 
 /**
  * Firefly's field names, in the vocabulary the model was actually given.
@@ -261,8 +305,61 @@ const READABLE_MODELS: readonly string[] = Object.keys(SPECS).filter(
 /** Models an Assistant may create or edit. Never its own machinery. */
 const WRITABLE_MODELS: readonly string[] = ["Party_DM", "Document_DM", "Invoice_DM", "Process_DM"];
 
+/**
+ * `Document_DM` with its attachment group readable.
+ *
+ * `SPECS.Document_DM` deliberately leaves the group out: `ThingRepository.update` merges onto the
+ * **raw** stored document precisely so the projection does not have to know about it, and adding it
+ * there would put an attachment in front of every writer that has never wanted one.
+ *
+ * Reading it needs one value, so the group is mapped here as if it were a scalar field:
+ * `fromDocument` copies `Document/Attachment` across untouched, whatever shape the store hands it
+ * back in. Read-only — nothing writes through this spec, and the readers update through
+ * `SPECS.Document_DM` as everything else does.
+ */
+export const DOCUMENT_WITH_ATTACHMENT: ModelSpec = {
+    ...SPECS.Document_DM,
+    fields: { ...SPECS.Document_DM.fields, attachment: "Attachment" },
+};
+
+/** The attachment group of a `Document_DM`, in the platform's own snake_case field names. */
+interface StoredAttachment {
+    attachment_id?: string;
+    original_filename?: string;
+    mime_type?: string;
+    size?: number;
+}
+
+/**
+ * The attachment on a Document, or `undefined` when it has none.
+ *
+ * The group is `repeatability: 1`, so the store holds it as a single object; a one-row array is
+ * accepted as well rather than trusting that observation with the whole reading ladder behind it.
+ * An attachment with no `attachment_id` is inline `content` — which nothing in this system creates,
+ * and which there is nothing to download for.
+ */
+function attachmentOf(data: Record<string, unknown>): StoredAttachment | undefined {
+    const group = data["attachment"];
+    const row = Array.isArray(group) ? group[0] : group;
+    if (typeof row !== "object" || row === null) return undefined;
+    const attachment = row as StoredAttachment;
+    return attachment.attachment_id ? attachment : undefined;
+}
+
+/**
+ * The caps' defaults, matching `config.ts`. Repeated rather than imported because these Operations
+ * take their limits as an argument and a caller with no Config — a test, the bootstrap CLI — should
+ * still get a bounded read rather than an unbounded one.
+ */
+const VISION_LIMIT_DEFAULTS: VisionLimits = {
+    visionMaxPages: 10,
+    visionMaxBytes: 16 * 1024 * 1024,
+};
+
 export function buildOperations(deps: OperationDeps): OperationImplementation[] {
     const { things, firefly } = deps;
+    const vision = deps.vision ?? NULL_VISION_READER;
+    const limits = deps.limits ?? VISION_LIMIT_DEFAULTS;
 
     const thingstoreCreate: OperationImplementation = {
         name: "thingstore.create",
@@ -880,17 +977,40 @@ export function buildOperations(deps: OperationDeps): OperationImplementation[] 
                     start: str("First day to include, yyyy-mm-dd."),
                     end: str("Last day to include, yyyy-mm-dd. Must be after start."),
                     account: str("Optional: restrict to one account, by its exact name."),
-                    limit: num("Maximum transactions (default 25)."),
+                    limit: num(`Maximum transactions (default 25, at most ${TRANSACTIONS_LIMIT_MAX}).`),
                 },
                 required: ["start", "end"],
             },
         },
         async execute(args): Promise<OperationOutcome> {
+            // Both callers are strangers in different ways: an LLM writes a date from a sentence, and
+            // — since this Operation became `clientReadable` (ADR-0023) — a browser writes one from a
+            // form. The Connector now encodes what it is given, so a stray `&` can no longer steer the
+            // outbound request; refusing it here as well means the caller is told *why* rather than
+            // quietly receiving a window it did not ask for.
+            const start = String(args["start"] ?? "");
+            const end = String(args["end"] ?? "");
+            for (const [field, value] of [["start", start], ["end", end]] as const) {
+                if (!ISO_DATE.test(value)) {
+                    return {
+                        kind: "error",
+                        message:
+                            `\`${field}\` must be a calendar date written yyyy-mm-dd, e.g. 2026-01-31 — ` +
+                            `got "${value}". Give the first and last day of the window explicitly.`,
+                    };
+                }
+            }
+
             const groups = await firefly.listTransactions({
-                start: String(args["start"] ?? ""),
-                end: String(args["end"] ?? ""),
+                start,
+                end,
                 accountName: args["account"] ? String(args["account"]) : undefined,
-                limit: Number(args["limit"] ?? 25) || 25,
+                // Clamped, because the response is buffered into the process that runs the scan loop:
+                // a browser asking for a million rows would be asking the Runtime to stop watching.
+                limit: Math.min(
+                    TRANSACTIONS_LIMIT_MAX,
+                    Math.max(1, Number(args["limit"] ?? 25) || 25),
+                ),
             });
             // Projected rather than passed through: a Firefly group carries several dozen fields per
             // split, and a register the model cannot read in one glance is a register it will not use.
@@ -1162,6 +1282,297 @@ export function buildOperations(deps: OperationDeps): OperationImplementation[] 
             ].join("\n"),
     });
 
+    /**
+     * The two reading Operations, and what they share.
+     *
+     * Both are pointed at a Document, both write exactly one field, and both must refuse to write
+     * it when it already says something. That refusal is the important half: `extractedText` may
+     * hold a transcription a human typed — `document.requestText` is precisely that path — and a
+     * reader that overwrote it would destroy work nobody can get back, silently, for a field it was
+     * only ever asked to fill.
+     */
+    type DocumentToRead =
+        | { refused: OperationOutcome }
+        | { docRef: string; data: Record<string, unknown> };
+
+    async function documentToRead(args: Record<string, unknown>): Promise<DocumentToRead> {
+        const thingId = String(args["thingId"] ?? "").trim();
+        if (!thingId) {
+            return { refused: { kind: "error", message: "This needs the Document's thingId." } };
+        }
+        const docRef = `${SPECS.Document_DM.model}/${thingId}`;
+        const document = await things.get<Record<string, unknown>>(DOCUMENT_WITH_ATTACHMENT, docRef);
+        const existing = String(document.data["extractedText"] ?? "").trim();
+        // `"true"` as well as `true`: a model that emits its booleans as strings would otherwise
+        // have `replace` silently ignored, and be told the Document already has text when it has
+        // just asked for that text to be replaced.
+        const replace = args["replace"] === true || args["replace"] === "true";
+        if (existing !== "" && !replace) {
+            return { refused: { kind: "value", value: { skipped: "already-has-text" } } };
+        }
+        return { docRef, data: document.data };
+    }
+
+    /** Shared by both readers, so the sentence about a missing Content Store is written once. */
+    async function attachmentBytes(
+        data: Record<string, unknown>,
+    ): Promise<{ refused: OperationOutcome } | { bytes: Buffer }> {
+        const attachment = attachmentOf(data);
+        if (!attachment?.attachment_id) {
+            return { refused: { kind: "value", value: { reason: "no-attachment" } } };
+        }
+        if (!deps.content) {
+            // A misconfigured Runtime, not a Document behaving unusually — so this one really is an
+            // error. Nothing the model does next can make it right, and it should say so plainly.
+            return {
+                refused: {
+                    kind: "error",
+                    message:
+                        "This Runtime has no Content Store client, so no attachment can be read. " +
+                        "That is a deployment fault; tell the User rather than trying again.",
+                },
+            };
+        }
+        return { bytes: await deps.content.download(attachment.attachment_id) };
+    }
+
+    /** "Has the text landed?", answered from the Document. Both readers reconcile the same way. */
+    async function textOnDocument(args: Record<string, unknown>): Promise<number | undefined> {
+        const thingId = String(args["thingId"] ?? "").trim();
+        if (!thingId) return undefined;
+        const document = await things.get<DocumentThing>(
+            SPECS.Document_DM,
+            `${SPECS.Document_DM.model}/${thingId}`,
+        );
+        return String(document.data.extractedText ?? "").trim().length;
+    }
+
+    const replaceParameter = {
+        type: "boolean",
+        description:
+            "Overwrite text the Document already has. Leave it out unless the User asked for it: " +
+            "the existing text may be a person's own transcription.",
+    };
+
+    const extractText: OperationImplementation = {
+        name: "document.extractText",
+        mutating: true,
+        // Never `clientReadable`: it writes.
+        seed: {
+            name: "Read a document's text layer",
+            system: "ThingStore",
+            kind: "connector",
+            description:
+                "Read the text layer of a Document's attachment and store it as the Document's text. " +
+                "Free, exact and deterministic — try this before anything that costs money. It reports " +
+                "'no-text-layer' when the attachment is a scan, which is an ordinary answer and not a " +
+                "failure: read it with document.readScan, or ask a human with document.requestText. " +
+                "Text the Document already has is never overwritten.",
+            parameters: {
+                type: "object",
+                properties: {
+                    thingId: str("The Document's ThingID."),
+                    replace: replaceParameter,
+                },
+                required: ["thingId"],
+            },
+        },
+        async execute(args): Promise<OperationOutcome> {
+            const subject = await documentToRead(args);
+            if ("refused" in subject) return subject.refused;
+
+            const attachment = await attachmentBytes(subject.data);
+            if ("refused" in attachment) return attachment.refused;
+
+            const layer = await readTextLayer(attachment.bytes);
+            if (layer.kind !== "text") {
+                // A **value** either way, deliberately. `no-text-layer` is the likeliest outcome on
+                // a scanned invoice and it is what tells the caller to try the next rung; an `error`
+                // would put a red entry in the transcript for a document behaving exactly as
+                // expected, and teach the model that something went wrong when nothing did.
+                return layer.kind === "no-text-layer"
+                    ? { kind: "value", value: { reason: "no-text-layer", pages: layer.pages ?? 0 } }
+                    : { kind: "value", value: { reason: "not-a-pdf" } };
+            }
+            // `extractedText` and nothing else. `update` merges onto the stored document, so the
+            // attachment, the classification and everything else survive untouched.
+            await things.update(SPECS.Document_DM, subject.docRef, { extractedText: layer.text });
+            log.info("read a document's text layer", {
+                thingId: String(args["thingId"] ?? ""),
+                pages: layer.pages,
+                characters: layer.text.length,
+            });
+            return { kind: "value", value: { pages: layer.pages, characters: layer.text.length } };
+        },
+        async reconcile(args): Promise<OperationOutcome | undefined> {
+            // Answerable, and worth answering even though repeating this is harmless: it is
+            // deterministic over unchanged bytes and it refuses a non-empty field, so the worst a
+            // re-run can do is cost a Turn.
+            const characters = await textOnDocument(args);
+            if (characters === undefined) return undefined;
+            return characters > 0
+                ? { kind: "value", value: { characters, alreadyExtracted: true } }
+                : {
+                      kind: "error",
+                      message:
+                          "This extraction was interrupted and the Document still has no text. Call it again — repeating it is safe.",
+                  };
+        },
+    };
+
+    const readScan: OperationImplementation = {
+        name: "document.readScan",
+        mutating: true,
+        // No `requiresApproval` in the seed, deliberately: an approval per scanned invoice is two
+        // questions per piece of post, and ADR-0018 makes adding one the User's to decide on the
+        // Operation Thing.
+        seed: {
+            name: "Read a scanned document",
+            system: "ThingStore",
+            kind: "connector",
+            description:
+                "Read a scanned attachment with a vision model and store what it says as the " +
+                "Document's text. This costs money per page, so call it only after " +
+                "document.extractText has reported 'no-text-layer' and only when the document is " +
+                "worth reading — a bill, a letter or a quote is; an advertising leaflet is not. It " +
+                "reports 'unavailable' when no vision model is configured, and refuses anything over " +
+                "its page or size cap rather than reading part of it. Text the Document already has " +
+                "is never overwritten.",
+            parameters: {
+                type: "object",
+                properties: {
+                    thingId: str("The Document's ThingID."),
+                    replace: replaceParameter,
+                },
+                required: ["thingId"],
+            },
+        },
+        async execute(args): Promise<OperationOutcome> {
+            // First, because it is free and because it is the shipped default: with no `vision`
+            // profile there is nothing to send a PDF to, and downloading one to discover that would
+            // be work done for an answer already known.
+            if (!vision.available) return { kind: "value", value: { reason: "unavailable" } };
+
+            const subject = await documentToRead(args);
+            if ("refused" in subject) return subject.refused;
+
+            const attachment = await attachmentBytes(subject.data);
+            if ("refused" in attachment) return attachment.refused;
+
+            const bytes = attachment.bytes;
+            if (bytes.length > limits.visionMaxBytes) {
+                return { kind: "value", value: { reason: "too-large", bytes: bytes.length } };
+            }
+            // The page count comes from the free reader, which returns it even when it finds no text
+            // — so nothing is ever sent uncapped. A file `pdfjs` cannot open has no page count, and
+            // a document whose length is unknown is exactly what the cap exists to refuse.
+            const layer = await readTextLayer(bytes);
+            if (layer.kind === "not-a-pdf") return { kind: "value", value: { reason: "not-a-pdf" } };
+            const pages = layer.pages ?? 0;
+            if (pages > limits.visionMaxPages) {
+                // A reason, never a truncated read: a partial invoice is worse than no invoice,
+                // because it looks complete.
+                return { kind: "value", value: { reason: "too-many-pages", pages } };
+            }
+
+            const read = await vision.read(bytes, pages);
+            await things.update(SPECS.Document_DM, subject.docRef, { extractedText: read.text });
+            log.info("read a scanned document with a vision model", {
+                thingId: String(args["thingId"] ?? ""),
+                reader: vision.name,
+                pages,
+                characters: read.text.length,
+            });
+            return {
+                kind: "value",
+                value: {
+                    pages,
+                    characters: read.text.length,
+                    // In the outcome because the Loop Driver adds it to what the Turn records. Left
+                    // out, this spend would be invisible — and it would grow with ordinary
+                    // successful use.
+                    ...(read.usage ? { usage: read.usage } : {}),
+                },
+            };
+        },
+        async reconcile(args): Promise<OperationOutcome | undefined> {
+            // The one reader where repeating costs money, so the interrupted case says what is true
+            // rather than inviting a retry.
+            const characters = await textOnDocument(args);
+            if (characters === undefined) return undefined;
+            return characters > 0
+                ? { kind: "value", value: { characters, alreadyRead: true } }
+                : {
+                      kind: "error",
+                      message:
+                          "This scan was interrupted and nothing was written to the Document. Reading it again costs money; do it only if the document is still worth it.",
+                  };
+        },
+    };
+
+    /**
+     * The letterbox, in the catalogue.
+     *
+     * It is here so the User can read it, describe it and switch it off — not because anything calls
+     * it through a Turn. **No Assistant is granted it**: an Assistant that could pull the household's
+     * post into a Conversation on a whim is not something this design wants, and the ingest calls
+     * its own code directly the way the scan loop calls what it needs. `execute` therefore says so
+     * rather than triggering a poll, which would be a second way into the letterbox and would put a
+     * fabricated conversation id in front of the mail Connector.
+     */
+    const emailReceive: OperationImplementation = {
+        name: "email.receive",
+        mutating: true,
+        seed: {
+            name: "Receive email",
+            system: "Email",
+            kind: "connector",
+            description:
+                "Take delivery of forwarded mail and turn each message into a Document. The Runtime " +
+                "runs this on its own schedule; it is in the catalogue so it can be described and " +
+                "switched off, and no Assistant calls it.",
+            parameters: {
+                type: "object",
+                properties: {
+                    externalRef: str(
+                        "The message's Message-ID, which is how a Document already ingested from it " +
+                            "is recognised.",
+                    ),
+                },
+                required: ["externalRef"],
+            },
+        },
+        async execute(): Promise<OperationOutcome> {
+            return {
+                kind: "value",
+                value: {
+                    reason: "driven-by-the-runtime",
+                    note:
+                        "Mail is collected by the Runtime's own scan loop, which creates a Document " +
+                        "per message before any Assistant is woken. There is nothing for a Turn to " +
+                        "call here. Switching this Operation off stops the letterbox.",
+                },
+            };
+        },
+        async reconcile(args): Promise<OperationOutcome | undefined> {
+            // Answerable because `ExternalRef` is a real key: the store knows whether a message has
+            // already become a Document, so recovery never has to guess.
+            const externalRef = String(args["externalRef"] ?? "").trim();
+            if (!externalRef) return undefined;
+            const [existing] = await things.search<DocumentThing>(
+                SPECS.Document_DM,
+                eq(fieldPath(SPECS.Document_DM, "externalRef"), externalRef),
+                1,
+            );
+            return existing
+                ? { kind: "value", value: { thingId: existing.thingId, alreadyReceived: true } }
+                : {
+                      kind: "error",
+                      message: `No Document carries the external reference "${externalRef}", so nothing was ingested under it.`,
+                  };
+        },
+    };
+
     return [
         thingstoreCreate,
         thingstoreGet,
@@ -1180,6 +1591,9 @@ export function buildOperations(deps: OperationDeps): OperationImplementation[] 
         emailSend,
         emailFetch,
         bankSendMoney,
+        extractText,
+        readScan,
+        emailReceive,
     ];
 }
 

@@ -19,11 +19,15 @@ import { OperationRegistry } from "./operations/registry.js";
 import { buildOperations } from "./operations/implementations.js";
 import { FireflyConnector } from "./connectors/firefly.js";
 import { Watcher } from "./watcher/watcher.js";
+import { runMailIngest } from "./watcher/mail.js";
+import { EmailConnector } from "./connectors/email.js";
+import { ContentStoreClient } from "./a12/content.js";
 import { OpenAiProvider } from "./llm/openai.js";
 import { AnthropicProvider } from "./llm/anthropic.js";
 import { ScriptedProvider } from "./llm/scripted.js";
 import type { LlmProvider } from "./llm/provider.js";
-import { loadLlmProfile, type LlmProfile } from "./llm/profiles.js";
+import { loadLlmProfile, loadVisionProfile, type LlmProfile } from "./llm/profiles.js";
+import { createVisionReader } from "./llm/vision.js";
 import type { Config } from "./config.js";
 
 export interface Runtime {
@@ -183,10 +187,48 @@ export function buildRuntime(config: Config): Runtime {
 
     const driver = new LoopDriver(advanceDeps);
 
+    // The letterbox (ADR-0024). Built unconditionally — it is cheap, holds no socket until it is
+    // asked to, and building it conditionally would mean two shapes of `Runtime` to reason about.
+    // What is conditional is whether the Watcher is given anything to call: with no `MAIL_HOST`
+    // there is no `pollMailbox`, and scan 0 returns without doing anything at all.
+    //
+    // It is built HERE, above the Operations, because it is not only the ingest's: the two document
+    // readers download their attachments through the same client. One instance, so one token and
+    // one 401 path, rather than two clients disagreeing about when the login expired.
+    const content = new ContentStoreClient({
+        baseUrl: config.thingStoreUrl,
+        // The same token the JSON-RPC client holds, rather than a second login: two logins would
+        // mean two tokens expiring at two different moments and two 401 paths to get right.
+        tokenSource: {
+            getToken: () => client.currentToken(),
+            invalidate: () => client.invalidateToken(),
+        },
+    });
+
+    // The optional second model. No `vision` in `llm.json` is the shipped default and not an error:
+    // `createVisionReader` hands back the null reader, `document.readScan` reports itself
+    // unavailable, and the ladder falls through to asking the User to type what the page says.
+    const visionProfile = loadVisionProfile(config.llmConfigFile);
+    const vision = createVisionReader(visionProfile, visionProfile?.apiKey);
+    if (vision.available && visionProfile) {
+        // Said only when it is on. Unavailable is the default, and a line about it every boot is
+        // noise in the log of every stack that never wanted a vision model in the first place.
+        log.info("scans can be read", {
+            profile: visionProfile.name,
+            provider: visionProfile.provider,
+            model: visionProfile.model,
+            endpoint: visionProfile.baseUrl,
+            maxPages: config.visionMaxPages,
+        });
+    }
+
     registry.registerAll(
         buildOperations({
             things,
             firefly,
+            content,
+            vision,
+            limits: { visionMaxPages: config.visionMaxPages, visionMaxBytes: config.visionMaxBytes },
             raiseQuestion: (input) =>
                 createQuestion({
                     conversation: input.context.conversation,
@@ -214,12 +256,51 @@ export function buildRuntime(config: Config): Runtime {
         }),
     );
 
+    const mailbox = config.mail.host
+        ? new EmailConnector({
+              host: config.mail.host,
+              port: config.mail.port,
+              user: config.mail.user,
+              password: config.mail.password,
+          })
+        : undefined;
+
+    if (mailbox) {
+        // The sender *count*, not the senders: a list that grants access is worth being able to see
+        // the size of at a glance, and `0` is the misconfiguration that matters.
+        log.info("the letterbox is configured", {
+            host: config.mail.host,
+            user: config.mail.user,
+            folder: config.mail.folderIncoming,
+            allowedSenders: config.mail.allowedSenders.length,
+            pollIntervalMs: config.mail.pollIntervalMs,
+        });
+        if (config.mail.allowedSenders.length === 0) {
+            log.warn(
+                "the letterbox has no allowed senders, so every message will be rejected. " +
+                    "Set MAIL_ALLOWED_SENDERS; empty means nobody, deliberately.",
+            );
+        }
+    }
+
     const watcher = new Watcher({
         things,
         driver,
         maxBirthsPerHour: config.maxBirthsPerHour,
         scheduleTimezone: config.scheduleTimezone,
         birth,
+        pollMailbox: mailbox
+            ? async () => {
+                  const summary = await runMailIngest({
+                      config: config.mail,
+                      connector: mailbox,
+                      content,
+                      things,
+                  });
+                  return summary.created;
+              }
+            : undefined,
+        mailPollIntervalMs: config.mail.pollIntervalMs,
     });
 
     return { client, things, registry, firefly, driver, watcher, llm, llmProfile, findAssistant };

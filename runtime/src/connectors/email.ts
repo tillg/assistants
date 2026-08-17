@@ -233,6 +233,17 @@ export interface FetchedMessage {
     readonly uid: number;
     readonly raw: Buffer;
     readonly internalDate: Date;
+    /**
+     * The envelope sender, lowercased and stripped to the bare address — `""` when the server sent
+     * no envelope or an envelope with no from-address.
+     *
+     * It is here, rather than only on the parsed message, so the ingest can decide *whether it wants
+     * this mail at all* before a single byte of MIME is decoded. IMAP hands the envelope over in the
+     * same FETCH as the source, so it costs nothing; what it buys is that a stranger's attachments
+     * are never base64-decoded into this process's memory on the strength of an address nobody
+     * vouched for.
+     */
+    readonly envelopeFrom: string;
 }
 
 /**
@@ -287,9 +298,16 @@ export class EmailConnector {
             const lock = await client.getMailboxLock(folder);
             try {
                 const messages: FetchedMessage[] = [];
-                for await (const message of client.fetch("1:*", { uid: true, source: true, internalDate: true })) {
+                for await (const message of client.fetch("1:*", {
+                    uid: true,
+                    source: true,
+                    internalDate: true,
+                    // The envelope is what lets the ingest reject a stranger before parsing him.
+                    envelope: true,
+                })) {
                     messages.push({
                         uid: message.uid,
+                        envelopeFrom: envelopeAddress(message.envelope),
                         raw: Buffer.isBuffer(message.source) ? message.source : Buffer.from(message.source ?? ""),
                         // Servers spell INTERNALDATE in several ways; imapflow hands back either a
                         // Date or the raw string, and only one of those is usable downstream.
@@ -331,6 +349,21 @@ export class EmailConnector {
             for (const folder of folders) await createFolder(client, folder);
         });
     }
+}
+
+/**
+ * The envelope's first from-address, normalised the way `parseMessage` normalises the header one.
+ *
+ * The same normalisation on both sides is the point: the ingest compares the envelope address and
+ * the parsed `From:` against one allowlist, and a gate whose two halves disagree about what an
+ * address *is* is not a gate. A missing envelope, an empty `from` list or an address-less entry all
+ * become `""`, which the allowlist refuses — an absent sender is never an allowed one.
+ *
+ * Exported so the normalisation the allowlist depends on can be pinned to a test without an IMAP
+ * server in the loop; nothing outside this file calls it.
+ */
+export function envelopeAddress(envelope: { from?: Array<{ address?: string }> } | undefined): string {
+    return (envelope?.from?.[0]?.address ?? "").trim().toLowerCase();
 }
 
 /**

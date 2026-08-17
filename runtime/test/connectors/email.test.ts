@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { parseMessage } from "../../src/connectors/email.js";
+import { envelopeAddress, parseMessage } from "../../src/connectors/email.js";
 
 /**
  * The Email Connector's parsing half, against real `.eml` files.
@@ -143,5 +143,30 @@ describe("parseMessage", () => {
         );
         const untitled = await parseMessage(stripped, 51, INTERNAL_DATE, NO_CAP);
         expect(untitled.documents[0]?.title).toBe("rechnung.pdf");
+    });
+});
+
+/**
+ * The envelope address the ingest gates on *before* any of the above runs.
+ *
+ * It is normalised exactly the way `parseMessage` normalises the header address, because the ingest
+ * checks both against one allowlist — and a gate whose two halves disagree about what an address is
+ * is not a gate. The cases that matter are the ones where the server gives us less than we hoped
+ * for: they must produce `""`, which the allowlist refuses, and never `undefined` reaching a
+ * comparison.
+ */
+describe("envelopeAddress", () => {
+    it("takes the first from-address, lowercased and bare", () => {
+        expect(envelopeAddress({ from: [{ address: "User@Example.COM" }] })).toBe("user@example.com");
+        expect(envelopeAddress({ from: [{ address: " anna@example.com " }] })).toBe("anna@example.com");
+        // A display name never reaches here — imapflow splits it off — but the first sender wins.
+        expect(envelopeAddress({ from: [{ address: "a@b.de" }, { address: "c@d.de" }] })).toBe("a@b.de");
+    });
+
+    it("is the empty address when the server gave no usable envelope", () => {
+        expect(envelopeAddress(undefined)).toBe("");
+        expect(envelopeAddress({})).toBe("");
+        expect(envelopeAddress({ from: [] })).toBe("");
+        expect(envelopeAddress({ from: [{}] })).toBe("");
     });
 });

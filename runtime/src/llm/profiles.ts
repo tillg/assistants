@@ -81,7 +81,23 @@ interface RawProfile {
 
 interface RawFile {
     active?: unknown;
+    /**
+     * The profile `document.readScan` sends a PDF to, if there is one. A sibling of `active` and
+     * not a field of it, because reading a scan is a different model from the one that takes Turns
+     * far more often than it is the same one: the loop wants something cheap and fast, and a scan
+     * wants something that can look at a page.
+     */
+    vision?: unknown;
     profiles?: Record<string, RawProfile>;
+}
+
+/** The file, read and checked as far as "it has profiles at all" — before any name is looked up. */
+interface Catalogue {
+    readonly where: string;
+    readonly parsed: RawFile;
+    readonly profiles: Record<string, RawProfile>;
+    /** Every name the file defines, sorted, so every error can list them. */
+    readonly known: string[];
 }
 
 /**
@@ -93,29 +109,74 @@ interface RawFile {
  * against a model nobody remembers choosing.
  */
 export function loadLlmProfile(file: string, env: NodeJS.ProcessEnv = process.env): LlmProfile {
-    const where = resolve(file);
-    const parsed = readProfilesFile(file, where);
+    const catalogue = readCatalogue(file);
+    const { where, known } = catalogue;
 
-    const profiles = parsed.profiles;
-    if (typeof profiles !== "object" || profiles === null || Array.isArray(profiles)) {
-        throw new ConfigurationError(`${where} has no "profiles" object. It must map a name to a configuration.`);
-    }
-    const known = Object.keys(profiles).sort();
-    if (known.length === 0) throw new ConfigurationError(`${where} defines no profiles under "profiles".`);
-
-    const active = parsed.active;
+    const active = catalogue.parsed.active;
     if (typeof active !== "string" || active === "") {
         throw new ConfigurationError(
             `${where} does not say which profile is active.\n\n` +
                 `  Set "active" to one of: ${known.join(", ")}`,
         );
     }
+    return resolveProfile(catalogue, "active", active, env);
+}
+
+/**
+ * The same, for the optional top-level `vision` key — the model `document.readScan` sends a PDF to.
+ *
+ * **No `vision` key is not an error.** It is the shipped default, and it means exactly one thing:
+ * there is nothing to send a scan to, so `document.readScan` reports itself unavailable and the
+ * ladder falls through to `document.requestText`, which asks the User to type what the page says.
+ * That is today's behaviour and it is a working system, so a stack that never configures a vision
+ * model must start silently rather than be nagged at every boot.
+ *
+ * A `vision` key that *is* present is held to exactly the same standard as `active`: naming a
+ * profile that does not exist, or one that is unusable, is a half-finished edit and is said so at
+ * start-up rather than discovered by the first Assistant that meets a scanned invoice.
+ */
+export function loadVisionProfile(
+    file: string,
+    env: NodeJS.ProcessEnv = process.env,
+): LlmProfile | undefined {
+    const catalogue = readCatalogue(file);
+    const { where, known } = catalogue;
+
+    const vision = catalogue.parsed.vision;
+    if (vision === undefined || vision === null) return undefined;
+    if (typeof vision !== "string" || vision === "") {
+        throw new ConfigurationError(
+            `${where} has a "vision" that names no profile: ${JSON.stringify(vision)}.\n\n` +
+                `  known profiles   ${known.join(", ")}\n\n` +
+                `Set "vision" to one of those, or remove the key altogether — without it there is ` +
+                `no vision model, reading a scan is unavailable, and an Assistant that meets a PDF ` +
+                `with no text layer asks the User to type it instead.`,
+        );
+    }
+    return resolveProfile(catalogue, "vision", vision, env);
+}
+
+/**
+ * Resolve and validate the profile named by one top-level key, and find its key in `env`.
+ *
+ * `selector` is carried through every message this can throw so that they name the key that made
+ * the choice — `"active"` or `"vision"` — because "the profile X, which this file does not define"
+ * is only half an instruction if it does not also say which line to change.
+ */
+function resolveProfile(
+    catalogue: Catalogue,
+    selector: "active" | "vision",
+    active: string,
+    env: NodeJS.ProcessEnv,
+): LlmProfile {
+    const { where, profiles, known } = catalogue;
+
     const raw = profiles[active];
     if (raw === undefined) {
         throw new ConfigurationError(
             `${where} selects the profile "${active}", which it does not define.\n\n` +
                 `  known profiles   ${known.join(", ")}\n\n` +
-                `Set "active" to one of those, or add "${active}" under "profiles".`,
+                `Set "${selector}" to one of those, or add "${active}" under "profiles".`,
         );
     }
     if (!NAME.test(active)) {
@@ -166,10 +227,30 @@ export function loadLlmProfile(file: string, env: NodeJS.ProcessEnv = process.en
     // give — which is the setup D-054 is about, so it has to be sayable rather than worked around.
     const requiresKey = name !== "scripted" && raw.requiresKey !== false;
     if (requiresKey && apiKey === "") {
-        throw new ConfigurationError(missingKeyMessage({ active, where, name, baseUrl, model, apiKeyVariable, known, profiles }));
+        throw new ConfigurationError(
+            missingKeyMessage({ active, selector, where, name, baseUrl, model, apiKeyVariable, known, profiles }),
+        );
     }
 
     return { name: active, provider: name, baseUrl, model, temperature, scriptFile, apiKey, apiKeyVariable };
+}
+
+/**
+ * The file, parsed, with the one check both selectors need done once: that there are profiles in
+ * it at all. Everything past this point is about a single name.
+ */
+function readCatalogue(file: string): Catalogue {
+    const where = resolve(file);
+    const parsed = readProfilesFile(file, where);
+
+    const profiles = parsed.profiles;
+    if (typeof profiles !== "object" || profiles === null || Array.isArray(profiles)) {
+        throw new ConfigurationError(`${where} has no "profiles" object. It must map a name to a configuration.`);
+    }
+    const known = Object.keys(profiles).sort();
+    if (known.length === 0) throw new ConfigurationError(`${where} defines no profiles under "profiles".`);
+
+    return { where, parsed, profiles, known };
 }
 
 function readProfilesFile(file: string, where: string): RawFile {
@@ -197,6 +278,7 @@ function readProfilesFile(file: string, where: string): RawFile {
  */
 function missingKeyMessage(input: {
     active: string;
+    selector: "active" | "vision";
     where: string;
     name: LlmProviderName;
     baseUrl: string;
@@ -214,7 +296,7 @@ function missingKeyMessage(input: {
         `The LLM profile "${input.active}" has no API key.`,
         ``,
         `  profile     ${input.active}`,
-        `  selected    by "active" in ${input.where}`,
+        `  selected    by "${input.selector}" in ${input.where}`,
         `  provider    ${input.name}`,
         `  endpoint    ${input.baseUrl}`,
         `  model       ${input.model}`,

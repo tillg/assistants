@@ -11,7 +11,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ConfigurationError, loadLlmProfile } from "../src/llm/profiles.js";
+import { ConfigurationError, loadLlmProfile, loadVisionProfile } from "../src/llm/profiles.js";
 
 const PROFILES = {
     active: "azure_gpt",
@@ -147,6 +147,79 @@ describe("LLM profiles", () => {
         const message = attempt(file, {});
         expect(message).toContain(file);
         expect(message).toContain("JSON");
+    });
+});
+
+/**
+ * The second, optional switch.
+ *
+ * Its absence is the interesting case, because it is the shipped one: no `vision` key means no
+ * vision model, which means `document.readScan` says it is unavailable and the Assistant asks the
+ * User to type the page instead. That is a working stack, so it must load without complaint.
+ */
+describe("the vision profile", () => {
+    const VISION = {
+        ...PROFILES,
+        vision: "vision_claude",
+        profiles: {
+            ...PROFILES.profiles,
+            vision_claude: {
+                provider: "anthropic",
+                baseUrl: "https://api.anthropic.com",
+                model: "claude-opus-5",
+            },
+        },
+    };
+
+    it("is undefined when the file names none, which is the shipped default and not an error", () => {
+        expect(loadVisionProfile(fileWith(PROFILES), { AZURE_GPT_KEY: "x" })).toBeUndefined();
+    });
+
+    it("resolves the profile named by \"vision\", with its own key from its own variable", () => {
+        const profile = loadVisionProfile(fileWith(VISION), { VISION_CLAUDE_KEY: "sk-vision" });
+
+        expect(profile?.name).toBe("vision_claude");
+        expect(profile?.provider).toBe("anthropic");
+        expect(profile?.model).toBe("claude-opus-5");
+        expect(profile?.apiKey).toBe("sk-vision");
+        expect(profile?.apiKeyVariable).toBe("VISION_CLAUDE_KEY");
+    });
+
+    it("names the key that made the choice when it names a profile the file does not define", () => {
+        const file = fileWith({ ...VISION, vision: "vision_claud" });
+        let message = "";
+        try {
+            loadVisionProfile(file, {});
+        } catch (error) {
+            expect(error).toBeInstanceOf(ConfigurationError);
+            message = (error as Error).message;
+        }
+
+        expect(message).toContain('"vision_claud"');
+        expect(message).toContain(file);
+        // "vision", not "active": the instruction has to name the line to change.
+        expect(message).toContain('Set "vision" to one of those');
+        expect(message).toContain("vision_claude");
+    });
+
+    it("wants its key exactly as the active profile does, and says so the same way", () => {
+        let message = "";
+        try {
+            loadVisionProfile(fileWith(VISION), {});
+        } catch (error) {
+            expect(error).toBeInstanceOf(ConfigurationError);
+            message = (error as Error).message;
+        }
+        expect(message).toContain("VISION_CLAUDE_KEY");
+        expect(message).toContain('by "vision" in');
+    });
+
+    it("leaves the active profile untouched, whether or not a vision one is configured", () => {
+        // The two switches are siblings, and reading one must not disturb the other.
+        const active = loadLlmProfile(fileWith(VISION), { AZURE_GPT_KEY: "sk-active" });
+        expect(active.name).toBe("azure_gpt");
+        expect(active.model).toBe("gpt-4o");
+        expect(active.apiKey).toBe("sk-active");
     });
 });
 

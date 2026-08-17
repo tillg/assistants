@@ -581,7 +581,7 @@ export class LoopDriver {
          * for most Turns. The cost goes on the first Entry the Turn wrote, which here is the first
          * intent, and it is set before the write that the intent-before-execution rule already does.
          */
-        let usageRecorded = false;
+        let costEntry: Entry | undefined;
 
         for (const call of response.toolCalls) {
             const resolved =
@@ -614,9 +614,9 @@ export class LoopDriver {
                 toolArgs: JSON.stringify(call.arguments),
                 idempotencyKey,
             });
-            if (!usageRecorded) {
+            if (!costEntry) {
                 recordUsage(intent, response.usage);
-                usageRecorded = true;
+                costEntry = intent;
             }
             await this.write(stored);
 
@@ -699,6 +699,17 @@ export class LoopDriver {
             // The approval is spent by a call that ran and returned a value, and by nothing else.
             if (argsHash && !refusal && outcome.kind === "value") {
                 stampSpentApproval(result, argsHash);
+            }
+
+            // An Operation may spend money on a model of its own — `document.readScan` sends a PDF
+            // to the vision profile — without that spend being the Turn's own LLM call. Summing a
+            // Conversation's Turns is meant to give an honest **lower bound**, understated only by
+            // Turns that errored; an Operation billing silently would open a second category of
+            // unrecorded spend, and unlike the first it would grow with ordinary successful use.
+            // So it goes onto the same Entry, added to what the Turn already recorded, because it
+            // was spent by this Turn and there is nowhere more truthful to put it.
+            if (outcome.kind === "value" && costEntry) {
+                addUsage(costEntry, operationUsage(outcome.value));
             }
         }
 
@@ -1173,6 +1184,34 @@ function recordUsage(entry: Entry, usage: LlmUsage | undefined): void {
     if (!usage) return;
     entry.promptTokens = usage.promptTokens;
     entry.completionTokens = usage.completionTokens;
+}
+
+/**
+ * What an Operation reports having spent on a model of its own, or nothing.
+ *
+ * The value is whatever the Operation chose to return, so this narrows rather than casts: a result
+ * with no `usage`, or one whose `usage` is not two finite numbers, changes nothing at all. Silently
+ * recording a wrong number would be worse than recording none, since the whole point of the figure
+ * is that it can be trusted as a floor.
+ */
+function operationUsage(value: unknown): LlmUsage | undefined {
+    if (typeof value !== "object" || value === null) return undefined;
+    const usage = (value as { usage?: unknown }).usage;
+    if (typeof usage !== "object" || usage === null) return undefined;
+    const { promptTokens, completionTokens } = usage as {
+        promptTokens?: unknown;
+        completionTokens?: unknown;
+    };
+    if (typeof promptTokens !== "number" || !Number.isFinite(promptTokens)) return undefined;
+    if (typeof completionTokens !== "number" || !Number.isFinite(completionTokens)) return undefined;
+    return { promptTokens, completionTokens };
+}
+
+/** Add to what the Entry already carries; an Entry with nothing on it starts from zero. */
+function addUsage(entry: Entry, usage: LlmUsage | undefined): void {
+    if (!usage) return;
+    entry.promptTokens = (entry.promptTokens ?? 0) + usage.promptTokens;
+    entry.completionTokens = (entry.completionTokens ?? 0) + usage.completionTokens;
 }
 
 export type { OpenQuestion };

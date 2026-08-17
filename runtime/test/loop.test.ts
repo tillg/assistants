@@ -852,6 +852,72 @@ describe("what a Turn cost (#6)", () => {
         const entries = (await harness.conversation(docRef)).data.entries ?? [];
         expect(entries.some((entry) => entry.promptTokens !== undefined)).toBe(false);
     });
+
+    /**
+     * An Operation that bills a model of its own — `document.readScan` and the vision profile —
+     * reports what it spent on its result, and the Turn folds it in. Without that, the sum over a
+     * Conversation's Turns stops being an honest lower bound in a second way: not only the Turns
+     * that errored, but every ordinary successful scan, silently uncounted.
+     */
+    describe("an Operation that spent on a model of its own", () => {
+        /** Register a stand-in that returns whatever the test wants under `usage`. */
+        function withSpendingOperation(harness: Harness, value: Record<string, unknown>): void {
+            harness.registry.registerAll([
+                {
+                    name: "test.spends",
+                    mutating: false,
+                    seed: {
+                        name: "Spends tokens",
+                        system: "Test",
+                        kind: "internal",
+                        description: "Returns a result that reports what it spent.",
+                        parameters: { type: "object", properties: {} },
+                    },
+                    execute: async () => ({ kind: "value", value }),
+                },
+            ]);
+            putCatalogue(harness.store, [
+                {
+                    key: "test.spends",
+                    name: "Spends tokens",
+                    system: "Test",
+                    kind: "internal",
+                    description: "Returns a result that reports what it spent.",
+                    parameters: '{"type":"object","properties":{}}',
+                    mutating: false,
+                    enabled: true,
+                },
+            ]);
+        }
+
+        async function tokensAfter(value: Record<string, unknown>): Promise<[number?, number?]> {
+            const harness = buildHarness([
+                { turn: 0, toolCalls: [{ name: "test__spends", arguments: {} }] },
+            ]);
+            withSpendingOperation(harness, value);
+            const assistant = await harness.seedAssistant({ grants: [{ operationKey: "test.spends" }] });
+            const docRef = await harness.birth({ assistant });
+
+            await harness.driver.advance(docRef);
+
+            const intent = (await harness.conversation(docRef)).data.entries!.find(
+                (entry) => entry.kind === "tool-intent",
+            );
+            return [intent?.promptTokens, intent?.completionTokens];
+        }
+
+        it("adds what the Operation spent to what the Turn recorded", async () => {
+            // The scripted provider reports zeroes, so what is left is exactly the Operation's own.
+            expect(await tokensAfter({ text: "an invoice", usage: { promptTokens: 1200, completionTokens: 340 } }))
+                .toEqual([1200, 340]);
+        });
+
+        it("changes nothing for a result that reports none, or reports it malformed", async () => {
+            expect(await tokensAfter({ text: "an invoice" })).toEqual([0, 0]);
+            expect(await tokensAfter({ usage: "quite a lot" })).toEqual([0, 0]);
+            expect(await tokensAfter({ usage: { promptTokens: "1200" } })).toEqual([0, 0]);
+        });
+    });
 });
 
 describe("suspension and continuation (ADR-0004, ADR-0005)", () => {
