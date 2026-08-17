@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 
 import { TransientLlmError } from "../../src/llm/provider.js";
-import type { LlmProfile } from "../../src/llm/profiles.js";
+import { ConfigurationError, type LlmProfile } from "../../src/llm/profiles.js";
 import {
     AnthropicVisionReader,
     createVisionReader,
@@ -99,6 +99,32 @@ describe("choosing a vision reader", () => {
 
     it("takes the key the profile already carries, so the caller need not restate it", () => {
         expect(createVisionReader({ ...PROFILE, apiKey: "sk-from-profile" }, undefined).available).toBe(true);
+    });
+
+    /**
+     * The reader below speaks one provider's HTTP. A profile naming another one has to be refused
+     * at start-up rather than built anyway: the alternative is Anthropic-shaped JSON posted at an
+     * OpenAI endpoint under a log line that says `provider: openai`, which fails every scan and
+     * points whoever debugs it at the wrong half of the stack.
+     */
+    it("refuses an openai profile rather than quietly building an Anthropic reader", () => {
+        const openai: LlmProfile = { ...PROFILE, name: "azure_gpt", provider: "openai" };
+
+        expect(() => createVisionReader(openai, "sk-test")).toThrow(ConfigurationError);
+        expect(() => createVisionReader(openai, "sk-test")).toThrow(/azure_gpt.*openai.*anthropic/s);
+    });
+
+    it("refuses before looking for a key, so a wrong provider cannot hide as 'unavailable'", () => {
+        expect(() => createVisionReader({ ...PROFILE, provider: "openai" }, undefined)).toThrow(
+            ConfigurationError,
+        );
+    });
+
+    /** No scripted vision reader exists either, so `"vision": "scripted"` is the same mistake. */
+    it("refuses a scripted profile too, having nothing scripted to read a scan with", () => {
+        expect(() => createVisionReader({ ...PROFILE, provider: "scripted" }, "k")).toThrow(
+            ConfigurationError,
+        );
     });
 });
 

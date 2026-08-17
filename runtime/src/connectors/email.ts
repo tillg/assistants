@@ -39,7 +39,18 @@ export interface IncomingDocument {
     readonly title: string;
     /** ISO 8601, from the `Date` header — the server's INTERNALDATE when that is unusable. */
     readonly receivedAt: string;
-    /** `<message-id>#<part>`. Part 0 means "the body, with nothing attached". */
+    /**
+     * `<message-id>#<part>` — the identity the ingest deduplicates on, and it must name the same
+     * MIME part for ever.
+     *
+     * Three shapes, and the differences between them are load-bearing:
+     *
+     *   - `#0` — the message had **no attachment parts at all**. Body only.
+     *   - `#N` (N ≥ 1) — the Nth part of the message's own attachment list, counted over *every*
+     *     part the parser found, not over the ones that survived the size cap.
+     *   - `#0.skipped` — the message *had* attachment parts and every one of them was over the cap.
+     *     Deliberately not `#0`: see {@link parseMessage}.
+     */
     readonly externalRef: string;
     /** The message body as prose. Identical across every Document one message produces. */
     readonly extractedText: string;
@@ -79,24 +90,50 @@ interface ParsedAttachment {
 }
 
 /**
+ * Where a message was found, in enough detail to tell one mailbox's UID 1 from another's.
+ *
+ * Only messages whose sender omitted the `Message-ID` need this, but for those it is the whole of
+ * their identity. An IMAP UID is unique within one `(mailbox, UIDVALIDITY)` generation and nowhere
+ * else: delete and recreate the `assistant` label and the server starts handing out UID 1 again.
+ * Without the generation in the ref, the next `Message-ID`-less message computes an `ExternalRef`
+ * that a completely different, older message already holds — and the ingest, doing exactly what it
+ * is meant to do, treats the new invoice as a duplicate and files it away as `skipped`.
+ *
+ * `uidValidity` is a string because IMAP's is a 32-bit unsigned integer that `imapflow` hands over
+ * as a `bigint`; the ref only ever compares it, never arithmetic on it.
+ */
+export interface MessageOrigin {
+    /** The IMAP host the mailbox lives on. */
+    readonly host: string;
+    /** The folder (Gmail: label) the message was fetched from. */
+    readonly folder: string;
+    /** The folder's `UIDVALIDITY` at the moment of the fetch. */
+    readonly uidValidity: string;
+}
+
+/**
  * Bytes to `IncomingMessage`. No network, no store, no side effects.
  *
  * `internalDate` is the server's own timestamp for the message, used only when the `Date` header is
  * missing or unparseable — which happens, and dropping the mail over it would be absurd.
+ *
+ * `origin` is only consulted for a message whose sender omitted the `Message-ID`; see
+ * {@link MessageOrigin} for why leaving it out is a silently dropped invoice. It is optional purely
+ * so that a caller that has no mailbox behind it (a fixture, a test) can still parse bytes — every
+ * caller that *did* get the message off a server must pass it.
  */
 export async function parseMessage(
     raw: Buffer,
     uid: number,
     internalDate: Date,
     maxAttachmentBytes: number,
+    origin?: MessageOrigin,
 ): Promise<IncomingMessage> {
     const parsed = (await simpleParser(raw)) as ParsedMail;
 
     const subject = (parsed.subject ?? "").trim();
     const from = (parsed.from?.value?.[0]?.address ?? "").trim().toLowerCase();
-    // A UID is stable within a mailbox, which is all idempotency needs; the alternative to
-    // synthesising one is losing the mail because its sender is non-conformant.
-    const messageId = (parsed.messageId ?? "").trim() || `<uid.${uid}@local>`;
+    const messageId = (parsed.messageId ?? "").trim() || synthesiseMessageId(uid, origin);
     const receivedAt = usableDate(parsed.date) ?? internalDate.toISOString();
 
     const body = bodyText(parsed);
@@ -112,25 +149,71 @@ export async function parseMessage(
         });
     }
 
+    // DO NOT "SIMPLIFY" THIS BACK TO `kept.map((_, index) => index + 1)`.
+    //
+    // The part number is an identity, not a position, and the cap is a setting the User changes.
+    // Numbering the *kept* attachments means a mail carrying `big.pdf` (over the cap) and
+    // `small.pdf` files `small.pdf` as `#1`. The User then raises `MAIL_MAX_ATTACHMENT_BYTES` and
+    // replays the mail — which is precisely the reason the skip is loud — and now `big.pdf` is `#1`
+    // and `small.pdf` is `#2`. The ingest sees `#1` already present and skips the invoice it was
+    // replayed to collect, and creates a second copy of `small.pdf` under its new number. One lost
+    // invoice, one duplicate, and a message moved to `processed` looking like a success.
+    //
+    // So each attachment is numbered by where it sits in the message's own part list, which no
+    // setting of ours can move. Numbers may have gaps (an inline signature image is a part but not
+    // an attachment) and that is fine: refs are compared, never counted.
     const documents: IncomingDocument[] =
         kept.length === 0
             ? [
                   {
                       title: subject || NO_SUBJECT,
                       receivedAt,
-                      externalRef: `${messageId}#0`,
+                      // `#0` means "no attachment parts at all", and a cap change can never make a
+                      // message mean that. A message whose only attachment was skipped is a
+                      // different case and gets a different ref: were it `#0` too, raising the cap
+                      // would turn that ref into `#1` and the same mail would be ingested twice.
+                      // `#0.skipped` is never produced at any other cap, so it collides with
+                      // nothing — the placeholder Document simply stays alongside the real one.
+                      externalRef: skipped.length === 0 ? `${messageId}#0` : `${messageId}#0.skipped`,
                       extractedText,
                   },
               ]
-            : kept.map((attachment, index) => ({
+            : kept.map((attachment) => ({
                   title: subject || attachment.filename,
                   receivedAt,
-                  externalRef: `${messageId}#${index + 1}`,
+                  externalRef: `${messageId}#${attachment.part}`,
                   extractedText,
-                  attachment,
+                  attachment: attachment.attachment,
               }));
 
     return { uid, from, subject, documents };
+}
+
+/**
+ * The `Message-ID` for a sender who did not send one.
+ *
+ * `<uid>@<mailbox-host>` is what the architecture asks for, and the mailbox is the whole point: a
+ * UID means nothing without the `(folder, UIDVALIDITY)` generation it was issued in. Without those
+ * two, a recreated label re-issues UID 1 and a brand-new invoice inherits an old message's ref.
+ *
+ * The value is derived only from things that are constant for a given message across polls — never
+ * from a clock or a counter — because a ref that changes between polls defeats idempotency just as
+ * thoroughly as one that collides.
+ */
+function synthesiseMessageId(uid: number, origin: MessageOrigin | undefined): string {
+    if (!origin) {
+        // Not fatal — parsing a fixture has no mailbox — but on the ingest path it is the
+        // collision described above waiting to happen, so it is never allowed to be quiet.
+        log.warn("synthesising a message id without a mailbox origin; refs are only unique per UID", { uid });
+        return `<uid.${uid}@local>`;
+    }
+    return `<uid.${uid}.v${origin.uidValidity}.${refToken(origin.folder)}@${refToken(origin.host)}>`;
+}
+
+/** Folder and host names reach a ref as themselves; anything that is not addr-spec-safe becomes `-`. */
+function refToken(value: string): string {
+    const token = value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-");
+    return token.length > 0 ? token : "unknown";
 }
 
 interface KeptAttachment {
@@ -141,23 +224,37 @@ interface KeptAttachment {
 }
 
 /**
+ * An attachment together with its number — its 1-based position in the message's *whole* part list.
+ *
+ * The number is computed before the size cap is applied and is carried through it, which is the
+ * entire point: the same MIME part must have the same number at every cap.
+ */
+interface NumberedAttachment {
+    readonly part: number;
+    readonly attachment: KeptAttachment;
+    readonly filename: string;
+    readonly size: number;
+}
+
+/**
  * Which MIME parts are attachments, and which of those fit.
  *
  * Anything with a filename or an explicit `attachment` disposition counts. An inline signature image
  * has neither — it is a logo, not an invoice — and is dropped here rather than becoming a Document
- * the Receptionist has to reason about.
+ * the Receptionist has to reason about. It still consumes a part number, so that whether the parser
+ * hands us the logo or not, the invoice after it keeps its own number.
  */
 function partitionAttachments(
     parts: ParsedAttachment[],
     maxAttachmentBytes: number,
-): { kept: KeptAttachment[]; skipped: KeptAttachment[] } {
-    const kept: KeptAttachment[] = [];
-    const skipped: KeptAttachment[] = [];
+): { kept: NumberedAttachment[]; skipped: NumberedAttachment[] } {
+    const kept: NumberedAttachment[] = [];
+    const skipped: NumberedAttachment[] = [];
 
-    for (const part of parts) {
+    parts.forEach((part, index) => {
         const filename = (part.filename ?? "").trim();
         const disposition = (part.contentDisposition ?? "").toLowerCase();
-        if (filename.length === 0 && disposition !== "attachment") continue;
+        if (filename.length === 0 && disposition !== "attachment") return;
 
         const bytes = Buffer.isBuffer(part.content) ? part.content : Buffer.alloc(0);
         const attachment: KeptAttachment = {
@@ -166,13 +263,20 @@ function partitionAttachments(
             size: bytes.length,
             bytes,
         };
-        (attachment.size > maxAttachmentBytes ? skipped : kept).push(attachment);
-    }
+        const numbered: NumberedAttachment = {
+            // The position in the parsed part list, which the cap has no say over.
+            part: index + 1,
+            attachment,
+            filename: attachment.filename,
+            size: attachment.size,
+        };
+        (attachment.size > maxAttachmentBytes ? skipped : kept).push(numbered);
+    });
 
     return { kept, skipped };
 }
 
-function describeSkipped(attachment: KeptAttachment): string {
+function describeSkipped(attachment: NumberedAttachment): string {
     return `[Attachment "${attachment.filename}" (${attachment.size} bytes) was too large to store and has been skipped.]`;
 }
 
@@ -227,6 +331,8 @@ export interface MailboxOptions {
     readonly port: number;
     readonly user: string;
     readonly password: string;
+    /** Implicit TLS. Defaults to `true`; only the integration tier's throwaway server sets it false. */
+    readonly secure?: boolean;
 }
 
 export interface FetchedMessage {
@@ -244,15 +350,98 @@ export interface FetchedMessage {
      * vouched for.
      */
     readonly envelopeFrom: string;
+    /**
+     * The mailbox generation this UID was issued in, threaded through to `parseMessage` so a
+     * `Message-ID`-less message gets a ref that a recreated label cannot re-issue.
+     *
+     * Optional only because a `FetchedMessage` can be built by hand in a test; anything that came
+     * off a real server always carries it.
+     */
+    readonly origin?: MessageOrigin;
+}
+
+/** One message left on the server because downloading it would not have been affordable. */
+export interface OversizedMessage {
+    readonly uid: number;
+    /** `RFC822.SIZE` — the size the server reported, without a byte of it being downloaded. */
+    readonly size: number;
+    readonly envelopeFrom: string;
 }
 
 /**
- * A mailbox, opened per operation.
+ * What one poll of a folder actually yielded, including what it deliberately did not.
  *
- * There is no connection pool and no long-lived session on purpose: the ingest polls once a minute,
- * so a socket held open between polls is a socket that has to survive a provider's idle timeout, a
- * container pause and a network blip — for no gain over logging in again. Every method therefore
- * connects, does its work, and closes in a `finally`.
+ * `oversized` is not a detail for a log line. A message that `fetch` silently declines to download
+ * stays in `incoming` and is declined again every minute for ever, so the caller has to be told
+ * about it in order to move it out to `failed`. Anything that drops this array reinvents a poll
+ * that never makes progress.
+ */
+export interface FetchResult {
+    readonly messages: FetchedMessage[];
+    readonly oversized: OversizedMessage[];
+    /**
+     * True when the poll's byte budget, not `max`, ended the batch. Nothing was lost — the
+     * remaining messages are still in `incoming` and the next poll starts with them — but it is the
+     * signal that the mailbox is arriving faster than it is being drained.
+     */
+    readonly budgetExhausted: boolean;
+}
+
+/**
+ * What a single poll may spend, in bytes on the wire and in memory.
+ *
+ * These live on the fetch call rather than on `MailboxOptions` because they belong with `max`: all
+ * three bound *one poll*, whereas `MailboxOptions` describes the connection, which is a different
+ * lifetime and a different question.
+ */
+export interface FetchLimits {
+    /** Above this, a single message is not downloaded at all. Default {@link DEFAULT_MAX_MESSAGE_BYTES}. */
+    readonly maxMessageBytes?: number;
+    /** Total raw bytes one poll may accumulate. Default {@link DEFAULT_MAX_TOTAL_BYTES}. */
+    readonly maxTotalBytes?: number;
+}
+
+/**
+ * 40 MiB — a message at Gmail's 25 MiB attachment ceiling, base64 expanded (×4/3) plus headers,
+ * still comes down. Anything above it is not a household invoice and will not become one.
+ */
+const DEFAULT_MAX_MESSAGE_BYTES = 40 * 1024 * 1024;
+
+/**
+ * 64 MiB of raw source per poll.
+ *
+ * The number that has to be bounded is not the attachment cap — that is applied *after* mailparser
+ * has already decoded everything — but the raw bytes this single-threaded loop holds and then
+ * parses. At `MAIL_MAX_PER_POLL=20` with no budget, a spam batch of maximum-size messages is ~700 MB
+ * of buffers and minutes of synchronous parsing, in the same loop that runs the ThingStore scans and
+ * that `health.ts` calls stale after 90 seconds. A spam batch must not make the Runtime unhealthy.
+ */
+const DEFAULT_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
+
+/**
+ * The three mailbox operations, on a connection somebody else is holding open.
+ *
+ * This is the same surface as {@link EmailConnector}; the difference is only who owns the socket.
+ */
+export interface MailSession {
+    fetch(folder: string, max: number, limits?: FetchLimits): Promise<FetchedMessage[]>;
+    fetchBatch(folder: string, max: number, limits?: FetchLimits): Promise<FetchResult>;
+    move(uid: number, fromFolder: string, toFolder: string): Promise<void>;
+    ensureFolders(folders: readonly string[]): Promise<void>;
+}
+
+/**
+ * A mailbox.
+ *
+ * Each method still connects, works and closes, so no caller had to change and nothing holds a
+ * socket across the minute between polls — a socket held that long has to survive a provider's idle
+ * timeout, a container pause and a network blip for no gain.
+ *
+ * But *within* one poll that arithmetic is the other way round. A poll is `ensureFolders` + `fetch`
+ * + one `move` per message, and with a method-per-connection that is 22 TLS handshakes and 22 IMAP
+ * logins a minute at `maxPerPoll=20` — against a provider that throttles rapid reconnects, with all
+ * of that latency sitting inside the scan loop. {@link session} therefore lends one connection to a
+ * block of work; the standalone methods are that same block with exactly one operation in it.
  *
  * TLS is implicit and certificate verification is never disabled. There is no option to turn it off,
  * because the moment one exists someone sets it.
@@ -264,18 +453,25 @@ export class EmailConnector {
         return new ImapFlow({
             host: this.options.host,
             port: this.options.port,
-            secure: true,
+            secure: this.options.secure ?? true,
             auth: { user: this.options.user, pass: this.options.password },
             // imapflow's own protocol chatter is far too loud for a household service.
             logger: false,
         });
     }
 
-    private async withClient<T>(work: (client: ImapFlow) => Promise<T>): Promise<T> {
+    /**
+     * Run `work` against one connection, opened before it and closed after it.
+     *
+     * The whole of a poll belongs in here. Nothing about the session outlives the call, so a
+     * connection that dies mid-poll fails that poll and the next one starts fresh a minute later —
+     * which is the same failure mode as before, at a twenty-second of the handshakes.
+     */
+    async session<T>(work: (session: MailSession) => Promise<T>): Promise<T> {
         const client = this.client();
         await client.connect();
         try {
-            return await work(client);
+            return await work(new ConnectedSession(client, this.options.host));
         } finally {
             try {
                 await client.logout();
@@ -287,42 +483,19 @@ export class EmailConnector {
     }
 
     /**
-     * Every message in `folder`, oldest first, capped at `max`.
+     * Every message in `folder`, oldest first, capped at `max` and at a byte budget.
      *
-     * The cap is what keeps one poll bounded: a mailbox that has accumulated a thousand messages
-     * must not turn a scan into a ten-minute stall of the loop that also keeps Conversations moving.
-     * The rest are still there next poll.
+     * Messages left behind for size are dropped on the floor by this signature — use
+     * {@link fetchBatch} on the ingest path, where an undownloadable message has to be moved out of
+     * `incoming` or it is retried for ever.
      */
-    async fetch(folder: string, max: number): Promise<FetchedMessage[]> {
-        return this.withClient(async (client) => {
-            const lock = await client.getMailboxLock(folder);
-            try {
-                const messages: FetchedMessage[] = [];
-                for await (const message of client.fetch("1:*", {
-                    uid: true,
-                    source: true,
-                    internalDate: true,
-                    // The envelope is what lets the ingest reject a stranger before parsing him.
-                    envelope: true,
-                })) {
-                    messages.push({
-                        uid: message.uid,
-                        envelopeFrom: envelopeAddress(message.envelope),
-                        raw: Buffer.isBuffer(message.source) ? message.source : Buffer.from(message.source ?? ""),
-                        // Servers spell INTERNALDATE in several ways; imapflow hands back either a
-                        // Date or the raw string, and only one of those is usable downstream.
-                        internalDate:
-                            message.internalDate instanceof Date
-                                ? message.internalDate
-                                : new Date(message.internalDate ?? Date.now()),
-                    });
-                    if (messages.length >= max) break;
-                }
-                return messages;
-            } finally {
-                lock.release();
-            }
-        });
+    async fetch(folder: string, max: number, limits?: FetchLimits): Promise<FetchedMessage[]> {
+        return this.session((session) => session.fetch(folder, max, limits));
+    }
+
+    /** {@link fetch}, and what it decided not to fetch. */
+    async fetchBatch(folder: string, max: number, limits?: FetchLimits): Promise<FetchResult> {
+        return this.session((session) => session.fetchBatch(folder, max, limits));
     }
 
     /**
@@ -332,23 +505,187 @@ export class EmailConnector {
      * something fails is the worst possible time to discover it.
      */
     async move(uid: number, fromFolder: string, toFolder: string): Promise<void> {
-        await this.withClient(async (client) => {
-            await createFolder(client, toFolder);
-            const lock = await client.getMailboxLock(fromFolder);
-            try {
-                await client.messageMove(String(uid), toFolder, { uid: true });
-            } finally {
-                lock.release();
-            }
-        });
+        await this.session((session) => session.move(uid, fromFolder, toFolder));
     }
 
     /** Create any of `folders` that do not exist yet. Existing ones are left alone. */
     async ensureFolders(folders: readonly string[]): Promise<void> {
-        await this.withClient(async (client) => {
-            for (const folder of folders) await createFolder(client, folder);
-        });
+        await this.session((session) => session.ensureFolders(folders));
     }
+}
+
+/** The mailbox operations, bound to one already-connected client. */
+class ConnectedSession implements MailSession {
+    constructor(
+        private readonly client: ImapFlow,
+        private readonly host: string,
+    ) {}
+
+    async fetch(folder: string, max: number, limits?: FetchLimits): Promise<FetchedMessage[]> {
+        return (await this.fetchBatch(folder, max, limits)).messages;
+    }
+
+    /**
+     * Two passes, and the order of them is the fix.
+     *
+     * The first pass asks only for `RFC822.SIZE`, the envelope and the internal date — metadata, no
+     * bodies — so the poll learns what every candidate message *would* cost before it costs
+     * anything. Only then does the second pass download sources, and only for the messages that fit
+     * inside `maxMessageBytes` individually and `maxTotalBytes` together.
+     *
+     * The old single pass buffered every source first and applied the attachment cap afterwards, by
+     * which time mailparser had already decoded a 30 MB attachment against a 1 MB cap — measured at
+     * 9.4 seconds and +255 MB rss — in order to throw it away. A cap that is only enforced after the
+     * work it was meant to prevent is not a cap.
+     *
+     * `max` still bounds the message count; the budget bounds the bytes, which is the quantity that
+     * actually stalls the loop.
+     */
+    async fetchBatch(folder: string, max: number, limits: FetchLimits = {}): Promise<FetchResult> {
+        const maxMessageBytes = limits.maxMessageBytes ?? DEFAULT_MAX_MESSAGE_BYTES;
+        const maxTotalBytes = limits.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
+
+        const lock = await this.client.getMailboxLock(folder);
+        try {
+            const mailbox = this.client.mailbox;
+            const origin: MessageOrigin = {
+                host: this.host,
+                folder,
+                uidValidity: mailbox ? String(mailbox.uidValidity) : "0",
+            };
+
+            // PASS ONE: metadata only. Nothing here downloads a body.
+            const candidates: MessageMetadata[] = [];
+            for await (const message of this.client.fetch("1:*", {
+                uid: true,
+                // RFC822.SIZE — what the second pass is about to be asked to pay.
+                size: true,
+                internalDate: true,
+                // The envelope is what lets the ingest reject a stranger before parsing him.
+                envelope: true,
+            })) {
+                candidates.push({
+                    uid: message.uid,
+                    size: message.size ?? 0,
+                    envelopeFrom: envelopeAddress(message.envelope),
+                    // Servers spell INTERNALDATE in several ways; imapflow hands back either a
+                    // Date or the raw string, and only one of those is usable downstream.
+                    internalDate:
+                        message.internalDate instanceof Date
+                            ? message.internalDate
+                            : new Date(message.internalDate ?? Date.now()),
+                });
+                if (candidates.length >= max) break;
+            }
+
+            // WHAT TO PAY FOR. Decided entirely on the server's own numbers.
+            const { wanted, oversized, budgetExhausted } = planFetch(candidates, {
+                maxMessageBytes,
+                maxTotalBytes,
+            });
+
+            if (oversized.length > 0) {
+                log.warn("mail too large to download, left on the server", {
+                    folder,
+                    uids: oversized.map((message) => message.uid),
+                    maxMessageBytes,
+                });
+            }
+            if (budgetExhausted) {
+                log.info("the poll's byte budget was reached; the rest waits for the next poll", {
+                    folder,
+                    fetched: wanted.length,
+                    ofCandidates: candidates.length,
+                    maxTotalBytes,
+                });
+            }
+
+            // PASS TWO: the sources, one at a time, for the messages already known to be affordable.
+            const messages: FetchedMessage[] = [];
+            for (const candidate of wanted) {
+                const fetched = await this.client.fetchOne(
+                    String(candidate.uid),
+                    { uid: true, source: true },
+                    { uid: true },
+                );
+                // Between the passes the message may have been moved or deleted by somebody else.
+                // Not an error: it is simply no longer in this folder.
+                if (!fetched) continue;
+                messages.push({
+                    uid: candidate.uid,
+                    envelopeFrom: candidate.envelopeFrom,
+                    internalDate: candidate.internalDate,
+                    origin,
+                    raw: Buffer.isBuffer(fetched.source) ? fetched.source : Buffer.from(fetched.source ?? ""),
+                });
+            }
+
+            return { messages, oversized, budgetExhausted };
+        } finally {
+            lock.release();
+        }
+    }
+
+    async move(uid: number, fromFolder: string, toFolder: string): Promise<void> {
+        await createFolder(this.client, toFolder);
+        const lock = await this.client.getMailboxLock(fromFolder);
+        try {
+            await this.client.messageMove(String(uid), toFolder, { uid: true });
+        } finally {
+            lock.release();
+        }
+    }
+
+    async ensureFolders(folders: readonly string[]): Promise<void> {
+        for (const folder of folders) await createFolder(this.client, folder);
+    }
+}
+
+/** A message as the first pass knows it: everything except the bytes. */
+export interface MessageMetadata {
+    readonly uid: number;
+    /** `RFC822.SIZE`, as reported by the server. */
+    readonly size: number;
+    readonly envelopeFrom: string;
+    readonly internalDate: Date;
+}
+
+/**
+ * Which of the candidate messages this poll will actually download.
+ *
+ * Split out and exported because it is the whole of the size decision and it is pure: whether a
+ * mailbox full of maximum-size spam can stall the Runtime past `health.ts`'s 90-second staleness
+ * threshold is decided here, and that deserves a test that does not need an IMAP server.
+ *
+ * Exported for the tests; nothing outside this file calls it.
+ */
+export function planFetch(
+    candidates: readonly MessageMetadata[],
+    limits: { maxMessageBytes: number; maxTotalBytes: number },
+): { wanted: MessageMetadata[]; oversized: OversizedMessage[]; budgetExhausted: boolean } {
+    const wanted: MessageMetadata[] = [];
+    const oversized: OversizedMessage[] = [];
+    let budget = 0;
+    let budgetExhausted = false;
+
+    for (const candidate of candidates) {
+        if (candidate.size > limits.maxMessageBytes) {
+            // Left on the server, and named in the result: a message nobody downloads and nobody
+            // hears about is retried every minute until the mailbox is cleaned out by hand.
+            oversized.push({ uid: candidate.uid, size: candidate.size, envelopeFrom: candidate.envelopeFrom });
+            continue;
+        }
+        // The first affordable message is always taken, however large, or a folder whose oldest
+        // message exceeds the whole budget never drains at all.
+        if (wanted.length > 0 && budget + candidate.size > limits.maxTotalBytes) {
+            budgetExhausted = true;
+            break;
+        }
+        budget += candidate.size;
+        wanted.push(candidate);
+    }
+
+    return { wanted, oversized, budgetExhausted };
 }
 
 /**

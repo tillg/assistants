@@ -185,10 +185,10 @@ describe("document.extractText", () => {
     });
 
     it("reports no-text-layer as a VALUE, because a scan is behaving exactly as expected", async () => {
-        // The single most likely outcome on a forwarded invoice, and the one that tells the caller
-        // to try the next rung. An `error` here would put a red entry in the transcript for a
-        // document that is doing nothing wrong.
-        const stack = buildStack({ content: contentStore(fixture("scanned-watermark.pdf")) });
+        // The likeliest outcome on a forwarded scan, and the one that tells the caller to try the
+        // next rung. An `error` here would put a red entry in the transcript for a document that is
+        // doing nothing wrong.
+        const stack = buildStack({ content: contentStore(fixture("scanned-no-text.pdf")) });
         const thingId = await stack.document({});
 
         const outcome = await stack.operation("document.extractText").execute({ thingId }, CONTEXT);
@@ -196,6 +196,47 @@ describe("document.extractText", () => {
         expect(outcome.kind).toBe("value");
         expect(valueOf(outcome)).toEqual({ reason: "no-text-layer", pages: 1 });
         expect(await stack.textOf(thingId)).toBe("");
+    });
+
+    it("STORES a short text layer and says it is short, instead of throwing it away", async () => {
+        // 84 characters of a real dentist's invoice. The amount is in there, exact and free. The
+        // old rule called this a scan and pointed the Receptionist at a paid vision model, which is
+        // the one reader in the ladder that can invent a number.
+        const stack = buildStack({ content: contentStore(fixture("short-invoice.pdf")) });
+        const thingId = await stack.document({});
+
+        const outcome = await stack.operation("document.extractText").execute({ thingId }, CONTEXT);
+
+        const value = valueOf(outcome);
+        expect(value["pages"]).toBe(1);
+        expect(value["sparse"]).toBe(true);
+        expect(value["characters"]).toBeGreaterThan(0);
+        // Legible to the model: how much was found, and that reading it is now its call.
+        expect(String(value["note"])).toContain(String(value["characters"]));
+        expect(await stack.textOf(thingId)).toContain("Betrag: 84,20 EUR");
+    });
+
+    it("stores a scanner watermark too — labelled, so the Receptionist can reject it", async () => {
+        // The other half of the same judgement, and the reason the flag exists. Nothing here can
+        // tell 21 characters of watermark from 44 characters of payment reminder; the Receptionist,
+        // which has the covering note and the subject line, can.
+        const stack = buildStack({ content: contentStore(fixture("scanned-watermark.pdf")) });
+        const thingId = await stack.document({});
+
+        const outcome = await stack.operation("document.extractText").execute({ thingId }, CONTEXT);
+
+        expect(valueOf(outcome)["sparse"]).toBe(true);
+        expect(await stack.textOf(thingId)).toContain("CamScanner");
+    });
+
+    it("says nothing about sparseness when the text layer is a full document", async () => {
+        const stack = buildStack({ content: contentStore(fixture("born-digital-invoice.pdf")) });
+        const thingId = await stack.document({});
+
+        const outcome = await stack.operation("document.extractText").execute({ thingId }, CONTEXT);
+
+        expect(valueOf(outcome)).not.toHaveProperty("sparse");
+        expect(valueOf(outcome)).not.toHaveProperty("note");
     });
 
     it("reports not-a-pdf as a value when the bytes cannot be opened", async () => {

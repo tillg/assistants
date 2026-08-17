@@ -1364,10 +1364,15 @@ export function buildOperations(deps: OperationDeps): OperationImplementation[] 
             kind: "connector",
             description:
                 "Read the text layer of a Document's attachment and store it as the Document's text. " +
-                "Free, exact and deterministic — try this before anything that costs money. It reports " +
-                "'no-text-layer' when the attachment is a scan, which is an ordinary answer and not a " +
-                "failure: read it with document.readScan, or ask a human with document.requestText. " +
-                "Text the Document already has is never overwritten.",
+                "Free, exact and deterministic — try this before anything that costs money. Whatever " +
+                "text it finds is stored, however little: when there is very little it says so with " +
+                "'sparse': true and tells you how many characters, because a short text layer is " +
+                "either a short document — a one-line reminder, a parking receipt, a dentist's " +
+                "invoice — or a scanner's watermark on an unreadable scan, and only you can tell " +
+                "which by reading it. It reports 'no-text-layer' only when the attachment carries no " +
+                "text at all, which is an ordinary answer and not a failure: read it with " +
+                "document.readScan, or ask a human with document.requestText. Text the Document " +
+                "already has is never overwritten.",
             parameters: {
                 type: "object",
                 properties: {
@@ -1391,9 +1396,16 @@ export function buildOperations(deps: OperationDeps): OperationImplementation[] 
                 // would put a red entry in the transcript for a document behaving exactly as
                 // expected, and teach the model that something went wrong when nothing did.
                 return layer.kind === "no-text-layer"
-                    ? { kind: "value", value: { reason: "no-text-layer", pages: layer.pages ?? 0 } }
+                    ? { kind: "value", value: { reason: "no-text-layer", pages: layer.pages } }
                     : { kind: "value", value: { reason: "not-a-pdf" } };
             }
+            // Sparse text is stored too. Eighty-four characters may be a scanner's watermark or may
+            // be the whole of a short invoice, and this Operation is in no position to tell: it can
+            // see the length and not the meaning. Storing it and *saying it is short* leaves the
+            // judgement with the Receptionist, which is where this system puts judgement — and it
+            // costs nothing to be wrong, because the next rung is still there. Throwing it away
+            // instead is what used to send a perfectly readable invoice to a paid vision model.
+            //
             // `extractedText` and nothing else. `update` merges onto the stored document, so the
             // attachment, the classification and everything else survive untouched.
             await things.update(SPECS.Document_DM, subject.docRef, { extractedText: layer.text });
@@ -1401,8 +1413,27 @@ export function buildOperations(deps: OperationDeps): OperationImplementation[] 
                 thingId: String(args["thingId"] ?? ""),
                 pages: layer.pages,
                 characters: layer.text.length,
+                sparse: layer.sparse,
             });
-            return { kind: "value", value: { pages: layer.pages, characters: layer.text.length } };
+            return {
+                kind: "value",
+                value: {
+                    pages: layer.pages,
+                    characters: layer.text.length,
+                    ...(layer.sparse
+                        ? {
+                              sparse: true,
+                              note:
+                                  `Only ${layer.text.length} characters, which is little enough to be a ` +
+                                  "scanner artefact and equally to be a short document — a one-line " +
+                                  "reminder, a receipt, a small invoice. The text is stored on the " +
+                                  "Document: read it and decide. If it turns out to be noise rather " +
+                                  "than the document, document.readScan with replace: true is the " +
+                                  "next rung.",
+                          }
+                        : {}),
+                },
+            };
         },
         async reconcile(args): Promise<OperationOutcome | undefined> {
             // Answerable, and worth answering even though repeating this is harmless: it is
@@ -1433,8 +1464,11 @@ export function buildOperations(deps: OperationDeps): OperationImplementation[] 
             description:
                 "Read a scanned attachment with a vision model and store what it says as the " +
                 "Document's text. This costs money per page, so call it only after " +
-                "document.extractText has reported 'no-text-layer' and only when the document is " +
-                "worth reading — a bill, a letter or a quote is; an advertising leaflet is not. It " +
+                "document.extractText has reported 'no-text-layer', or has reported 'sparse' text " +
+                "that you have read and judged to be a scanner's noise rather than the document " +
+                "(in which case pass replace: true, since that noise is now the Document's text) — " +
+                "and only when the document is worth reading: a bill, a letter or a quote is; an " +
+                "advertising leaflet is not. It " +
                 "reports 'unavailable' when no vision model is configured, and refuses anything over " +
                 "its page or size cap rather than reading part of it. Text the Document already has " +
                 "is never overwritten.",

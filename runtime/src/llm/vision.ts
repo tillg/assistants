@@ -18,7 +18,7 @@ import {
     TransientLlmError,
     type LlmUsage,
 } from "./provider.js";
-import type { LlmProfile } from "./profiles.js";
+import { ConfigurationError, type LlmProfile } from "./profiles.js";
 
 /**
  * The prompt, fixed in code, taking no input whatsoever from the Document — not its filename, not
@@ -164,12 +164,42 @@ export class AnthropicVisionReader implements VisionReader {
  * A profile without its key is the same situation as no profile at all from `readScan`'s point of
  * view: there is nothing to send the PDF to. It says so through `available` rather than by throwing
  * during start-up, because the vision profile is optional and the rest of the stack runs without it.
+ *
+ * A profile naming a provider this port cannot speak is the opposite case, and it throws. Only
+ * `anthropic` has a vision implementation: the request built below is Anthropic-shaped down to the
+ * `x-api-key` header and the `/v1/messages` path, so pointing `vision` at an `openai` profile and
+ * building this reader anyway would POST that body at an endpoint that has never heard of it, fail
+ * every `document.readScan`, and — worse — do it under a start-up log line reporting `provider:
+ * openai`. Sending whoever debugs it to the wrong provider costs more than the failure does. So it
+ * is a `ConfigurationError` at start-up, which is what `loadLlmProfile`'s own doc comment argues
+ * for: a half-finished edit across `llm.json` and `.env` is cheap to hear about now and expensive
+ * to discover hours later, from the first Assistant that meets a scanned invoice.
+ *
+ * `scripted` throws with the rest, deliberately. There is no scripted vision reader either, so a
+ * `"vision": "scripted"` would land in exactly the same silent-Anthropic-request hole — against a
+ * `scripted` profile's empty `baseUrl`, at that. Nothing in the stack configures one today; the day
+ * one is wanted, it wants an implementation here rather than an exemption.
  */
 export function createVisionReader(
     profile: VisionProfile | undefined,
     apiKey: string | undefined,
 ): VisionReader {
     if (profile === undefined) return NULL_VISION_READER;
+
+    // Before the key check: a wrong provider is wrong whether or not its key is present, and
+    // falling through to the null reader would hide the misconfiguration behind "unavailable".
+    if (profile.provider !== "anthropic") {
+        throw new ConfigurationError(
+            `The LLM profile "${profile.name}" is selected by "vision" in llm.json, but its ` +
+                `provider is ${profile.provider}.\n\n` +
+                `  supported for vision   anthropic\n\n` +
+                `Reading a scan sends the PDF as an Anthropic \`document\` content block, and no ` +
+                `other provider has an implementation here. Point "vision" at an anthropic ` +
+                `profile, or remove the key altogether — without it there is no vision model, ` +
+                `reading a scan is unavailable, and an Assistant that meets a PDF with no text ` +
+                `layer asks the User to type it instead.`,
+        );
+    }
 
     const key = apiKey ?? profile.apiKey ?? "";
     if (key === "" && profile.requiresKey !== false) return NULL_VISION_READER;

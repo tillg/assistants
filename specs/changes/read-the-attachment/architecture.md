@@ -55,19 +55,57 @@ not on either path.
 | **reads** | the Document, then its attachment from the Content Store |
 | **does** | `pdfjs-dist` → per-page text → joined with page breaks preserved |
 | **writes** | `extractedText`, and nothing else on the Document |
-| **returns** | `{ pages, characters }`, or `{ reason: "no-text-layer" }`, or `{ reason: "not-a-pdf" }` |
+| **returns** | `{ pages, characters }`; `{ pages, characters, sparse: true, note }` when the text is very short; `{ reason: "no-text-layer", pages }` when there is none at all; or `{ reason: "not-a-pdf" }` |
 
 **`no-text-layer` is a value, not an error.** It is the single most likely outcome on a scanned
 invoice and it is what tells the Receptionist to try the next rung. Returning it as
 `{kind: "error"}` would put a red entry in the transcript for a document behaving exactly as
 expected, and would teach the LLM that something went wrong when nothing did.
 
-**Heuristic for "has a text layer".** A scanned PDF often yields a handful of stray characters rather
-than zero — a scanner watermark, a page number stamped by a fax gateway. So the test is not
-`text.length > 0` but a threshold: fewer than ~`MIN_TEXT_CHARS` (default 100) of extracted text
-across the whole document counts as **no text layer**. That number is a guess and is configurable,
-and the fixtures in the plan are what calibrate it. Getting it wrong in the lenient direction is the
-harmful one — it hands the Receptionist twelve characters of noise and it classifies from that.
+**Sparse text is reported, not suppressed.** A scanned PDF often yields a handful of stray characters
+rather than zero — a scanner watermark, a page number stamped by a fax gateway — and handing the
+Receptionist twelve characters of that *as if they were the invoice* is genuinely harmful.
+
+This originally shipped as a hard gate: under `MIN_TEXT_CHARS` (100) the reader returned
+`no-text-layer` **and threw the text away**. That was wrong, and it was wrong in a way worth
+recording. The number had been calibrated against exactly two fixtures — a 21-character watermark and
+a 576-character utility invoice — which do straddle 100 but are not a population. Against ordinary
+born-digital post the gate misfires constantly: a short dentist's invoice extracts to **84**
+characters, a one-line payment reminder to **44**, a parking receipt to **49**. All three are perfect,
+free and exact; all three were reported as scans; and the seed description then sent each of them to
+`document.readScan`, so the household paid a vision model *which can invent an amount* to recover a
+number the file had already stated exactly. On the arrival path the same documents became Documents
+with an empty `extractedText` whenever the forward carried no covering note.
+
+Both directions are harmful and one boolean can only express one of them, so the reader now returns
+both facts:
+
+```ts
+{ kind: "text"; text: string; pages: number; sparse: boolean; pagesRead: number; truncated: boolean }
+{ kind: "no-text-layer"; pages: number }   // genuinely nothing, once trimmed
+{ kind: "not-a-pdf"; pages?: number; detail?: string }
+```
+
+`SPARSE_TEXT_CHARS` (still 100) is now a **label, not a gate**: below it, `sparse` is true and every
+character still comes back. Nothing is withheld on the strength of that number, so being slightly
+wrong about it costs a hint rather than a document — which is the property the old threshold lacked,
+and the reason lowering the number would have been no fix at all. It would only have moved the
+misclassification onto shorter post.
+
+**And the judgement moves to where this system keeps judgement.** *"Are these 84 characters an
+invoice or a scanner's leavings?"* cannot be answered by length — 44 characters of payment reminder
+and 21 characters of watermark are the same kind of short. It can be answered by reading them next to
+the covering note and the subject line, which is the Receptionist's job and not a library's. The
+reader reports faithfully; the Assistant decides.
+
+**A page cap, separately.** `readTextLayer` takes an optional `maxPages` (unlimited by default) which
+bounds *decode time on the calling thread* — the mail ingest reads inside the Runtime's single scan
+loop, whose heartbeat is stale after ninety seconds, so a forwarded five-hundred-page prospectus must
+not be able to take the loop with it. A capped read still reports the document's real `pages`
+alongside `pagesRead` and `truncated`, on the same principle as `readScan`'s `too-many-pages`: a
+partial read must never look complete. This is a different cap from the ingest's character limit on
+what it stores and prompts with — one bounds the work, the other bounds the payload — and a document
+can be small in pages and vast in characters or the reverse.
 
 **It is `mutating`, so it is not `clientReadable`** and never reachable through the inbox. It also
 needs a `reconcile`, which it can answer trivially: re-running is safe, because it is deterministic
@@ -197,9 +235,11 @@ grants:
 
 > 2. If its `extractedText` is empty and it has an attachment, try to read it:
 >    a. `document.extractText` — free and exact. Usually this is enough.
->    b. If that reports `no-text-layer`, the attachment is a scan. Call `document.readScan` **only if
->       the Document looks like something worth reading** — it costs money per page. A bill, a letter
->       or a quote is worth it; an advertising leaflet is not.
+>    b. If that reports `no-text-layer` — or reports `sparse` text which, on reading it, turns out to
+>       be a scanner's watermark rather than the document — the attachment is a scan. Call
+>       `document.readScan` **only if the Document looks like something worth reading** — it costs
+>       money per page. A bill, a letter or a quote is worth it; an advertising leaflet is not.
+>       Sparse text that *is* the document — a one-line reminder, a receipt — needs no second read.
 >    c. If reading is unavailable or the result is unusable, ask a human with
 >       `document.requestText`, as before.
 
@@ -223,7 +263,9 @@ is small and it keeps [CONTEXT.md](../../../CONTEXT.md)'s sentence about Turns t
 | What happens | What the User sees |
 |---|---|
 | the PDF is encrypted or corrupt | `not-a-pdf`, the ladder falls to `requestText` |
-| the text layer is a scanner's noise | the `MIN_TEXT_CHARS` threshold calls it `no-text-layer`; the ladder continues |
+| the text layer is a scanner's noise | it comes back flagged `sparse`, stored and legible; the Receptionist reads it, sees it is noise, and takes the next rung with `replace: true` |
+| the text layer is a short but complete document | it comes back flagged `sparse` too, and is kept. Nothing is spent |
+| the attachment has hundreds of pages | with a `maxPages` cap the read stops and says `truncated`, reporting the document's real `pages`; without one it reads the lot |
 | no `vision` profile configured | `unavailable`; the ladder falls to `requestText`. **This is the shipped default** |
 | the vision API is down or rate-limited | an `error` outcome; the loop's existing retry and escalation apply |
 | the model returns something unusable | the Receptionist classifies badly, or asks. Its rule *never invent a fact* is what protects the books, and the Accountant's approval is what protects the money |

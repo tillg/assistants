@@ -5,10 +5,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { A12Client } from "../../src/a12/client.js";
 import type { UploadedAttachment } from "../../src/a12/content.js";
 import { SPECS, ThingRepository } from "../../src/a12/things.js";
-import type { FetchedMessage } from "../../src/connectors/email.js";
+import type {
+    FetchedMessage,
+    FetchResult,
+    MailSession,
+    MessageOrigin,
+    OversizedMessage,
+} from "../../src/connectors/email.js";
 import type { MailConfig } from "../../src/config.js";
 import type { DocumentThing, Stored } from "../../src/domain/types.js";
-import { isAllowedSender, runMailIngest } from "../../src/watcher/mail.js";
+import type { LoopDriver } from "../../src/loop/advance.js";
+import { log } from "../../src/log.js";
+import {
+    ARRIVAL_MAX_PAGES,
+    isAllowedSender,
+    MailboxUnreachable,
+    MAX_EXTRACTED_TEXT_LENGTH,
+    runMailIngest,
+} from "../../src/watcher/mail.js";
+import { Watcher } from "../../src/watcher/watcher.js";
 import { MemoryStore } from "../support/memory-store.js";
 
 /**
@@ -37,14 +52,22 @@ import { MemoryStore } from "../support/memory-store.js";
  * `FakeMailbox.swallowNextMove` below, which is to say fault injection into an otherwise honest
  * collaborator rather than a stub standing in for it.
  */
-const reader = vi.hoisted(() => ({ throws: false }));
+const reader = vi.hoisted(() => ({
+    throws: false,
+    maxPages: undefined as number | undefined,
+}));
 vi.mock("../../src/readers/textLayer.js", async (importOriginal) => {
     const actual = await importOriginal<typeof import("../../src/readers/textLayer.js")>();
     return {
         ...actual,
-        readTextLayer: (bytes: Buffer, minChars?: number) => {
+        // EVERY argument is forwarded, and the last one is recorded. A wrapper that drops an
+        // argument is not a wrapper: forget `maxPages` here and the ingest's page cap is never
+        // exercised by any test, so it can be deleted without a single failure — which is precisely
+        // how a cap that bounds work inside the scan loop goes missing.
+        readTextLayer: (bytes: Buffer, sparseBelow?: number, maxPages?: number) => {
+            reader.maxPages = maxPages;
             if (reader.throws) throw new Error("pdfjs fell over");
-            return actual.readTextLayer(bytes, minChars);
+            return actual.readTextLayer(bytes, sparseBelow, maxPages);
         },
     };
 });
@@ -73,7 +96,12 @@ function load(name: string): Buffer {
  */
 function fetched(uid: number, fixture: string, envelopeFrom?: string): FetchedMessage {
     const raw = load(fixture);
-    return { uid, raw, internalDate: INTERNAL_DATE, envelopeFrom: envelopeFrom ?? headerFrom(raw) };
+    return {
+        uid,
+        raw,
+        internalDate: INTERNAL_DATE,
+        envelopeFrom: envelopeFrom ?? headerFrom(raw),
+    };
 }
 
 function headerFrom(raw: Buffer): string {
@@ -99,9 +127,84 @@ function unreadable(uid: number, envelopeFrom: string): FetchedMessage {
     return message as FetchedMessage;
 }
 
+/**
+ * A mail from an allowed sender that carries no `Message-ID` at all.
+ *
+ * Perfectly ordinary post — small senders' order confirmations arrive like this — and the only kind
+ * of message whose identity has to be synthesised from the mailbox it was found in.
+ */
+function noMessageId(uid: number, subject: string): FetchedMessage {
+    const raw = Buffer.from(
+        [
+            "From: user@example.com",
+            "To: receptionist@example.com",
+            `Subject: ${subject}`,
+            "Date: Tue, 13 Jan 2026 17:02:11 +0000",
+            "MIME-Version: 1.0",
+            "Content-Type: text/plain; charset=utf-8",
+            "",
+            `${subject} — der Text der Nachricht.`,
+            "",
+        ].join("\r\n"),
+    );
+    return {
+        uid,
+        raw,
+        internalDate: INTERNAL_DATE,
+        envelopeFrom: "user@example.com",
+    };
+}
+
+/**
+ * A PDF of `pages` pages, each saying which one it is.
+ *
+ * Built rather than committed because what it is for is a document *longer than the arrival page
+ * cap*, and a fixture of that length would be a file nobody could read to check the test — whereas
+ * this is twelve lines whose page count is the number in the call.
+ */
+function manyPagePdf(pages: number): Buffer {
+    // 1 catalogue, 2 page tree, 3 font, then one page object and one content stream per page.
+    const objects: string[] = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        `<< /Type /Pages /Kids [${Array.from({ length: pages }, (_, index) => `${4 + index * 2} 0 R`).join(" ")}] /Count ${pages} >>`,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ];
+    for (let page = 1; page <= pages; page++) {
+        const stream = `BT\n/F1 11 Tf\n56 780 Td\n(Seite ${page} von ${pages}) Tj\nET`;
+        objects.push(
+            `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents ${5 + (page - 1) * 2} 0 R >>`,
+            `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+        );
+    }
+
+    let body = "%PDF-1.4\n";
+    const offsets: number[] = [];
+    objects.forEach((object, index) => {
+        offsets.push(body.length);
+        body += `${index + 1} 0 obj\n${object}\nendobj\n`;
+    });
+
+    const startxref = body.length;
+    const table = offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+    const trailer = `<< /Size ${objects.length + 1} /Root 1 0 R >>`;
+    return Buffer.from(
+        `${body}xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${table}trailer\n${trailer}\nstartxref\n${startxref}\n%%EOF\n`,
+        "latin1",
+    );
+}
+
 /** A forward with one PDF attached, built here because the PDF is what the test is about. */
 function withPdf(uid: number, pdf: string, options: { body?: string; messageId?: string } = {}): FetchedMessage {
-    const bytes = readFileSync(`${PDF_FIXTURES}${pdf}`).toString("base64");
+    return withPdfBytes(uid, pdf, readFileSync(`${PDF_FIXTURES}${pdf}`), options);
+}
+
+function withPdfBytes(
+    uid: number,
+    pdf: string,
+    content: Buffer,
+    options: { body?: string; messageId?: string } = {},
+): FetchedMessage {
+    const bytes = content.toString("base64");
     const raw = Buffer.from(
         [
             "From: user@example.com",
@@ -125,25 +228,67 @@ function withPdf(uid: number, pdf: string, options: { body?: string; messageId?:
             "",
         ].join("\r\n"),
     );
-    return { uid, raw, internalDate: INTERNAL_DATE, envelopeFrom: "user@example.com" };
+    return {
+        uid,
+        raw,
+        internalDate: INTERNAL_DATE,
+        envelopeFrom: "user@example.com",
+    };
 }
 
 /**
- * A mailbox with folders and no protocol.
+ * A mailbox with folders, connections and no protocol.
  *
  * It really moves messages between folders and really refuses a folder it has never been told
  * about, which is what makes "a missing folder is created rather than throwing" a claim about the
  * ingest instead of a claim about the fake. It records every call so a disabled ingest can be shown
  * to have touched nothing at all.
+ *
+ * **It is as strict as the server, deliberately.** Three of its rules exist only to stop a bug of
+ * exactly the kind these tests are about from passing:
+ *
+ *   - **Nothing works without a session.** Every operation goes through {@link session}, and a
+ *     session that has been closed refuses to do anything. A fake that lets the ingest fetch from
+ *     thin air cannot tell "one connection per poll" from "one connection per call" — which is the
+ *     whole subject of the change.
+ *   - **`fetchBatch` declines messages it decides are too large**, exactly as the real one does on
+ *     the server's `RFC822.SIZE`, and those messages stay in the folder. If the ingest does not file
+ *     them, the next poll sees them again — and one of the tests below asserts that it does not.
+ *   - **It stamps the origin**, from its own host, the folder and the current `UIDVALIDITY`, the way
+ *     `ConnectedSession.fetchBatch` does. A fake that omits it makes every `Message-ID`-less message
+ *     silently fall back to `<uid.N@local>`, which is the collision the origin exists to prevent.
  */
 class FakeMailbox {
     readonly folders = new Map<string, FetchedMessage[]>();
     readonly calls: string[] = [];
+    /** The host a stamped {@link MessageOrigin} names — the same one `mailConfig()` connects to. */
+    host = "imap.example.com";
+    /**
+     * The incoming folder's `UIDVALIDITY`. Change it between polls to be the server that dropped and
+     * recreated the `assistant` label and is now handing out UID 1 again.
+     */
+    uidValidity = "1";
+    /** UIDs the fetch will decline to download, mapped to the size it reports for them. */
+    readonly tooLarge = new Map<number, number>();
+    /** What `fetchBatch` reports about its byte budget. */
+    budgetExhausted = false;
     /**
      * Swallow the next `move`, leaving the message where it was. That is the crash between
      * `ADD_DOCUMENT` and `MOVE` — the one window the move-last ordering exists to survive.
      */
     swallowNextMove = false;
+    /**
+     * Throw on the next `move`, leaving the message where it was.
+     *
+     * Different from {@link swallowNextMove} in the one way that matters here: the caller *finds
+     * out*. That is the transient IMAP error on the last statement of an otherwise successful
+     * message — the one that used to change the message's verdict.
+     */
+    refuseNextMove = false;
+    /** Fault injection for the mailbox *as a whole*: the three wholesale failures, one field each. */
+    failConnect: string | undefined;
+    failFetch: string | undefined;
+    failEnsureFolders: string | undefined;
 
     constructor(existingFolders: readonly string[] = [INCOMING]) {
         for (const folder of existingFolders) this.folders.set(folder, []);
@@ -157,20 +302,99 @@ class FakeMailbox {
         return (this.folders.get(folder) ?? []).map((message) => message.uid);
     }
 
+    /** How many connections were opened — the number the one-connection-per-poll change is about. */
+    get sessionsOpened(): number {
+        return this.calls.filter((call) => call === "session:open").length;
+    }
+
+    /**
+     * One connection, lent to `work` and closed afterwards — and dead the moment it is.
+     *
+     * The closed check is the point: it is what makes a session an actual scope rather than a
+     * decorative wrapper around the same three methods.
+     */
+    async session<T>(work: (session: MailSession) => Promise<T>): Promise<T> {
+        this.calls.push("session:open");
+        if (this.failConnect) throw new Error(this.failConnect);
+        let open = true;
+        const alive = <A extends unknown[], R>(operation: (...args: A) => Promise<R>) => {
+            return async (...args: A): Promise<R> => {
+                if (!open) throw new Error("the session is closed");
+                return operation(...args);
+            };
+        };
+        try {
+            return await work({
+                fetch: alive(async (folder: string, max: number) => (await this.fetchIn(folder, max)).messages),
+                fetchBatch: alive((folder: string, max: number) => this.fetchIn(folder, max)),
+                move: alive((uid: number, from: string, to: string) => this.moveIn(uid, from, to)),
+                ensureFolders: alive((folders: readonly string[]) => this.ensureIn(folders)),
+            });
+        } finally {
+            open = false;
+            this.calls.push("session:close");
+        }
+    }
+
+    /** The one-shot forms, each its own session — the same shape the real connector has. */
     async ensureFolders(folders: readonly string[]): Promise<void> {
-        this.calls.push(`ensureFolders:${folders.join(",")}`);
-        for (const folder of folders) if (!this.folders.has(folder)) this.folders.set(folder, []);
+        await this.session((session) => session.ensureFolders(folders));
     }
 
     async fetch(folder: string, max: number): Promise<FetchedMessage[]> {
-        this.calls.push(`fetch:${folder}:${max}`);
-        const rows = this.folders.get(folder);
-        if (!rows) throw new Error(`No folder ${folder}`);
-        return rows.slice(0, max);
+        return this.session((session) => session.fetch(folder, max));
+    }
+
+    async fetchBatch(folder: string, max: number): Promise<FetchResult> {
+        return this.session((session) => session.fetchBatch(folder, max));
     }
 
     async move(uid: number, fromFolder: string, toFolder: string): Promise<void> {
+        await this.session((session) => session.move(uid, fromFolder, toFolder));
+    }
+
+    private async ensureIn(folders: readonly string[]): Promise<void> {
+        this.calls.push(`ensureFolders:${folders.join(",")}`);
+        if (this.failEnsureFolders) throw new Error(this.failEnsureFolders);
+        for (const folder of folders) if (!this.folders.has(folder)) this.folders.set(folder, []);
+    }
+
+    private async fetchIn(folder: string, max: number): Promise<FetchResult> {
+        this.calls.push(`fetchBatch:${folder}:${max}`);
+        if (this.failFetch) throw new Error(this.failFetch);
+        const rows = this.folders.get(folder);
+        if (!rows) throw new Error(`No folder ${folder}`);
+
+        const origin: MessageOrigin = {
+            host: this.host,
+            folder,
+            uidValidity: this.uidValidity,
+        };
+        const messages: FetchedMessage[] = [];
+        const oversized: OversizedMessage[] = [];
+        // `max` bounds the *candidates*, as it does on the server: a message that is declined for
+        // its size has still used up one of the poll's slots, which is why it has to be filed.
+        for (const message of rows.slice(0, max)) {
+            const size = this.tooLarge.get(message.uid);
+            if (size !== undefined) {
+                oversized.push({
+                    uid: message.uid,
+                    size,
+                    envelopeFrom: message.envelopeFrom,
+                });
+                continue;
+            }
+            messages.push(withOrigin(message, origin));
+        }
+        return { messages, oversized, budgetExhausted: this.budgetExhausted };
+    }
+
+    private async moveIn(uid: number, fromFolder: string, toFolder: string): Promise<void> {
         this.calls.push(`move:${uid}:${fromFolder}->${toFolder}`);
+        if (this.refuseNextMove) {
+            this.refuseNextMove = false;
+            throw new Error(`the server refused to move ${uid} to ${toFolder}`);
+        }
         if (this.swallowNextMove) {
             this.swallowNextMove = false;
             return;
@@ -189,9 +413,27 @@ class FakeMailbox {
     }
 }
 
+/**
+ * The message as the fetch hands it over: itself, plus where it was found.
+ *
+ * Copied by property *descriptor* rather than spread, because {@link unreadable}'s `raw` is a getter
+ * that throws on purpose and spreading would read it — turning the one test that proves a stranger's
+ * MIME is never parsed into a test that parses it here instead.
+ */
+function withOrigin(message: FetchedMessage, origin: MessageOrigin): FetchedMessage {
+    const copy = {} as FetchedMessage;
+    Object.defineProperties(copy, Object.getOwnPropertyDescriptors(message));
+    Object.defineProperty(copy, "origin", { value: origin, enumerable: true });
+    return copy;
+}
+
 /** A Content Store that keeps the bytes in a list and can be told to refuse one file. */
 class FakeContentStore {
-    readonly uploaded: Array<{ filename: string; mimeType: string; bytes: number }> = [];
+    readonly uploaded: Array<{
+        filename: string;
+        mimeType: string;
+        bytes: number;
+    }> = [];
     /** The filename to refuse, so a failure can be provoked *mid*-message rather than before it. */
     refuse: string | undefined;
 
@@ -235,6 +477,7 @@ beforeEach(() => {
     things = new ThingRepository(store as unknown as A12Client);
     content = new FakeContentStore();
     reader.throws = false;
+    reader.maxPages = undefined;
 });
 
 /** The Operation Thing that is the ingest's switch, created the way bootstrap creates it. */
@@ -302,7 +545,13 @@ describe("runMailIngest", () => {
 
         const summary = await ingest(mailbox, mailConfig({ host: "" }));
 
-        expect(summary).toEqual({ fetched: 0, rejected: 0, created: 0, skipped: 0, failed: 0 });
+        expect(summary).toEqual({
+            fetched: 0,
+            rejected: 0,
+            created: 0,
+            skipped: 0,
+            failed: 0,
+        });
         expect(mailbox.calls).toEqual([]);
         expect(await documents()).toHaveLength(0);
     });
@@ -313,7 +562,13 @@ describe("runMailIngest", () => {
 
         const summary = await ingest(mailbox);
 
-        expect(summary).toEqual({ fetched: 1, rejected: 0, created: 1, skipped: 0, failed: 0 });
+        expect(summary).toEqual({
+            fetched: 1,
+            rejected: 0,
+            created: 1,
+            skipped: 0,
+            failed: 0,
+        });
 
         const [document] = await documents();
         expect(document?.data.source).toBe("email");
@@ -334,7 +589,11 @@ describe("runMailIngest", () => {
         await ingest(mailbox);
 
         expect(content.uploaded).toEqual([
-            { filename: "rechnung.pdf", mimeType: "application/pdf", bytes: expect.any(Number) },
+            {
+                filename: "rechnung.pdf",
+                mimeType: "application/pdf",
+                bytes: expect.any(Number),
+            },
         ]);
         // Read the raw stored document, because the group is what `ADD_DOCUMENT` had to carry —
         // asserting on our own projection of it would prove nothing about what reached the store.
@@ -357,7 +616,13 @@ describe("runMailIngest", () => {
 
         const summary = await ingest(mailbox);
 
-        expect(summary).toEqual({ fetched: 1, rejected: 1, created: 0, skipped: 0, failed: 0 });
+        expect(summary).toEqual({
+            fetched: 1,
+            rejected: 1,
+            created: 0,
+            skipped: 0,
+            failed: 0,
+        });
         expect(await documents()).toHaveLength(0);
         expect(content.uploaded).toEqual([]);
         expect(mailbox.uids(REJECTED)).toEqual([3]);
@@ -392,7 +657,13 @@ describe("runMailIngest", () => {
 
         const summary = await ingest(mailbox);
 
-        expect(summary).toEqual({ fetched: 1, rejected: 0, created: 1, skipped: 0, failed: 1 });
+        expect(summary).toEqual({
+            fetched: 1,
+            rejected: 0,
+            created: 1,
+            skipped: 0,
+            failed: 1,
+        });
         expect(mailbox.uids(FAILED)).toEqual([11]);
         expect(mailbox.uids(INCOMING)).toEqual([]);
         // The Document that did land stays landed: it is a real Thing with a real ExternalRef.
@@ -416,7 +687,13 @@ describe("runMailIngest", () => {
 
         const second = await ingest(mailbox);
 
-        expect(second).toEqual({ fetched: 1, rejected: 0, created: 0, skipped: 1, failed: 0 });
+        expect(second).toEqual({
+            fetched: 1,
+            rejected: 0,
+            created: 0,
+            skipped: 1,
+            failed: 0,
+        });
         expect(await documents()).toHaveLength(1);
         expect(content.uploaded).toHaveLength(1);
         expect(mailbox.uids(PROCESSED)).toEqual([13]);
@@ -433,7 +710,13 @@ describe("runMailIngest", () => {
         await mailbox.move(15, PROCESSED, INCOMING);
         const second = await ingest(mailbox);
 
-        expect(second).toEqual({ fetched: 1, rejected: 0, created: 0, skipped: 2, failed: 0 });
+        expect(second).toEqual({
+            fetched: 1,
+            rejected: 0,
+            created: 0,
+            skipped: 2,
+            failed: 0,
+        });
         expect(await documents()).toHaveLength(2);
         expect(mailbox.uids(PROCESSED)).toEqual([15]);
     });
@@ -450,7 +733,7 @@ describe("runMailIngest", () => {
         const summary = await ingest(mailbox, mailConfig({ maxPerPoll: 2 }));
 
         expect(summary.fetched).toBe(2);
-        expect(mailbox.calls).toContain(`fetch:${INCOMING}:2`);
+        expect(mailbox.calls).toContain(`fetchBatch:${INCOMING}:2`);
         expect(mailbox.uids(INCOMING)).toEqual([23]);
     });
 
@@ -473,7 +756,13 @@ describe("runMailIngest", () => {
 
         const summary = await ingest(mailbox);
 
-        expect(summary).toEqual({ fetched: 2, rejected: 0, created: 2, skipped: 0, failed: 1 });
+        expect(summary).toEqual({
+            fetched: 2,
+            rejected: 0,
+            created: 2,
+            skipped: 0,
+            failed: 1,
+        });
         expect(mailbox.uids(FAILED)).toEqual([41]);
         expect(mailbox.uids(PROCESSED)).toEqual([42]);
     });
@@ -492,7 +781,13 @@ describe("runMailIngest", () => {
 
         const summary = await ingest(mailbox);
 
-        expect(summary).toEqual({ fetched: 1, rejected: 1, created: 0, skipped: 0, failed: 0 });
+        expect(summary).toEqual({
+            fetched: 1,
+            rejected: 1,
+            created: 0,
+            skipped: 0,
+            failed: 0,
+        });
         expect(await documents()).toHaveLength(0);
         expect(content.uploaded).toEqual([]);
         expect(mailbox.uids(REJECTED)).toEqual([61]);
@@ -516,7 +811,13 @@ describe("runMailIngest", () => {
 
         const summary = await ingest(mailbox);
 
-        expect(summary).toEqual({ fetched: 1, rejected: 1, created: 0, skipped: 0, failed: 0 });
+        expect(summary).toEqual({
+            fetched: 1,
+            rejected: 1,
+            created: 0,
+            skipped: 0,
+            failed: 0,
+        });
         expect(await documents()).toHaveLength(0);
         expect(mailbox.uids(REJECTED)).toEqual([63]);
     });
@@ -540,7 +841,13 @@ describe("runMailIngest", () => {
 
         const summary = await ingest(mailbox);
 
-        expect(summary).toEqual({ fetched: 1, rejected: 0, created: 1, skipped: 0, failed: 0 });
+        expect(summary).toEqual({
+            fetched: 1,
+            rejected: 0,
+            created: 1,
+            skipped: 0,
+            failed: 0,
+        });
         const [document] = await documents();
         expect(document?.data.extractedText).toBe("");
         expect(mailbox.uids(PROCESSED)).toEqual([72]);
@@ -551,7 +858,9 @@ describe("runMailIngest", () => {
         const mailbox = new FakeMailbox();
         mailbox.put(
             INCOMING,
-            withPdf(73, "born-digital-invoice.pdf", { body: "Die Zahnarztrechnung, ist schon bezahlt." }),
+            withPdf(73, "born-digital-invoice.pdf", {
+                body: "Die Zahnarztrechnung, ist schon bezahlt.",
+            }),
         );
 
         await ingest(mailbox);
@@ -568,7 +877,13 @@ describe("runMailIngest", () => {
 
         const summary = await ingest(mailbox);
 
-        expect(summary).toEqual({ fetched: 1, rejected: 0, created: 1, skipped: 0, failed: 0 });
+        expect(summary).toEqual({
+            fetched: 1,
+            rejected: 0,
+            created: 1,
+            skipped: 0,
+            failed: 0,
+        });
         expect(await documents()).toHaveLength(1);
         expect(mailbox.uids(PROCESSED)).toEqual([74]);
     });
@@ -580,7 +895,13 @@ describe("runMailIngest", () => {
 
         const summary = await ingest(mailbox);
 
-        expect(summary).toEqual({ fetched: 0, rejected: 0, created: 0, skipped: 0, failed: 0 });
+        expect(summary).toEqual({
+            fetched: 0,
+            rejected: 0,
+            created: 0,
+            skipped: 0,
+            failed: 0,
+        });
         expect(mailbox.calls).toEqual([]);
         expect(mailbox.uids(INCOMING)).toEqual([81]);
         expect(await documents()).toHaveLength(0);
@@ -631,18 +952,487 @@ describe("runMailIngest", () => {
         expect(mailbox.uids(PROCESSED)).toEqual([84]);
     });
 
-    it("returns a summary rather than throwing when the mailbox itself is unreachable", async () => {
+    /**
+     * DEFECT 1, PINNED. **A move that fails may not turn a success into a failure.**
+     *
+     * Every Document landed. One transient IMAP error on the last statement, and the old code filed
+     * the message in `assistant/failed` — "tried, threw, gave up", the folder the architecture
+     * reserves for a human's attention — and counted it `failed`. Nothing about that is
+     * self-healing: the message is out of `incoming`, so the poll that actually succeeded sits in a
+     * failure inbox for ever.
+     *
+     * What must happen instead is nothing. The message keeps its verdict, stays where it is, and
+     * the next poll finishes the job — which is what the second half of this test asserts.
+     */
+    it("leaves a fully ingested mail in incoming when the move to processed fails, and calls it a success", async () => {
         const mailbox = new FakeMailbox();
-        mailbox.fetch = async () => {
-            throw new Error("ECONNREFUSED");
-        };
+        mailbox.put(INCOMING, fetched(91, "forward-one-pdf.eml"));
+        mailbox.refuseNextMove = true;
 
-        await expect(ingest(mailbox)).resolves.toEqual({
+        const summary = await ingest(mailbox);
+
+        expect(summary).toEqual({
+            fetched: 1,
+            rejected: 0,
+            created: 1,
+            skipped: 0,
+            failed: 0,
+        });
+        expect(await documents()).toHaveLength(1);
+        expect(mailbox.uids(FAILED)).toEqual([]);
+        expect(mailbox.uids(PROCESSED)).toEqual([]);
+        expect(mailbox.uids(INCOMING)).toEqual([91]);
+        // Exactly one move was attempted: no second, compensating move to anywhere else.
+        expect(mailbox.calls.filter((call) => call.startsWith("move:"))).toEqual([
+            `move:91:${INCOMING}->${PROCESSED}`,
+        ]);
+
+        // Self-healing: the ExternalRef query skips the Document, and the move happens now.
+        const second = await ingest(mailbox);
+        expect(second).toEqual({
+            fetched: 1,
+            rejected: 0,
+            created: 0,
+            skipped: 1,
+            failed: 0,
+        });
+        expect(await documents()).toHaveLength(1);
+        expect(mailbox.uids(PROCESSED)).toEqual([91]);
+    });
+
+    /**
+     * DEFECT 2, PINNED. **"Not for us" and "we broke" may not share a folder, or a counter.**
+     *
+     * A stranger's mail whose move to `rejected` hiccupped used to end in `assistant/failed` — the
+     * exact collapse the three-folder design exists to prevent — and to be counted in BOTH
+     * `summary.rejected` and `summary.failed`, so the poll log said two things happened to one
+     * message.
+     */
+    it("leaves a rejected mail in incoming when the move to rejected fails, and counts it once", async () => {
+        const mailbox = new FakeMailbox();
+        // plain-text.eml is from anna.beispiel@example.com; only user@example.com is allowed.
+        mailbox.put(INCOMING, fetched(92, "plain-text.eml"));
+        mailbox.refuseNextMove = true;
+
+        const summary = await ingest(mailbox);
+
+        expect(summary).toEqual({
+            fetched: 1,
+            rejected: 1,
+            created: 0,
+            skipped: 0,
+            failed: 0,
+        });
+        expect(mailbox.uids(FAILED)).toEqual([]);
+        expect(mailbox.uids(REJECTED)).toEqual([]);
+        expect(mailbox.uids(INCOMING)).toEqual([92]);
+        expect(mailbox.calls.filter((call) => call.startsWith("move:"))).toEqual([
+            `move:92:${INCOMING}->${REJECTED}`,
+        ]);
+
+        const second = await ingest(mailbox);
+        expect(second).toEqual({
+            fetched: 1,
+            rejected: 1,
+            created: 0,
+            skipped: 0,
+            failed: 0,
+        });
+        expect(mailbox.uids(REJECTED)).toEqual([92]);
+    });
+
+    /** The third path, for completeness: a failed mail whose move also fails is counted once, too. */
+    it("leaves a failed mail in incoming when the move to failed fails, and counts it once", async () => {
+        const mailbox = new FakeMailbox();
+        mailbox.put(INCOMING, fetched(93, "forward-two-pdfs.eml"));
+        content.refuse = "zweite.pdf";
+        mailbox.refuseNextMove = true;
+
+        const summary = await ingest(mailbox);
+
+        expect(summary).toEqual({
+            fetched: 1,
+            rejected: 0,
+            created: 1,
+            skipped: 0,
+            failed: 1,
+        });
+        expect(mailbox.uids(INCOMING)).toEqual([93]);
+        expect(mailbox.calls.filter((call) => call.startsWith("move:"))).toEqual([
+            `move:93:${INCOMING}->${FAILED}`,
+        ]);
+    });
+
+    /** One message's move failing says nothing about the next one. */
+    it("carries on with the next message when one of them cannot be moved", async () => {
+        const mailbox = new FakeMailbox();
+        mailbox.put(INCOMING, fetched(94, "forward-one-pdf.eml"), fetched(95, "forward-two-pdfs.eml"));
+        mailbox.refuseNextMove = true;
+
+        const summary = await ingest(mailbox);
+
+        expect(summary).toEqual({
+            fetched: 2,
+            rejected: 0,
+            created: 3,
+            skipped: 0,
+            failed: 0,
+        });
+        expect(mailbox.uids(INCOMING)).toEqual([94]);
+        expect(mailbox.uids(PROCESSED)).toEqual([95]);
+    });
+
+    /**
+     * DEFECT 4, PINNED. **A Document's text is bounded, and says when it was bounded.**
+     *
+     * `Document_DM.ExtractedText` has no `maxLength`, so the limit is paid by the Receptionist, on
+     * the very next Turn, per token. The note matters as much as the cap: a text that simply stops
+     * is read as a document that ends there.
+     */
+    it("caps a very long mail body and says so in the stored text", async () => {
+        const body = "Sehr geehrte Damen und Herren. ".repeat(2_000);
+        expect(body.length).toBeGreaterThan(MAX_EXTRACTED_TEXT_LENGTH);
+        const mailbox = new FakeMailbox();
+        mailbox.put(INCOMING, withPdf(96, "scanned-no-text.pdf", { body }));
+
+        const summary = await ingest(mailbox);
+
+        expect(summary.created).toBe(1);
+        const [document] = await documents();
+        const text = document?.data.extractedText ?? "";
+        expect(text.length).toBeLessThan(MAX_EXTRACTED_TEXT_LENGTH + 200);
+        expect(text).toContain(`truncated at ${MAX_EXTRACTED_TEXT_LENGTH} characters`);
+        expect(text.startsWith("Sehr geehrte Damen und Herren.")).toBe(true);
+    });
+
+    it("stores an ordinary invoice's text whole, with no note", async () => {
+        const mailbox = new FakeMailbox();
+        mailbox.put(INCOMING, withPdf(97, "born-digital-invoice.pdf"));
+
+        await ingest(mailbox);
+
+        const [document] = await documents();
+        expect(document?.data.extractedText).not.toContain("truncated");
+        expect((document?.data.extractedText ?? "").length).toBeLessThanOrEqual(MAX_EXTRACTED_TEXT_LENGTH);
+    });
+
+    /**
+     * ONE POLL, ONE CONNECTION.
+     *
+     * The poll below does the folder check, a fetch, one oversized filing and three ordinary moves —
+     * six operations that used to be six logins, and at `maxPerPoll: 20` would be twenty-two a
+     * minute against a provider that throttles reconnects, every one of those handshakes inside the
+     * scan loop. Counting the sessions is the only way to assert it: every other observable
+     * behaviour of the poll is identical either way, which is exactly why it went unnoticed.
+     */
+    it("opens exactly one connection for the whole poll, however much it does", async () => {
+        const mailbox = new FakeMailbox();
+        mailbox.put(
+            INCOMING,
+            fetched(101, "forward-one-pdf.eml"),
+            fetched(102, "plain-text.eml"),
+            fetched(103, "forward-two-pdfs.eml"),
+            unreadable(104, "user@example.com"),
+        );
+        mailbox.tooLarge.set(104, 80 * 1024 * 1024);
+
+        await ingest(mailbox);
+
+        expect(mailbox.sessionsOpened).toBe(1);
+        // And everything happened inside it: the connection is opened first and closed last.
+        expect(mailbox.calls.at(0)).toBe("session:open");
+        expect(mailbox.calls.at(-1)).toBe("session:close");
+        expect(mailbox.calls.filter((call) => call.startsWith("move:"))).toHaveLength(4);
+    });
+
+    /**
+     * A MESSAGE NOBODY CAN DOWNLOAD MUST STILL LEAVE THE INCOMING FOLDER.
+     *
+     * `fetchBatch` declines it on the server's own size, so not one byte of it is read — the message
+     * here throws if anything touches its bytes, which is how that is asserted rather than assumed.
+     * Left where it is, it would be declined again every minute for ever, and since a poll takes at
+     * most `maxPerPoll` candidates, a few of them at the head of the folder would starve the real
+     * invoices behind them. It belongs in `failed`, which a human reads.
+     */
+    it("moves a mail too large to download to failed, counts it, and never sees it again", async () => {
+        const mailbox = new FakeMailbox();
+        mailbox.put(INCOMING, unreadable(111, "user@example.com"), fetched(112, "forward-one-pdf.eml"));
+        mailbox.tooLarge.set(111, 80 * 1024 * 1024);
+
+        const summary = await ingest(mailbox);
+
+        // `fetched` counts what was read, and the oversized message never was.
+        expect(summary).toEqual({
+            fetched: 1,
+            rejected: 0,
+            created: 1,
+            skipped: 0,
+            failed: 1,
+        });
+        expect(mailbox.uids(FAILED)).toEqual([111]);
+        expect(mailbox.uids(PROCESSED)).toEqual([112]);
+        expect(mailbox.uids(INCOMING)).toEqual([]);
+
+        const second = await ingest(mailbox);
+        expect(second).toEqual({
             fetched: 0,
             rejected: 0,
             created: 0,
             skipped: 0,
             failed: 0,
         });
+        expect(mailbox.uids(FAILED)).toEqual([111]);
+    });
+
+    /** A move that will not go through leaves it where it is — self-healing, like every other move. */
+    it("leaves an oversized mail in incoming when the move to failed fails", async () => {
+        const mailbox = new FakeMailbox();
+        mailbox.put(INCOMING, unreadable(113, "user@example.com"));
+        mailbox.tooLarge.set(113, 80 * 1024 * 1024);
+        mailbox.refuseNextMove = true;
+
+        const summary = await ingest(mailbox);
+
+        expect(summary.failed).toBe(1);
+        expect(mailbox.uids(INCOMING)).toEqual([113]);
+
+        const second = await ingest(mailbox);
+        expect(second.failed).toBe(1);
+        expect(mailbox.uids(FAILED)).toEqual([113]);
+    });
+
+    /**
+     * A POLL THAT STOPPED ON ITS BUDGET SAYS SO — and nothing else.
+     *
+     * It is a normal, self-correcting event: what was not fetched is still in `incoming` and the
+     * next poll continues with it, so no counter moves and nothing is filed anywhere. But silence
+     * here is baffling to anybody watching a backlog drain more slowly than `maxPerPoll` would
+     * explain, so it is one info line per poll — not a warning, and never per message.
+     */
+    it("logs one line when the poll spent its byte budget, and none when it did not", async () => {
+        const infos = vi.spyOn(log, "info").mockImplementation(() => {});
+        const said = (): number =>
+            infos.mock.calls.filter(
+                ([message]) =>
+                    message === "the letterbox poll spent its byte budget; the rest waits for the next poll",
+            ).length;
+
+        const quiet = new FakeMailbox();
+        quiet.put(INCOMING, fetched(121, "forward-one-pdf.eml"));
+        expect(await ingest(quiet)).toEqual({
+            fetched: 1,
+            rejected: 0,
+            created: 1,
+            skipped: 0,
+            failed: 0,
+        });
+        expect(said()).toBe(0);
+
+        const busy = new FakeMailbox();
+        busy.put(INCOMING, fetched(122, "forward-two-pdfs.eml"));
+        busy.budgetExhausted = true;
+        // Nothing about the summary changes: the budget is about pace, not about outcomes.
+        expect(await ingest(busy)).toEqual({
+            fetched: 1,
+            rejected: 0,
+            created: 2,
+            skipped: 0,
+            failed: 0,
+        });
+        expect(said()).toBe(1);
+        expect(busy.uids(PROCESSED)).toEqual([122]);
+
+        infos.mockRestore();
+    });
+
+    /**
+     * A MESSAGE WITH NO `Message-ID` IS IDENTIFIED BY THE MAILBOX IT WAS FOUND IN.
+     *
+     * Without the origin the ref falls back to `<uid.N@local>`, which is unique to nothing. The ref
+     * must also be *stable*: it is computed from the UID, the folder, the host and the generation,
+     * none of which change between polls, so the same message polled twice is skipped rather than
+     * duplicated.
+     */
+    it("derives a Message-ID-less mail's ref from its mailbox, and gets the same one twice", async () => {
+        const mailbox = new FakeMailbox();
+        mailbox.put(INCOMING, noMessageId(131, "Bestellbestaetigung"));
+        mailbox.swallowNextMove = true;
+
+        const first = await ingest(mailbox);
+
+        expect(first.created).toBe(1);
+        const [document] = await documents();
+        expect(document?.data.externalRef).toBe(`<uid.131.v1.${INCOMING}@imap.example.com>#0`);
+        expect(document?.data.externalRef).not.toContain("@local");
+
+        // The move was swallowed, so the very same message is polled again.
+        expect(mailbox.uids(INCOMING)).toEqual([131]);
+        const second = await ingest(mailbox);
+
+        expect(second).toEqual({
+            fetched: 1,
+            rejected: 0,
+            created: 0,
+            skipped: 1,
+            failed: 0,
+        });
+        expect(await documents()).toHaveLength(1);
+    });
+
+    /**
+     * THE SILENTLY DROPPED INVOICE, PINNED.
+     *
+     * An IMAP UID is unique within one `(mailbox, UIDVALIDITY)` generation and nowhere else. Delete
+     * and recreate the `assistant` label — a thing people do to Gmail labels — and the server hands
+     * out UID 1 again. Without the generation in the ref, this second, completely different mail
+     * computes the ref the first one already holds, the `ExternalRef` query says "already landed",
+     * and the invoice is skipped and filed in `processed` looking like a success.
+     */
+    it("does not confuse two mails that share a UID across a recreated label", async () => {
+        const mailbox = new FakeMailbox();
+        mailbox.put(INCOMING, noMessageId(5, "Die erste Rechnung"));
+
+        await ingest(mailbox);
+
+        // The label is dropped and recreated; UIDs start over and a different mail is now UID 5.
+        mailbox.uidValidity = "2";
+        mailbox.put(INCOMING, noMessageId(5, "Die zweite Rechnung"));
+
+        const second = await ingest(mailbox);
+
+        expect(second).toEqual({
+            fetched: 1,
+            rejected: 0,
+            created: 1,
+            skipped: 0,
+            failed: 0,
+        });
+        const created = await documents();
+        expect(created.map((document) => document.data.externalRef).sort()).toEqual([
+            `<uid.5.v1.${INCOMING}@imap.example.com>#0`,
+            `<uid.5.v2.${INCOMING}@imap.example.com>#0`,
+        ]);
+        expect(created.map((document) => document.data.title).sort()).toEqual([
+            "Die erste Rechnung",
+            "Die zweite Rechnung",
+        ]);
+    });
+
+    /**
+     * THE OTHER CAP. **Arrival bounds the pages it decodes, not only the characters it stores.**
+     *
+     * A five-hundred-page prospectus decoded in the scan loop holds up every other scan and outlives
+     * the heartbeat, and `MAX_EXTRACTED_TEXT_LENGTH` cannot prevent it: that cap applies to the text
+     * *after* the decode has already been paid for. Both caps are needed and neither replaces the
+     * other — and the note is what stops a Document that stops at page twenty from reading like a
+     * document that ends there.
+     */
+    it("decodes at most ARRIVAL_MAX_PAGES of a long PDF, and says so in the stored text", async () => {
+        const mailbox = new FakeMailbox();
+        mailbox.put(INCOMING, withPdfBytes(141, "prospekt.pdf", manyPagePdf(25)));
+
+        const summary = await ingest(mailbox);
+
+        expect(summary.created).toBe(1);
+        expect(reader.maxPages).toBe(ARRIVAL_MAX_PAGES);
+        const text = (await documents())[0]?.data.extractedText ?? "";
+        expect(text).toContain(`Seite ${ARRIVAL_MAX_PAGES} von 25`);
+        expect(text).not.toContain("Seite 21 von 25");
+        expect(text).toContain(`Only the first ${ARRIVAL_MAX_PAGES} of 25 pages were read`);
+    });
+
+    /** The ordinary case says nothing, because there is nothing to say. */
+    it("adds no page note to a PDF it read to the end", async () => {
+        const mailbox = new FakeMailbox();
+        mailbox.put(INCOMING, withPdfBytes(142, "kurz.pdf", manyPagePdf(2)));
+
+        await ingest(mailbox);
+
+        const text = (await documents())[0]?.data.extractedText ?? "";
+        expect(text).toContain("Seite 2 von 2");
+        expect(text).not.toContain("pages were read");
+    });
+
+    /**
+     * DEFECT 3, PINNED — half of it. **A wholesale failure leaves as an exception.**
+     *
+     * A failure before the first message — cannot connect, cannot authenticate, cannot list the
+     * folders — is not something a summary can describe: nothing was attempted, so every counter
+     * is zero, which is indistinguishable from an empty letterbox. Swallowing it here logged one
+     * ERROR a minute for ever and left the Watcher's once-per-outage suppression unreachable. It
+     * is the ONLY thing this function raises; everything per-message stays in the summary, which
+     * the tests above assert at length.
+     */
+    it("throws MailboxUnreachable when the mailbox itself cannot be read", async () => {
+        const mailbox = new FakeMailbox();
+        mailbox.failFetch = "ECONNREFUSED";
+
+        await expect(ingest(mailbox)).rejects.toBeInstanceOf(MailboxUnreachable);
+    });
+
+    it("throws MailboxUnreachable when the folders cannot be listed or created", async () => {
+        const mailbox = new FakeMailbox();
+        mailbox.failEnsureFolders = "AUTHENTICATIONFAILED";
+
+        await expect(ingest(mailbox)).rejects.toThrow(/AUTHENTICATIONFAILED/);
+    });
+
+    /** The connection itself, which is now the first thing a poll needs and the first thing to fail. */
+    it("throws MailboxUnreachable when the connection cannot be opened at all", async () => {
+        const mailbox = new FakeMailbox();
+        mailbox.failConnect = "ETIMEDOUT";
+
+        await expect(ingest(mailbox)).rejects.toBeInstanceOf(MailboxUnreachable);
+        await expect(ingest(mailbox)).rejects.toThrow(/ETIMEDOUT/);
+    });
+});
+
+/**
+ * DEFECT 3, PINNED — the other half. **The Watcher says it once, not once a minute.**
+ *
+ * This lives here rather than beside the other Watcher tests because it is a claim about the seam
+ * between the two files: the ingest raises a wholesale failure precisely so that the one piece of
+ * state that can make it bearable to read — "have I already said this?" — can live in the Watcher,
+ * where it survives across polls. Assert them apart and the seam is what nobody tests.
+ */
+describe("the Watcher's letterbox suppression", () => {
+    function watcherOver(poll: () => Promise<number>): Watcher {
+        return new Watcher({
+            things,
+            driver: { advance: async () => {} } as unknown as LoopDriver,
+            maxBirthsPerHour: 10,
+            scheduleTimezone: "Europe/Berlin",
+            birth: async () => "",
+            pollMailbox: poll,
+            // Zero, so every scan polls: the interval is not what this test is about.
+            mailPollIntervalMs: 0,
+        });
+    }
+
+    it("logs one error for an outage that spans many polls, and one line when it recovers", async () => {
+        await seedOperation(true);
+        const errors = vi.spyOn(log, "error").mockImplementation(() => {});
+        const infos = vi.spyOn(log, "info").mockImplementation(() => {});
+
+        let reachable = false;
+        const watcher = watcherOver(async () => {
+            if (!reachable) throw new MailboxUnreachable(new Error("ECONNREFUSED"));
+            return 0;
+        });
+
+        for (let poll = 0; poll < 5; poll++) await watcher.scan();
+
+        const complaints = errors.mock.calls.filter(([message]) => message === "could not read the letterbox");
+        expect(complaints).toHaveLength(1);
+
+        reachable = true;
+        await watcher.scan();
+        await watcher.scan();
+
+        const recoveries = infos.mock.calls.filter(([message]) => message === "the letterbox is reachable again");
+        expect(recoveries).toHaveLength(1);
+
+        errors.mockRestore();
+        infos.mockRestore();
     });
 });

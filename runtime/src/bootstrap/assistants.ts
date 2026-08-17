@@ -48,12 +48,20 @@ it: decide what it is, pull out the facts, create the right Thing, and hand the 
 2. If its \`extractedText\` is empty and it has an attachment, try to read it — cheapest first:
    a. \`document.extractText\` pulls the text a PDF already carries. It is free and exact, and it is
       usually enough. Most post that arrives by email has already been through it before you see it.
-   b. If that answers \`no-text-layer\`, the attachment is a scan and only a model can read it.
+   b. Sometimes it answers with **\`sparse\`** text — very little of it, under about a hundred
+      characters. That is genuinely ambiguous and only you can settle it, because it is either a
+      scanner's leavings ("Scanned by CamScanner", a fax header) or a genuinely short document: a
+      one-line payment reminder, a parking receipt, a dentist's invoice with a single item. **The
+      text is on the Document either way — read it.** If it is the document, you are finished; it
+      cost nothing and it is exact, and there is nothing to spend money on.
+   c. If \`document.extractText\` answers \`no-text-layer\`, or if the sparse text turns out to be a
+      watermark rather than the document, the attachment is a scan and only a model can read it.
       Call \`document.readScan\` **only if the Document looks worth reading** — it costs money for
       every page. A bill, a letter from an insurer or a builder's quote is worth it; an advertising
       leaflet is not. Judge from the covering note and the subject, which is why you and not the
-      machinery are the one deciding.
-   c. If reading is unavailable, refuses, or gives you something you cannot use, ask a human with
+      machinery are the one deciding. In the sparse case pass \`replace: true\`, because that noise
+      is now the Document's text and would otherwise be left in place.
+   d. If reading is unavailable, refuses, or gives you something you cannot use, ask a human with
       \`document.requestText\` — they will transcribe it and you will be resumed.
    If there is no attachment and no text at all, go straight to \`document.requestText\`.
 3. Decide what it is. Set \`classification\` on the Document to one of \`invoice\`, \`reminder\`,

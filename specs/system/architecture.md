@@ -544,11 +544,16 @@ Two Implementations and one narrow port. `document.extractText` (`readers/textLa
 arrival, between uploading the binary and creating the Document, so the Document materialises already
 classifiable and no Turn is spent discovering that it was not. Calling it through the registry instead
 would mean constructing an `OperationContext` with a fabricated conversation id inside an idempotency
-key — the same refusal `inbound/server.ts` already makes. "Has a text layer" is a threshold
-(`MIN_TEXT_CHARS`, 100) rather than a test for zero, because a scanner watermark or a fax gateway's
-page number yields a handful of stray characters, and being lenient here hands the Receptionist twelve
-characters of noise to classify from. `no-text-layer` comes back as a *value*, not an error: it is the
-expected outcome on a scan and it is what tells the Receptionist to try the next rung.
+key — the same refusal `inbound/server.ts` already makes. The reader never discards what it extracts:
+below `SPARSE_TEXT_CHARS` (100) it returns the text *and* flags it `sparse`, because a scanner
+watermark and a one-line payment reminder are the same length and no threshold can tell them apart —
+the Receptionist reads the characters and decides, which is where this system keeps judgement. (It
+was a hard gate at first, calibrated against two fixtures, and it binned 84-character invoices;
+[read-the-attachment](../changes/read-the-attachment/architecture.md) records what that cost.)
+`no-text-layer` is reserved for a document with no characters at all, and comes back as a *value*,
+not an error: it is the expected outcome on a scan and it is what tells the Receptionist to try the
+next rung. An optional `maxPages` bounds decode time for the ingest, which reads inside the scan
+loop, and a capped read reports `truncated` so a partial extraction cannot pass for a whole one.
 
 `document.readScan` sends the PDF to the model named by `llm.json`'s `vision` key, through a second,
 deliberately tiny port — `llm/vision.ts`, `available` plus `read()` — rather than by widening

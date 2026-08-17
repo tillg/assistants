@@ -22,11 +22,39 @@
  * incoming folder, including spam, because a poll takes at most `maxPerPoll` messages and
  * accumulated junk would otherwise starve the invoice behind it.
  *
+ * **The move is not part of the ingest.** Whatever a message turned out to be — processed, rejected
+ * or failed — the move that files it happens *outside* the block that decided so, in a `try` of its
+ * own. A transient IMAP error on that last statement is not a reason to re-file a message somewhere
+ * it does not belong: the message simply stays in `incoming`, the next poll re-reads it, the
+ * `ExternalRef` query skips every Document already created, and it is moved then. A move that
+ * failed is therefore self-healing; a move to the *wrong* folder is not, because nothing ever looks
+ * in `processed` or `rejected` again.
+ *
  * **Failure is contained at three levels**, because this scan rides in the loop that also keeps
  * Conversations moving: one Document's failure fails its message, one message's failure never
- * aborts the batch, and the whole ingest catches everything and returns a summary rather than
- * throwing. There is no backoff state and no circuit breaker — the next poll is a minute away,
- * which *is* the backoff.
+ * aborts the batch, and one message's failure to *move* is neither. There is no backoff state and
+ * no circuit breaker — the next poll is a minute away, which *is* the backoff.
+ *
+ * **One poll, one connection.** The whole of a poll — the folder check, the fetch, and every move
+ * it decides on — runs inside a single `connector.session(...)`. Each of those used to open, log in
+ * and log out on its own, which at `maxPerPoll: 20` is `2 + N` = 22 TLS handshakes and 22 IMAP
+ * logins a minute against a provider that throttles rapid reconnects — with twenty handshake-plus-
+ * login latencies sitting *inside* the scan loop that also keeps Conversations moving. Nothing about
+ * the session outlives the poll, so a connection that dies mid-poll fails that poll and the next one
+ * starts fresh a minute later: the same failure mode, at a twentieth of the handshakes.
+ *
+ * **A message too large to download is filed, not ignored.** `fetchBatch` names the messages it
+ * declined to fetch on the server's own `RFC822.SIZE`, and they are the one category that does not
+ * reach {@link handleMessage} at all — there are no bytes to decide anything from. Left alone they
+ * would stay in the incoming folder and be declined again every minute for ever, and because a poll
+ * takes at most `maxPerPoll` messages they would eventually crowd the User's actual invoices out of
+ * the batch. So they are moved to `failed`, which is a folder a human reads, and counted there.
+ *
+ * **A wholesale failure is the one thing that leaves here as an exception.** Cannot connect, cannot
+ * authenticate, cannot list the folders: nothing was attempted, no message has an outcome, and the
+ * Watcher — which is the only thing that can remember one outage across polls — is the right place
+ * to decide how often to say so. Everything per-message stays non-fatal and is reported in the
+ * summary, exactly as before. See {@link MailboxUnreachable}.
  */
 
 import { createHash } from "node:crypto";
@@ -40,10 +68,12 @@ import {
     type FetchedMessage,
     type IncomingDocument,
     type IncomingMessage,
+    type MailSession,
+    type OversizedMessage,
 } from "../connectors/email.js";
 import type { DocumentThing, Operation } from "../domain/types.js";
 import { describeError, log } from "../log.js";
-import { readTextLayer } from "../readers/textLayer.js";
+import { readTextLayer, SPARSE_TEXT_CHARS } from "../readers/textLayer.js";
 
 /**
  * `Document_DM` plus its attachment group.
@@ -81,13 +111,85 @@ const MAX_FIELD_LENGTH = 200;
 const MAX_SEARCHABLE_LENGTH = 100;
 
 /**
+ * How much extracted text a Document may carry.
+ *
+ * `Document_DM.ExtractedText` has no `maxLength`, which reads as "no limit" and is in fact a limit
+ * paid by somebody else: the Receptionist is woken by a Document and the Document's text goes into
+ * the prompt of the very next Turn. A forwarded 500-page contract would therefore be extracted in
+ * full inside the scan loop, stored whole, and then billed per token on arrival — for a household
+ * whose actual post is an invoice of a few kilobytes.
+ *
+ * 20,000 characters is roughly 5,000 tokens: comfortably more than any household document anybody
+ * has ever forwarded here, and small enough that a pathological one cannot dominate a Turn. It is a
+ * ceiling for the absurd case, not a budget the ordinary case is meant to feel.
+ */
+export const MAX_EXTRACTED_TEXT_LENGTH = 20_000;
+
+/**
+ * Said *in the stored text*, not only in the log.
+ *
+ * A Document whose text stops mid-sentence is read — by a human and by a model — as a document that
+ * ends there, and the model will classify from it confidently. Saying so is the same courtesy the
+ * Connector already pays with its oversized-attachment note.
+ */
+const TRUNCATION_NOTE = `\n\n[This text was truncated at ${MAX_EXTRACTED_TEXT_LENGTH} characters; the rest was not stored.]`;
+
+/**
+ * How many pages of a forwarded PDF arrival may decode.
+ *
+ * **This is not a duplicate of {@link MAX_EXTRACTED_TEXT_LENGTH}, and deleting either one because
+ * "there are two caps" breaks something.** They bound different quantities:
+ *
+ *   - `MAX_EXTRACTED_TEXT_LENGTH` bounds what is **stored and prompted with**. It is paid by the
+ *     Receptionist, per token, on the very next Turn.
+ *   - `ARRIVAL_MAX_PAGES` bounds what is **decoded**, in the scan loop, before a single character is
+ *     stored. That cost is paid in wall-clock time by every other scan in the same loop, and by
+ *     `health.ts`, which calls the Runtime stale after ninety seconds.
+ *
+ * A document can be short in pages and vast in characters, or five hundred pages of almost nothing.
+ * Twenty pages matches the generosity `readScan` extends to household post (whose own cap is 10),
+ * finishes a text-layer decode in well under a second, and stops a forwarded prospectus.
+ */
+export const ARRIVAL_MAX_PAGES = 20;
+
+/**
+ * Said in the stored text, for the same reason {@link TRUNCATION_NOTE} is.
+ *
+ * A Document whose text stops at page twenty of five hundred and does not say so reads — to a human
+ * and to a model — as a document that ends there, and the model will classify from it confidently.
+ */
+function pageTruncationNote(pagesRead: number, pages: number): string {
+    return `\n\n[Only the first ${pagesRead} of ${pages} pages were read on arrival; the rest was not extracted.]`;
+}
+
+/**
+ * The mailbox could not be reached, authenticated with, or listed.
+ *
+ * The one failure this module raises rather than reports, because it is the only one that is *not*
+ * about a message: nothing was fetched, so no message has an outcome and the summary has nothing to
+ * say. It exists as a type so the Watcher can tell it apart from a bug in this file, and so a
+ * mailbox that has been down for an hour costs one log line rather than sixty.
+ */
+export class MailboxUnreachable extends Error {
+    constructor(cause: unknown) {
+        super(`the letterbox could not be read: ${describeError(cause)}`);
+        this.name = "MailboxUnreachable";
+        this.cause = cause;
+    }
+}
+
+/**
  * The mailbox, narrowed to what the ingest uses.
  *
  * Derived from {@link EmailConnector} rather than written out, so it cannot drift from the class,
  * and structural rather than nominal so a test can hand over an in-memory mailbox instead of
  * standing up an IMAP server for a decision that has nothing to do with the protocol.
+ *
+ * Only `session` is called from here; the other three are kept in the type because they are what a
+ * session *is*, and narrowing to `session` alone would let a fake satisfy the ingest while being
+ * unable to satisfy anything else that holds a mailbox.
  */
-export type MailConnector = Pick<EmailConnector, "fetch" | "move" | "ensureFolders">;
+export type MailConnector = Pick<EmailConnector, "fetch" | "fetchBatch" | "move" | "ensureFolders" | "session">;
 
 /** The Content Store, narrowed the same way and for the same reason. */
 export type AttachmentUploader = Pick<ContentStoreClient, "upload">;
@@ -106,7 +208,11 @@ export interface MailIngestDeps {
  * retried is the ordinary case, not an exception.
  */
 export interface MailIngestSummary {
-    /** Messages read out of the incoming folder. Never more than `maxPerPoll`. */
+    /**
+     * Messages whose bytes were actually read out of the incoming folder. Never more than
+     * `maxPerPoll`, and never counting the ones that were too large to download — those were
+     * considered and declined, not read, and they are counted in `failed`.
+     */
     fetched: number;
     /** Messages whose sender is on nobody's list. Nothing was read and nothing created. */
     rejected: number;
@@ -114,7 +220,10 @@ export interface MailIngestSummary {
     created: number;
     /** Documents that were already there under this `ExternalRef`. */
     skipped: number;
-    /** Messages that threw. Their Documents that did land stay landed. */
+    /**
+     * Messages that threw, plus the ones that were never downloaded because they were too large.
+     * Both end in the `failed` folder for a human to look at; Documents that did land stay landed.
+     */
     failed: number;
 }
 
@@ -147,11 +256,27 @@ function bareAddress(value: string): string {
 /**
  * One poll of the letterbox.
  *
- * Returns a summary and never throws: an unreachable mailbox, a refused password or a mailbox
- * serving garbage must not take the scans that keep already-running Conversations moving with it.
+ * **Per-message failure returns; wholesale failure throws.** Anything that happens to *a message*
+ * — a refused upload, unparseable MIME, a move that would not go through — is contained, counted
+ * and reported in the summary, because the other messages in the batch are unaffected and the
+ * scans that keep already-running Conversations moving have nothing to do with any of it.
+ *
+ * A failure *before the first message* is a different fact: the host is down, the password was
+ * refused, the folder list could not be read. Nothing was attempted, so there is nothing to
+ * summarise, and — the reason this is not swallowed here — the state that makes such a failure
+ * bearable to read is "have I already said this?", which lives across polls and therefore in the
+ * Watcher. Swallowing it here logged `ERROR the mail ingest failed` once a minute, for ever, and
+ * left the Watcher's once-per-outage suppression as unreachable code. It leaves as a
+ * {@link MailboxUnreachable}.
  */
 export async function runMailIngest(deps: MailIngestDeps): Promise<MailIngestSummary> {
-    const summary: MailIngestSummary = { fetched: 0, rejected: 0, created: 0, skipped: 0, failed: 0 };
+    const summary: MailIngestSummary = {
+        fetched: 0,
+        rejected: 0,
+        created: 0,
+        skipped: 0,
+        failed: 0,
+    };
     const { config, connector } = deps;
 
     // The default, and not an error: a household that has not set a mailbox up has no letterbox.
@@ -160,31 +285,61 @@ export async function runMailIngest(deps: MailIngestDeps): Promise<MailIngestSum
 
     try {
         // The switch in the web application, read every poll so turning it off stops the letterbox
-        // without a restart. Before `ensureFolders`, so a switched-off ingest opens no socket at all.
+        // without a restart. Before the session, so a switched-off ingest opens no socket at all.
         if (!(await isSwitchedOn(deps))) return summary;
 
-        // Up front rather than on demand: a missing `failed` label at the moment something fails is
-        // the worst possible time to discover it. Existing folders are left alone.
-        await connector.ensureFolders([
-            config.folderIncoming,
-            config.folderProcessed,
-            config.folderFailed,
-            config.folderRejected,
-        ]);
+        // ONE CONNECTION FOR THE WHOLE POLL. Everything that speaks IMAP happens in here, and the
+        // socket is gone by the time this returns — see the file header for the arithmetic.
+        await connector.session(async (session) => {
+            // Up front rather than on demand: a missing `failed` label at the moment something
+            // fails is the worst possible time to discover it. Existing folders are left alone.
+            await session.ensureFolders([
+                config.folderIncoming,
+                config.folderProcessed,
+                config.folderFailed,
+                config.folderRejected,
+            ]);
 
-        const messages = await connector.fetch(config.folderIncoming, config.maxPerPoll);
-        summary.fetched = messages.length;
+            const { messages, oversized, budgetExhausted } = await session.fetchBatch(
+                config.folderIncoming,
+                config.maxPerPoll,
+            );
 
-        for (const message of messages) {
-            await handleMessage(deps, message, summary);
-        }
+            // A poll that stopped short of `maxPerPoll` because it had spent its byte budget is a
+            // normal, self-correcting event — the rest is still in `incoming` and the next poll
+            // continues — but a silent one is baffling to anybody watching a backlog drain, so it
+            // is said once per poll and at info rather than warn.
+            if (budgetExhausted) {
+                log.info("the letterbox poll spent its byte budget; the rest waits for the next poll", {
+                    folder: config.folderIncoming,
+                    fetched: messages.length,
+                    maxPerPoll: config.maxPerPoll,
+                });
+            }
+
+            // Before the ordinary messages, so that a folder whose head is a wall of undownloadable
+            // mail is being cleared from the first poll rather than after the batch it is blocking.
+            for (const message of oversized) {
+                await fileOversized(deps, session, message, summary);
+            }
+
+            summary.fetched = messages.length;
+            // `handleMessage` is total: every path inside it, including the move, ends in a log line
+            // and a count rather than a throw. That is what makes one message's failure never abort
+            // the batch, and it is why this loop needs no guard of its own — and why nothing it does
+            // can be mistaken for the wholesale failure this `try` is here to catch.
+            for (const message of messages) {
+                await handleMessage(deps, session, message, summary);
+            }
+        });
     } catch (error) {
-        // The mailbox itself, or something before the first message. Logged, and the summary says
-        // what did happen; the next poll is a minute away and is the retry.
-        log.error("the mail ingest failed", { error: describeError(error) });
+        // The mailbox as a whole: could not connect, could not authenticate, could not list the
+        // folders, could not fetch. Wrapped rather than rethrown bare, so the Watcher's handler can
+        // say what kind of failure it is holding.
+        throw new MailboxUnreachable(error);
     }
 
-    if (summary.fetched > 0) {
+    if (summary.fetched > 0 || summary.failed > 0) {
         log.info("polled the letterbox", { ...summary });
     }
     return summary;
@@ -226,7 +381,10 @@ async function isSwitchedOn(deps: MailIngestDeps): Promise<boolean> {
             2,
         );
         const off = found.some((operation) => operation.data.enabled === false);
-        if (off) log.debug("the mail ingest is switched off on its Operation Thing", { key: OPERATION_KEY });
+        if (off)
+            log.debug("the mail ingest is switched off on its Operation Thing", {
+                key: OPERATION_KEY,
+            });
         return !off;
     } catch (error) {
         log.warn("could not read the mail ingest's Operation Thing; polling anyway", {
@@ -238,19 +396,101 @@ async function isSwitchedOn(deps: MailIngestDeps): Promise<boolean> {
 }
 
 /**
- * One message, from parsing to the move that ends it.
+ * One message: decide what it turned out to be, then file it there.
  *
- * The move is the last statement on every path, and each path moves it exactly once — that is the
- * property to preserve if this function is ever edited. A failure to move is caught separately
- * from a failure to ingest, because the two mean different things: the second leaves work undone,
- * and the first leaves a message that will simply be seen again and skipped.
+ * **Two steps, and the split is the correctness argument.** {@link classifyMessage} does all the
+ * work and all the counting, and returns the folder the message belongs in. This function then
+ * moves it — once, on every path, in a `try` of its own that swallows nothing but the move.
+ *
+ * The earlier shape had the move *inside* the catch-all, which quietly made the last statement of
+ * a successful poll able to change its verdict. A transient IMAP error after every Document had
+ * landed filed the message in `assistant/failed` — "tried, threw, gave up", a real inbox for a
+ * human — and counted it `failed`, for a message that had entirely succeeded; and it did the same
+ * to a rejected stranger, collapsing *"not for us"* into *"we broke"* and counting one message in
+ * both `rejected` and `failed`. Neither is self-healing, because nothing ever reads those folders
+ * again.
+ *
+ * What happens now when the move fails is nothing: the message stays in `incoming`, keeps the
+ * outcome it earned, and is seen again next poll — where the `ExternalRef` query skips every
+ * Document already created and the move is retried. A move failure is a log line and never an
+ * ingest failure, because no ingesting failed.
  */
 async function handleMessage(
     deps: MailIngestDeps,
+    session: MailSession,
     fetched: FetchedMessage,
     summary: MailIngestSummary,
 ): Promise<void> {
-    const { config, connector } = deps;
+    const { config } = deps;
+    const destination = await classifyMessage(deps, fetched, summary);
+
+    try {
+        await session.move(fetched.uid, config.folderIncoming, destination);
+    } catch (error) {
+        log.error("a mail could not be moved out of the incoming folder; it stays there for the next poll", {
+            uid: fetched.uid,
+            destination,
+            error: describeError(error),
+        });
+    }
+}
+
+/**
+ * One message the fetch declined to download: say so loudly, and get it out of the way.
+ *
+ * There is nothing to classify — not one byte of the message was read, so neither the allowlist nor
+ * the parser has anything to work with — and that is exactly why it cannot simply be left alone. A
+ * message nobody downloads and nobody files is re-considered on every poll for ever, and since a
+ * poll takes at most `maxPerPoll` candidates, a handful of them at the head of the folder quietly
+ * starves the invoices behind them. So it goes to `failed`, the folder a human reads, and is counted
+ * there: it is not a rejection (nobody said this sender may not write) and it is certainly not a
+ * success.
+ *
+ * The size is the server's own `RFC822.SIZE`, logged next to the uid because "too large" without a
+ * number is not something anybody can act on. The ceiling it exceeded belongs to the Connector,
+ * which is what decides affordability; this file only files the consequence.
+ *
+ * Total, like {@link handleMessage}: a move that will not go through leaves the message where it is
+ * for the next poll, which is the same self-healing behaviour every other move here has.
+ */
+async function fileOversized(
+    deps: MailIngestDeps,
+    session: MailSession,
+    message: OversizedMessage,
+    summary: MailIngestSummary,
+): Promise<void> {
+    const { config } = deps;
+    summary.failed += 1;
+    log.warn("a mail was too large to download; it belongs in the failed folder", {
+        uid: message.uid,
+        from: message.envelopeFrom,
+        size: message.size,
+        limit: "the connector's per-message download ceiling",
+    });
+
+    try {
+        await session.move(message.uid, config.folderIncoming, config.folderFailed);
+    } catch (error) {
+        log.error("an oversized mail could not be moved out of the incoming folder; it stays there", {
+            uid: message.uid,
+            error: describeError(error),
+        });
+    }
+}
+
+/**
+ * What did this message turn out to be? Returns the folder it belongs in, and never throws.
+ *
+ * Every counter the summary carries is incremented here, so "the outcome" and "where it is filed"
+ * are one decision made in one place — and so the move, which cannot change any of it, cannot be
+ * mistaken for part of it.
+ */
+async function classifyMessage(
+    deps: MailIngestDeps,
+    fetched: FetchedMessage,
+    summary: MailIngestSummary,
+): Promise<string> {
+    const { config } = deps;
     try {
         // AUTHORISE FIRST, PARSE SECOND. The envelope address comes off the IMAP FETCH without any
         // MIME being touched, so a stranger's message is declined for the price of a string
@@ -260,9 +500,8 @@ async function handleMessage(
         // untrusted input this system has, and the parser is the largest piece of foreign code it
         // reaches; the less of it a stranger can start, the better.
         if (!isAllowedSender(fetched.envelopeFrom, config.allowedSenders)) {
-            reject(fetched.uid,fetched.envelopeFrom, summary);
-            await connector.move(fetched.uid, config.folderIncoming, config.folderRejected);
-            return;
+            reject(fetched.uid, fetched.envelopeFrom, summary);
+            return config.folderRejected;
         }
 
         const message = await parseMessage(
@@ -270,6 +509,13 @@ async function handleMessage(
             fetched.uid,
             fetched.internalDate,
             config.maxAttachmentBytes,
+            // WITHOUT THIS THE REF IS A COLLISION WAITING TO HAPPEN. A message whose sender omitted
+            // the `Message-ID` is identified by its UID, and an IMAP UID is unique only within one
+            // `(mailbox, UIDVALIDITY)` generation: recreate the `assistant` label and the server
+            // starts at 1 again. The next such message then computes a ref an older, different
+            // message already holds, the `ExternalRef` query below says "already landed", and the
+            // invoice is skipped and filed in `processed` looking like a success.
+            fetched.origin,
         );
 
         // BOTH must be allowed, and the second check is kept rather than replaced. The envelope
@@ -279,34 +525,22 @@ async function handleMessage(
         // the allowlist, they did not mean "and the other one may be anybody". The check costs a
         // string comparison against a message that is already parsed.
         if (!isAllowedSender(message.from, config.allowedSenders)) {
-            reject(fetched.uid,message.from, summary);
-            await connector.move(fetched.uid, config.folderIncoming, config.folderRejected);
-            return;
+            reject(fetched.uid, message.from, summary);
+            return config.folderRejected;
         }
 
         for (const document of message.documents) {
             await ingestDocument(deps, message, document, summary);
         }
 
-        // LAST. See the note at the top of the file.
-        await connector.move(fetched.uid, config.folderIncoming, config.folderProcessed);
+        return config.folderProcessed;
     } catch (error) {
         summary.failed += 1;
-        log.error("a mail could not be ingested; moving it to the failed folder", {
+        log.error("a mail could not be ingested; it belongs in the failed folder", {
             uid: fetched.uid,
             error: describeError(error),
         });
-        try {
-            await connector.move(fetched.uid, config.folderIncoming, config.folderFailed);
-        } catch (moveError) {
-            // Both the ingest and the move failed, which almost always means the mailbox itself is
-            // gone. The message stays where it is and is seen again next poll; whatever Documents
-            // it did produce are skipped then.
-            log.error("a failed mail could not be moved out of the incoming folder", {
-                uid: fetched.uid,
-                error: describeError(moveError),
-            });
-        }
+        return config.folderFailed;
     }
 }
 
@@ -317,7 +551,10 @@ async function handleMessage(
  * household's log, and after the envelope check there is not even a parsed subject to log.
  */
 function reject(uid: number, from: string, summary: MailIngestSummary): void {
-    log.info("a mail from a sender who is not on the allowlist was rejected", { uid, from });
+    log.info("a mail from a sender who is not on the allowlist was rejected", {
+        uid,
+        from,
+    });
     summary.rejected += 1;
 }
 
@@ -347,7 +584,9 @@ async function ingestDocument(
         1,
     );
     if (existing.length > 0) {
-        log.debug("a Document for this mail is already in the store", { externalRef });
+        log.debug("a Document for this mail is already in the store", {
+            externalRef,
+        });
         summary.skipped += 1;
         return;
     }
@@ -361,7 +600,7 @@ async function ingestDocument(
         );
     }
 
-    const extractedText = await withTextLayer(document);
+    const extractedText = cappedText(await withTextLayer(document));
 
     await deps.things.create(DOCUMENT_WITH_ATTACHMENT, {
         title: capped(document.title, MAX_FIELD_LENGTH),
@@ -404,6 +643,9 @@ async function ingestDocument(
  *   - **Arrival may translate; arrival may not spend.** No vision, no OCR, nothing that costs money
  *     — the text layer is the free rung of the ladder, and the free rung is the only one the post
  *     may take on its own.
+ *   - **Arrival may not take the loop with it.** The decode is bounded at {@link ARRIVAL_MAX_PAGES}
+ *     pages — a bound on *work*, distinct from {@link MAX_EXTRACTED_TEXT_LENGTH}'s bound on
+ *     *payload* — and a read that was cut short says so in the text it returns.
  */
 async function withTextLayer(document: IncomingDocument): Promise<string> {
     const attachment = document.attachment;
@@ -411,14 +653,21 @@ async function withTextLayer(document: IncomingDocument): Promise<string> {
     if (document.extractedText.trim() !== "") return document.extractedText;
 
     try {
-        const outcome = await readTextLayer(attachment.bytes);
+        const outcome = await readTextLayer(attachment.bytes, SPARSE_TEXT_CHARS, ARRIVAL_MAX_PAGES);
         if (outcome.kind === "text") {
             log.debug("read a forwarded PDF's text layer on arrival", {
                 filename: attachment.filename,
                 pages: outcome.pages,
+                pagesRead: outcome.pagesRead,
                 characters: outcome.text.length,
+                // Reported, never acted on here: whether 84 characters are a parking receipt or a
+                // scanner's leavings is the Receptionist's judgement, and it has the Document.
+                sparse: outcome.sparse,
+                truncated: outcome.truncated,
             });
-            return outcome.text;
+            return outcome.truncated
+                ? `${outcome.text}${pageTruncationNote(outcome.pagesRead, outcome.pages)}`
+                : outcome.text;
         }
         log.debug("a forwarded PDF has no text layer to read on arrival", {
             filename: attachment.filename,
@@ -452,6 +701,28 @@ function storableRef(externalRef: string): string {
         digest,
     });
     return `mail-digest:${digest}`;
+}
+
+/**
+ * The Document's text, bounded — and told so, in the text itself.
+ *
+ * Unlike `Title` and `ExternalRef`, this is not capped because the store would refuse it: it is
+ * capped because the Receptionist reads it on the very next Turn and pays per token for whatever
+ * it finds. `capped()` cannot do this job: it ends with an ellipsis, which reads as an editorial
+ * trailing-off rather than as a limit, and the note is the whole point.
+ *
+ * Kept whole when it fits, which is every ordinary invoice and every covering note anybody has
+ * written. The note is appended *after* the cut, so a truncated Document is slightly over the
+ * ceiling — deliberately: rounding the ceiling down to fit an explanation would be arithmetic
+ * nobody could reconstruct from the stored value.
+ */
+function cappedText(value: string): string {
+    if (value.length <= MAX_EXTRACTED_TEXT_LENGTH) return value;
+    log.info("a mail's extracted text was longer than a Turn can afford; it was truncated", {
+        characters: value.length,
+        keptCharacters: MAX_EXTRACTED_TEXT_LENGTH,
+    });
+    return `${value.slice(0, MAX_EXTRACTED_TEXT_LENGTH)}${TRUNCATION_NOTE}`;
 }
 
 function capped(value: string, maxLength: number): string {

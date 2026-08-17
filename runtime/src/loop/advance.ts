@@ -1190,9 +1190,20 @@ function recordUsage(entry: Entry, usage: LlmUsage | undefined): void {
  * What an Operation reports having spent on a model of its own, or nothing.
  *
  * The value is whatever the Operation chose to return, so this narrows rather than casts: a result
- * with no `usage`, or one whose `usage` is not two finite numbers, changes nothing at all. Silently
- * recording a wrong number would be worse than recording none, since the whole point of the figure
- * is that it can be trusted as a floor.
+ * with no `usage`, or one whose `usage` is not two finite non-negative numbers, changes nothing at
+ * all. Silently recording a wrong number would be worse than recording none, since the whole point
+ * of the figure is that it can be trusted as a floor.
+ *
+ * Negative is the case worth naming. `Number.isFinite(-999999)` is `true`, so a `usage` block with
+ * a negative count would pass a finiteness check and then *subtract* from the Turn — turning the
+ * lower bound a Conversation's cost is documented to be into a number below the truth, which is the
+ * one failure mode the floor exists to rule out. D-054 supports pointing a profile at a local
+ * server, and an odd `usage` block is likeliest to come from exactly there.
+ *
+ * A partially-bad pair contributes **nothing**, not its good half. The two numbers come from one
+ * report by one Operation, and an Operation that got one of them wrong has given no reason to
+ * believe the other; half a pair recorded as a whole one reads, downstream, as a Turn that
+ * genuinely spent zero completion tokens rather than as a report that was not trustworthy.
  */
 function operationUsage(value: unknown): LlmUsage | undefined {
     if (typeof value !== "object" || value === null) return undefined;
@@ -1202,8 +1213,16 @@ function operationUsage(value: unknown): LlmUsage | undefined {
         promptTokens?: unknown;
         completionTokens?: unknown;
     };
-    if (typeof promptTokens !== "number" || !Number.isFinite(promptTokens)) return undefined;
-    if (typeof completionTokens !== "number" || !Number.isFinite(completionTokens)) return undefined;
+    if (typeof promptTokens !== "number" || !Number.isFinite(promptTokens) || promptTokens < 0) {
+        return undefined;
+    }
+    if (
+        typeof completionTokens !== "number" ||
+        !Number.isFinite(completionTokens) ||
+        completionTokens < 0
+    ) {
+        return undefined;
+    }
     return { promptTokens, completionTokens };
 }
 

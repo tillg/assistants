@@ -15,6 +15,23 @@ _Avoid_: OCR layer, embedded text, searchable text
 It is a property of the bytes, not of the Thing. Nothing records it, because asking the bytes is
 cheaper and always current.
 
+**Sparse Text Layer**
+: A text layer with very little in it — under ~100 characters across the whole document. It is
+*either* a scanner's leavings (`Scanned by CamScanner`, a fax gateway's page number) *or* a genuinely
+short document (a one-line payment reminder, a parking receipt, a dentist's invoice with one item).
+The two are indistinguishable by length, so *sparse* is a **report, not a verdict**: the reader says
+how little it found and hands over every character of it; the Receptionist reads it and decides.
+_Avoid_: noise, watermark-only, empty-ish
+
+We first got this wrong. The reader tested `length < 100` and returned `no-text-layer` with the text
+**thrown away** — a rule calibrated against exactly two fixtures, a 21-character watermark and a
+576-character utility invoice, which do sit either side of 100 but are not a population. Measured
+against ordinary born-digital post, a dentist's invoice is 84 characters, a payment reminder 44 and a
+parking receipt 49 — all free, all exact, all binned, and each one then sent to a paid vision model
+*that can invent an amount* to recover a number the file had already stated. Both directions of that
+mistake are harmful, and a single boolean could only ever express one of them. Hence a shape that
+carries both facts, and a threshold that has stopped being a gate.
+
 ## The distinction: reading is two different acts
 
 The system has one word — *reading* — for two acts with opposite economics. Naming them apart is the
@@ -41,13 +58,17 @@ keep the other, and the User can put an approval on the one that spends.
 ```mermaid
 flowchart TB
     D["Document<br/>attachment, no extractedText"]
-    D --> E{"has a text layer?"}
-    E -->|yes| X["extraction<br/>free · exact · deterministic"]
+    D --> E{"any text at all?"}
+    E -->|yes| X["extraction<br/>free · exact · deterministic<br/>stored either way"]
     E -->|no| R{"worth spending on?"}
+    X --> S{"sparse?"}
+    S -->|no| C["classification"]
+    S -->|"yes — the Receptionist<br/>reads it and judges"| J{"is that the document?"}
+    J -->|yes| C
+    J -->|"no, it is scanner noise"| R
     R -->|"the Receptionist decides"| V["recognition<br/>costs money · approximate"]
     R -->|no| H
     V -->|"unavailable or failed"| H["ask the User<br/>document.requestText — ships today"]
-    X --> C["classification"]
     V --> C
     H --> C
 
@@ -65,6 +86,7 @@ is judgement.** This change tests that line by putting something on each side of
 |---|---|---|
 | **extraction** | **arrival** | deterministic, free, no decision. Bytes to text is the same category of work as MIME to Document |
 | **recognition** | **classification** | it spends the household's money, and *"is this worth reading?"* has no correct answer that does not look at the Document |
+| **judging a sparse text layer** | **classification** | *"are these 84 characters the invoice or the scanner's watermark?"* is judgement, and judgement is not arrival's. Arrival extracts and stores whatever it finds; whether it is the document is decided where the covering note and the subject line are |
 
 So the seam holds, and it now carries a sharper rule:
 

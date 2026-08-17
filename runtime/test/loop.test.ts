@@ -917,6 +917,20 @@ describe("what a Turn cost (#6)", () => {
             expect(await tokensAfter({ usage: "quite a lot" })).toEqual([0, 0]);
             expect(await tokensAfter({ usage: { promptTokens: "1200" } })).toEqual([0, 0]);
         });
+
+        it("ignores a negative count, which would otherwise subtract from the Turn", async () => {
+            // `Number.isFinite(-999999)` is true, so finiteness alone lets this through — and a
+            // recorded figure below the truth is the one thing a floor may never be.
+            expect(await tokensAfter({ usage: { promptTokens: -999999, completionTokens: -1 } }))
+                .toEqual([0, 0]);
+        });
+
+        it("takes neither half of a pair when one half is negative", async () => {
+            // Deliberate: one report, one Operation. Getting one number wrong is no reason to
+            // believe the other, and half a pair would read downstream as a genuine zero.
+            expect(await tokensAfter({ usage: { promptTokens: 1200, completionTokens: -5 } }))
+                .toEqual([0, 0]);
+        });
     });
 });
 
