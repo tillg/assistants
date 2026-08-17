@@ -221,6 +221,29 @@ export LLM_BASE_URL=https://api.openai.com/v1   # optional; any OpenAI-compatibl
 a compose-level environment variable rather than a constructor argument, on purpose
 ([D-002](DECISIONS.md)).
 
+**`Assistant.LlmModel` overrides `LLM_MODEL`.** The environment variable is only the default; each
+Assistant carries its own model on its Thing, and that is what the Turn uses. Changing the variable
+alone leaves both seeded Assistants asking for `gpt-4o-mini`, which a gateway that does not serve it
+answers with a 404 — recorded as an error on the Conversation, which is how it announces itself.
+
+#### Against a local model
+
+Any OpenAI-compatible server works — the endpoint is the only thing that has to be true. Two settings
+are not optional in that case, and both were learned the hard way ([D-054](DECISIONS.md)):
+
+```
+export LLM_BASE_URL=http://host.docker.internal:8000/v1   # NOT 127.0.0.1: the Runtime is in a container
+export LLM_TEMPERATURE=0
+```
+
+`LLM_TEMPERATURE` is sent only when set, so the provider's own default stands otherwise. A quantized
+model needs `0` to emit **structured** tool calls: at its default temperature it writes the call as
+prose instead, which the Runtime now catches and retries rather than mistaking for an answer.
+
+Completions are bounded at 4096 tokens, as the Anthropic provider has always bounded them. Without a
+bound a local server's own default applies — 32768 is common, which at a quantized model's speed is
+several minutes inside a single Turn, long enough to stall the scan that owns it.
+
 ### Schedules and the timezone they are read in
 
 `SCHEDULE_TIMEZONE` in `.env` (default `Europe/Berlin`) is the timezone every Assistant's `cron` is
