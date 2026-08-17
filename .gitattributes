@@ -5,3 +5,11 @@
 # Declare files that will always have LF line endings on checkout
 *.sh text eol=lf
 *.generated.ts text eol=lf
+
+# Mail fixtures are RFC 5322, which specifies CRLF. `* text=auto` normalised them to LF on the way
+# into the object database, so a fresh clone got files that were not the ones the tests were written
+# against — MIME boundary and base64 handling both depend on the exact bytes. `-text` means no
+# conversion in either direction, which for a fixture is the only correct answer.
+*.eml -text
+# Same reasoning, less subtly: a PDF is bytes.
+*.pdf -text
