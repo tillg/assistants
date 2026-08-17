@@ -232,3 +232,28 @@ currently carries uncommitted work from two sessions — is how a safety check b
 is a small, well-understood change and it should be made deliberately, with the suite watched. The
 alternative fix, weakening the comment to match the code, would be the wrong way round: the comment
 describes the property that is actually wanted.
+
+### B-11 — the e2e suite was testing whichever application answered first · FIXED
+
+Found by the parallel session, fixed here. `e2e/utils/config.ts` defaulted all four service URLs to
+`localhost`. Compose binds every published port to `127.0.0.1` — IPv4 only — and macOS resolves
+`localhost` to `::1` first. So **any process holding the IPv6 wildcard on one of those ports shadows
+the container**, and the suite silently tests it instead.
+
+Not hypothetical. A webpack dev server left listening on `*:8081` since that morning meant
+`localhost:8081` answered from a live-compiled bundle while `127.0.0.1:8081` answered from the image
+`just build` had produced. Two applications, one URL, and the peer session established it by reading
+six healthy tiles and then screenshotting a "Failed to compile" overlay two seconds later.
+
+The failure mode is both silent and flattering: the suite passes, and what it passed against is not
+what ships. All four URLs were vulnerable, not only `BASE_URL`; 8081 was simply the one with a
+squatter. The reason is written next to the value, because a bare `127.0.0.1` reads like a style
+preference and will eventually be tidied back into `localhost` by somebody being helpful.
+
+`e2e/build.gradle:47` hardcodes the same thing and was **left alone** — it belongs to the other
+session's tier and was mid-run.
+
+**The dev server was not killed.** It had `PPID 1` and a start time thirteen hours before either
+session began, which makes it the User's own process. Two agents agreeing to kill a human's
+long-running process at midnight is not a call either of them should make, and the config fix
+removes the problem without touching it.
