@@ -1,0 +1,9 @@
+From: Telco <billing@telco.example>
+To: receptionist@example.com
+Subject: Ihre Mobilfunkrechnung
+Date: Thu, 15 Jan 2026 06:00:00 +0000
+Message-ID: <html-only@telco.example>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<html><body><h1>Rechnung</h1><p>Betrag: <b>19,99 EUR</b></p></body></html>

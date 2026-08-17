@@ -1,0 +1,8 @@
+From: Kleiner Anbieter <shop@anbieter.example>
+To: receptionist@example.com
+Subject: Bestellbestaetigung
+Date: Mon, 02 Mar 2026 12:00:00 +0100
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Danke fuer Ihre Bestellung.

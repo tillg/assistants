@@ -26,9 +26,13 @@
     "undici": "^7.10.0"
   },
   "devDependencies": {
+    "@types/mailparser": "^3.4.6",
     "@types/node": "^24.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^3.2.4"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.0"
   }
 }

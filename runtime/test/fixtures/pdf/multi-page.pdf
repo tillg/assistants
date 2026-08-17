@@ -1,0 +1,87 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>
+endobj
+5 0 obj
+<< /Length 416 >>
+stream
+BT
+/F1 11 Tf
+14 TL
+56 780 Td
+(Kontoauszug Nr. 3 / 2026) Tj
+T*
+(Seite 1 von 2) Tj
+T*
+() Tj
+T*
+(Sparkasse Koeln-Bonn, Kontonummer 1234567890) Tj
+T*
+(Auszugszeitraum: 01.03.2026 bis 31.03.2026) Tj
+T*
+(Alter Kontostand: 2.415,88 EUR) Tj
+T*
+() Tj
+T*
+(02.03. Dauerauftrag Miete            -980,00 EUR) Tj
+T*
+(05.03. Gehalt Arbeitgeber GmbH      3.210,45 EUR) Tj
+T*
+(11.03. Lastschrift Stadtwerke        -106,60 EUR) Tj
+ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >>
+endobj
+7 0 obj
+<< /Length 377 >>
+stream
+BT
+/F1 11 Tf
+14 TL
+56 780 Td
+(Kontoauszug Nr. 3 / 2026) Tj
+T*
+(Seite 2 von 2) Tj
+T*
+() Tj
+T*
+(18.03. Kartenzahlung Supermarkt       -84,17 EUR) Tj
+T*
+(24.03. Ueberweisung Versicherung     -132,00 EUR) Tj
+T*
+(29.03. Lastschrift Telefon            -39,99 EUR) Tj
+T*
+() Tj
+T*
+(Neuer Kontostand: 4.283,57 EUR) Tj
+T*
+(Bitte pruefen Sie den Auszug innerhalb von sechs Wochen.) Tj
+ET
+endstream
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000121 00000 n 
+0000000191 00000 n 
+0000000317 00000 n 
+0000000783 00000 n 
+0000000909 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R >>
+startxref
+1336
+%%EOF

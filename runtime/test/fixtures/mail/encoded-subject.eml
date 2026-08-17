@@ -1,0 +1,9 @@
+From: Versorger <post@versorger.example>
+To: receptionist@example.com
+Subject: =?UTF-8?Q?Rechnung_f=C3=BCr_M=C3=A4rz?=
+Date: Sun, 01 Mar 2026 07:00:00 +0100
+Message-ID: <encoded-subject@versorger.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Der Betrag wird eingezogen.

@@ -1,0 +1,22 @@
+From: Steuerberater <kanzlei@example.org>
+To: receptionist@example.com
+Subject: Kurze Rueckfrage
+Date: Fri, 16 Jan 2026 11:45:00 +0100
+Message-ID: <sig-inline@example.org>
+MIME-Version: 1.0
+Content-Type: multipart/related; boundary="b3"
+
+--b3
+Content-Type: text/plain; charset=utf-8
+
+Bitte um kurze Rueckmeldung.
+
+--b3
+Content-Type: image/png
+Content-Transfer-Encoding: base64
+Content-ID: <logo@example.org>
+Content-Disposition: inline
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4nGNgAAACAAEABf4C/qcA
+AAAASUVORK5CYII=
+--b3--

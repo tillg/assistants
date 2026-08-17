@@ -111,6 +111,48 @@ export interface Config {
      * nothing, which is the right default for a list that grants access.
      */
     readonly clientCallable: readonly string[];
+
+    /**
+     * The letterbox. Grouped rather than flattened into ten more fields on `Config`, because the
+     * mail ingest takes the whole of it as one argument and nothing else in the process wants any
+     * part of it — the grouping is what the code actually passes around.
+     */
+    readonly mail: MailConfig;
+
+    /**
+     * Reading a scan costs money per page, so both caps live here rather than in the reader.
+     *
+     * Which *model* does the reading is not here: that is `llm.json`'s `vision` profile, for the
+     * same reason the active model is not an environment variable — a second endpoint should be a
+     * named entry one switch away, not a second set of exports.
+     */
+    readonly visionMaxPages: number;
+    readonly visionMaxBytes: number;
+}
+
+export interface MailConfig {
+    /** Empty means the scan never runs. The default, and not an error. */
+    readonly host: string;
+    readonly port: number;
+    readonly user: string;
+    readonly password: string;
+    /** The only folder the ingest reads. A Gmail label, seen through IMAP as a folder. */
+    readonly folderIncoming: string;
+    readonly folderProcessed: string;
+    readonly folderFailed: string;
+    readonly folderRejected: string;
+    /**
+     * Who may post to the letterbox. **Empty means nobody**, which is why it is read with
+     * {@link list} and given no fallback.
+     *
+     * A mailbox is the first untrusted input this system has: every other way a Thing comes into
+     * being involves the User typing. A default that failed open on a public address would turn
+     * spam into Conversations and LLM spend on the first day it was misconfigured.
+     */
+    readonly allowedSenders: readonly string[];
+    readonly pollIntervalMs: number;
+    readonly maxPerPoll: number;
+    readonly maxAttachmentBytes: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -158,6 +200,33 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         // startup is the correct behaviour — the alternative is a door that opens quietly.
         inboundSecret: inboundPort === 0 ? "" : required("INBOUND_SECRET"),
         clientCallable: list("CLIENT_CALLABLE_OPERATIONS"),
+
+        mail: {
+            host: optional("MAIL_HOST", ""),
+            port: number("MAIL_PORT", 993),
+            user: optional("MAIL_USER", ""),
+            password: optional("MAIL_PASSWORD", ""),
+            // Gmail nests labels with `/`, and the household's label is `assistant`. These are
+            // configuration rather than constants because the same ingest should work against a
+            // provider that spells its folders differently.
+            folderIncoming: optional("MAIL_FOLDER_INCOMING", "assistant"),
+            folderProcessed: optional("MAIL_FOLDER_PROCESSED", "assistant/processed"),
+            folderFailed: optional("MAIL_FOLDER_FAILED", "assistant/failed"),
+            folderRejected: optional("MAIL_FOLDER_REJECTED", "assistant/rejected"),
+            allowedSenders: list("MAIL_ALLOWED_SENDERS").map((entry) => entry.toLowerCase()),
+            // A minute. `SCAN_INTERVAL_MS` is two seconds, and an IMAP login every two seconds is
+            // abusive enough that several providers rate-limit or lock the account for it.
+            pollIntervalMs: number("MAIL_POLL_INTERVAL_MS", 60_000),
+            maxPerPoll: number("MAIL_MAX_PER_POLL", 20),
+            maxAttachmentBytes: number("MAIL_MAX_ATTACHMENT_BYTES", 25 * 1024 * 1024),
+        },
+
+        // Ten pages is generous for a household invoice and mean for a pension provider's annual
+        // brochure, which is the distinction worth drawing: over the cap it reports a reason, and
+        // never a truncated read. A partial invoice is worse than no invoice, because it looks
+        // complete.
+        visionMaxPages: number("VISION_MAX_PAGES", 10),
+        visionMaxBytes: number("VISION_MAX_BYTES", 16 * 1024 * 1024),
     };
 }
 

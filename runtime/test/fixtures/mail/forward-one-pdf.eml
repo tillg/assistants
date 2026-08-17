@@ -1,0 +1,21 @@
+From: User <user@example.com>
+To: receptionist@example.com
+Subject: Fwd: Zahnarztrechnung
+Date: Tue, 13 Jan 2026 18:02:11 +0100
+Message-ID: <fwd-one@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="b1"
+
+--b1
+Content-Type: text/plain; charset=utf-8
+
+FYI, das ist die Zahnarztrechnung fuer Anna. Schon bezahlt.
+
+--b1
+Content-Type: application/pdf; name="rechnung.pdf"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="rechnung.pdf"
+
+JVBERi0xLjQKJSByZWNobnVuZwoxIDAgb2JqPDw+PmVuZG9iagp0cmFpbGVyPDw+PgolJUVPRgo=
+
+--b1--
