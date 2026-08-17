@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 
 import { ConnectorLocator, type RestRequestPayload, type ServerConnector } from "@com.mgmtp.a12.utils/utils-connector";
 import { LoggerFactory } from "@com.mgmtp.a12.utils/utils-logging";
@@ -166,6 +166,36 @@ describe("useExternalCall", () => {
         const { result } = renderHook(() => useExternalCall("bookkeeping.listAccounts"));
 
         await waitFor(() => expect(result.current.state).toBe("error"));
+    });
+
+    it("says error for a value of null, because a Tile cannot render a list that is not there", async () => {
+        // `null` is a value the Runtime can genuinely produce, and it used to be handed on as *ready*:
+        // the Tile then mapped over it and took the render down.
+        install({ reply: (request) => answered(request.id, null) });
+
+        const { result } = renderHook(() => useExternalCall("bookkeeping.listAccounts"));
+
+        await waitFor(() => expect(result.current.state).toBe("error"));
+    });
+
+    it("gives up after fifteen seconds rather than leaving the Tile loading for ever", async () => {
+        vi.useFakeTimers();
+        try {
+            // A promise that never settles: no rejection, no timeout of its own, nothing to catch.
+            ConnectorLocator.createInstance({
+                fetchData: () => new Promise<Response>(() => {})
+            } as unknown as ServerConnector);
+
+            const { result } = renderHook(() => useExternalCall("bookkeeping.listAccounts"));
+
+            expect(result.current.state).toBe("loading");
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(15_000);
+            });
+            expect(result.current.state).toBe("error");
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("keeps nothing between mounts, so leaving and returning re-asks Firefly", async () => {

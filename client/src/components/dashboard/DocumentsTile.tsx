@@ -97,6 +97,7 @@ export function DocumentsTile() {
             icon={PLACE_ICONS.documents}
             title="Documents"
             state={counts.state}
+            expectsHeadline
             headline={counts.state === "ready" ? counts.counts["total"] : undefined}
             body={
                 counts.state === "ready" ? (

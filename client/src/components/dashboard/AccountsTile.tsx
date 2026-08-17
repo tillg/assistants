@@ -23,7 +23,13 @@ import { useExternalCall } from "./useExternalCall";
  * **No headline.** The obvious candidate is the sum of the balances, and that is precisely the number
  * that cannot be honestly produced once the household holds two currencies. So the sums stay below the
  * rule, one line per currency, and the Tile carries no big figure at all — a headline that appeared and
- * vanished with the shape of the account list would be worse than none.
+ * vanished with the shape of the account list would be worse than none. It passes no `expectsHeadline`
+ * either, so no placeholder is drawn where a number is never going to arrive.
+ *
+ * **What it cannot show, it says.** An empty answer is a line saying so rather than an empty body, which
+ * is indistinguishable from a broken Tile; a row whose currency or balance is unusable is still listed,
+ * but is left out of the totals and the Tile says the totals are short of it. A wrong number here is
+ * worse than a missing one — the household would reconcile against it.
  *
  * **It is a door.** `href` rather than `onOpen`: the books are another application, and a summary is not
  * a way in — a User who reads a balance here and wants to correct it needs Firefly, not a module.
@@ -66,11 +72,27 @@ const TotalRow = styled(Row)`
     font-weight: 600;
 `;
 
+/** An empty body and a broken Tile look identical, so the Tile says which of the two it is. */
+const Nothing = styled.span`
+    color: ${({ theme }) => theme.colors.text.secondaryColor};
+`;
+
+/** A total short of a row is a wrong number unless it says so; it says so where it is read. */
+const Caveat = styled(Nothing)`
+    font-size: 0.9em;
+`;
+
 export function AccountsTile() {
     const accounts = useExternalCall<Account[]>("bookkeeping.listAccounts", { type: "asset" });
 
-    const rows = accounts.state === "ready" ? accounts.data : [];
+    // The hook is handed whatever the Runtime produced, and a body in a shape nobody promised is
+    // *nothing to show* — a `.map` of something that is not a list would take the Dashboard down.
+    const answered = accounts.state === "ready" ? accounts.data : [];
+    const rows = Array.isArray(answered) ? answered : [];
     const sums = totals(rows.map((account) => ({ amount: account.balance, currency: account.currency })));
+    // Every row unusable leaves no total to carry the flag, and that is the most incomplete a read can
+    // be — so it is said here rather than lost between the two.
+    const partial = sums.some((total) => total.partial === true) || (rows.length > 0 && sums.length === 0);
 
     return (
         <DashboardTile
@@ -81,8 +103,13 @@ export function AccountsTile() {
             body={
                 accounts.state === "ready" ? (
                     <>
-                        {rows.map((account) => (
-                            <Row key={account.name} data-role="tile-accounts-account">
+                        {rows.length === 0 && <Nothing data-role="tile-accounts-empty">no accounts</Nothing>}
+                        {/*
+                         * The index is in the key because Firefly permits two accounts of the same name,
+                         * and two rows sharing a key is React dropping or duplicating one of them.
+                         */}
+                        {rows.map((account, index) => (
+                            <Row key={`${account.name}-${index}`} data-role="tile-accounts-account">
                                 <Name>{account.name}</Name>
                                 <Figure>{amount(account.balance, account.currency)}</Figure>
                             </Row>
@@ -93,6 +120,11 @@ export function AccountsTile() {
                                 <Figure>{amount(total.value, total.currency)}</Figure>
                             </TotalRow>
                         ))}
+                        {partial && (
+                            <Caveat data-role="tile-accounts-partial">
+                                some accounts could not be counted; the totals are short of them
+                            </Caveat>
+                        )}
                     </>
                 ) : undefined
             }

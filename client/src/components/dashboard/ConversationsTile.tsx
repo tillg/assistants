@@ -67,6 +67,7 @@ export function ConversationsTile() {
             icon={PLACE_ICONS.conversations}
             title="Conversations"
             state={counts.state}
+            expectsHeadline
             headline={inFlight === undefined ? undefined : `${inFlight} in flight`}
             body={
                 counts.state === "ready" ? (

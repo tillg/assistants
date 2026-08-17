@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { format, parseISO, subDays } from "date-fns";
+import { format, isValid, parseISO, subDays } from "date-fns";
 import styled from "styled-components";
 
 import { PLACE_ICONS } from "../icons";
@@ -20,11 +20,17 @@ import { useExternalCall } from "./useExternalCall";
  * assumption: with no window named, ten rows ending in April would read as a broken read rather than as
  * a quiet quarter.
  *
- * **The amounts are unsigned, and the arrow carries the direction.** The rows Firefly answers with have
- * no `type` — only `from` and `to` — so `money.signed()` has nothing to be given. Inventing a direction
- * from the account names would mean teaching a component the household's chart of accounts, and getting
- * it wrong renders money coming in as money going out. `Payables → Expenses:Health` already says which
- * way it went, and says it without guessing.
+ * **The amounts are rendered as the books hold them, and the arrow carries the direction.** The rows
+ * Firefly answers with have no `type` — only `from` and `to` — so there is no direction to read off a
+ * row. Inventing one from the account names would mean teaching a component the household's chart of
+ * accounts, and getting it wrong renders money coming in as money going out. `Payables →
+ * Expenses:Health` already says which way it went, and says it without guessing. (`money.ts` had a
+ * `signed()` for the shape Firefly does *not* send here; it had no caller and was deleted.)
+ *
+ * **A thin row is still a row.** A date that will not parse is shown as the string the books hold rather
+ * than thrown on, an arrow with nothing either side of it is left out, and an empty window says so —
+ * one unreadable booking must not blank the other nine, and there is no ErrorBoundary to catch it if
+ * it does.
  *
  * **The window is computed once per mount.** `useExternalCall` fingerprints its arguments with
  * `JSON.stringify`, so a `start` recomputed on every render would be a new fingerprint each time only on
@@ -99,6 +105,33 @@ const Figure = styled.span`
     white-space: nowrap;
 `;
 
+/** An empty body and a broken Tile look identical, so the Tile says which of the two it is. */
+const Nothing = styled.span`
+    color: ${({ theme }) => theme.colors.text.secondaryColor};
+`;
+
+/**
+ * The day, or the string the books hold if that is not a day.
+ *
+ * `format(parseISO(""))` throws `RangeError: Invalid time value`, and a throw during render blanks the
+ * Tile — there is no ErrorBoundary in this application. A date that cannot be read is shown as it
+ * arrived: unhelpful, but true, and beside nine rows that are fine.
+ */
+function day(date: string): string {
+    const parsed = parseISO(date ?? "");
+    return isValid(parsed) ? format(parsed, "dd.MM.") : (date ?? "");
+}
+
+/**
+ * The route, with the arrow only where there are two ends for it to join.
+ *
+ * A booking missing its `from` and `to` used to render as a bare `→` with nothing either side, which
+ * reads as a rendering fault rather than as a row the books are thin on.
+ */
+function route(from: string, to: string): string {
+    return [from, to].filter(Boolean).join(" → ");
+}
+
 export function TransactionsTile() {
     // Once per mount, never per render: an unstable argument is a re-fingerprinted effect, which is a
     // read that never settles.
@@ -111,7 +144,9 @@ export function TransactionsTile() {
 
     // The Operation is asked for ten and the Tile shows ten: the cap is stated twice rather than trusted
     // once, because a Tile that quietly grew to thirty rows would push the rest of the Dashboard down.
-    const rows = bookings.state === "ready" ? bookings.data.slice(0, LIMIT) : [];
+    // And an answer that is not a list at all is *nothing to show*, not something to slice.
+    const answered = bookings.state === "ready" ? bookings.data : [];
+    const rows = (Array.isArray(answered) ? answered : []).slice(0, LIMIT);
 
     return (
         <DashboardTile
@@ -125,13 +160,19 @@ export function TransactionsTile() {
                         <Window data-role="tile-transactions-window">
                             the last {LIMIT} bookings, past {WINDOW_DAYS} days
                         </Window>
-                        {rows.map((booking) => (
-                            <Row key={booking.transactionId} data-role="tile-transactions-booking">
-                                <When>{format(parseISO(booking.date), "dd.MM.")}</When>
+                        {rows.length === 0 && (
+                            <Nothing data-role="tile-transactions-empty">nothing booked in this window</Nothing>
+                        )}
+                        {/*
+                         * The index is in the key because a split transaction is flattened into several
+                         * rows that all carry the *same* `transactionId`, and two rows sharing a key is
+                         * React dropping or duplicating one of them on the next update.
+                         */}
+                        {rows.map((booking, index) => (
+                            <Row key={`${booking.transactionId}-${index}`} data-role="tile-transactions-booking">
+                                <When>{day(booking.date)}</When>
                                 <What>{booking.description}</What>
-                                <Route>
-                                    {booking.from} → {booking.to}
-                                </Route>
+                                <Route>{route(booking.from, booking.to)}</Route>
                                 <Figure>{amount(booking.amount, booking.currency)}</Figure>
                             </Row>
                         ))}

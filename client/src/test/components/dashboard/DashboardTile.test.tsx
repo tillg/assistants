@@ -35,6 +35,22 @@ describe("DashboardTile", () => {
         expect(screen.getByTestId("tile-test-headline-placeholder")).toBeInTheDocument();
     });
 
+    it("keeps the placeholder for a Tile that says it expects a headline it has not read yet", () => {
+        // The Tiles whose headline is a count pass no `headline` while loading, so the promise that one
+        // is coming has to be stated separately or the grey block would vanish for them too.
+        renderTile({ state: "loading", expectsHeadline: true });
+
+        expect(screen.getByTestId("tile-test-headline-placeholder")).toBeInTheDocument();
+    });
+
+    it("shows no placeholder while loading for a Tile that will never have a headline", () => {
+        // A grey block that appears and vanishes on a Tile with no big number is a guaranteed layout
+        // jump, and it contradicts the rule that a Tile with no honest headline shows none.
+        renderTile({ state: "loading", body: <p>one line per account</p> });
+
+        expect(screen.queryByTestId("tile-test-headline-placeholder")).not.toBeInTheDocument();
+    });
+
     it("shows the slots it was given when it is ready", () => {
         renderTile({ headline: "7", body: <p>three lines</p>, footer: "as of 14:32" });
 

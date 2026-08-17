@@ -39,6 +39,7 @@ export function AssistantsTile() {
             icon={ICONS.assistant}
             title="Assistants"
             state={assistants.state}
+            expectsHeadline
             headline={assistants.state === "ready" ? assistants.total : undefined}
             body={
                 assistants.state === "ready" ? (

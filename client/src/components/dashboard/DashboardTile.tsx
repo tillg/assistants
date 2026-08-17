@@ -9,9 +9,12 @@ import { Card } from "@com.mgmtp.a12.widgets/widgets-core";
  * own spinner and no Tile writes its own error line.
  *
  * Headline and footer are optional because not every Tile has one: a Tile with no honest headline shows
- * none rather than inventing one (domain.md). Making the slots optional is the smaller decision than a
- * second chrome — the Tiles share the click target, the link role, the theming and the three states, and
- * only the *contents* differ.
+ * none rather than inventing one (domain.md) — and so shows no loading placeholder where one would have
+ * gone either, because a grey block that appears and vanishes is a layout jump promising a number that
+ * is never coming. `expectsHeadline` is how a Tile whose headline is still in flight says so.
+ *
+ * Making the slots optional is the smaller decision than a second chrome — the Tiles share the click
+ * target, the link role, the theming and the three states, and only the *contents* differ.
  *
  * There are two **variants**, and the second exists because the bookkeeping door has nothing to say at
  * all. A *tile* is a summary: a frame, a minimum height, and the three slots. A *button* is a control:
@@ -44,6 +47,15 @@ export interface DashboardTileProps {
     readonly variant?: TileVariant;
     /** The one big number. Absent on a Tile that has no honest one. */
     readonly headline?: ReactNode;
+    /**
+     * Whether a headline is still coming, and so whether the loading placeholder is drawn.
+     *
+     * It has to be said rather than inferred, because the Tiles that *do* headline a count pass no
+     * `headline` while they are loading — that is the whole state the placeholder exists for. Defaults
+     * to "a headline was handed in", which keeps a Tile that already has its number honest; the money
+     * Tiles pass neither, and so show no grey block that appears and vanishes.
+     */
+    readonly expectsHeadline?: boolean;
     readonly body?: ReactNode;
     /** Usually the read instant. Absent on the Tile that read nothing. */
     readonly footer?: ReactNode;
@@ -154,6 +166,7 @@ export function DashboardTile({
     state,
     variant = "tile",
     headline,
+    expectsHeadline,
     body,
     footer,
     onOpen,
@@ -174,7 +187,9 @@ export function DashboardTile({
                     <span>{title}</span>
                 </Heading>
 
-                {state === "loading" && <Placeholder data-role={`${role}-headline-placeholder`}>—</Placeholder>}
+                {state === "loading" && (expectsHeadline ?? headline !== undefined) && (
+                    <Placeholder data-role={`${role}-headline-placeholder`}>—</Placeholder>
+                )}
                 {state === "error" && <Sorry data-role={`${role}-error`}>could not read this</Sorry>}
 
                 {state === "ready" && headline !== undefined && (

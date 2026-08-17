@@ -43,6 +43,17 @@ const LANGUAGE = "en";
 /** One request, so one id; it is still matched by id rather than by position, as the protocol requires. */
 const ID = "external-call";
 
+/**
+ * How long a Tile waits before it says it could not read.
+ *
+ * "Fails soft" is only true if every failure arrives. A `fetch` that never settles — a Runtime holding
+ * the connection, a proxy that drops it silently — throws nothing and rejects nothing, so without a
+ * deadline of its own the Tile sits on its loading state for the length of the session. Fifteen seconds
+ * is longer than any read this Dashboard makes and short enough that a User is told rather than left
+ * watching.
+ */
+const DEADLINE_MS = 15_000;
+
 export type ExternalCall<T> =
     | { readonly state: "loading" }
     | { readonly state: "ready"; readonly data: T; readonly readAt: Date }
@@ -63,16 +74,33 @@ export function useExternalCall<T>(operation: string, args?: Record<string, unkn
 
     useEffect(() => {
         let live = true;
+        let deadline: ReturnType<typeof setTimeout> | undefined;
         setResult(LOADING);
-        void call<T>(JSON.parse(fingerprint) as Call).then((data) => {
+
+        // Read back out of the fingerprint, as the call itself is, so the effect depends on what is in
+        // the arguments rather than on the identity of an object a Tile rebuilds every render.
+        const asked = JSON.parse(fingerprint) as Call;
+        const expired = new Promise<undefined>((resolve) => {
+            deadline = setTimeout(() => {
+                logger.warn(`${asked.operation} did not answer within ${DEADLINE_MS}ms.`);
+                resolve(undefined);
+            }, DEADLINE_MS);
+        });
+
+        void Promise.race([call<T>(asked), expired]).then((data) => {
             // The answer to a Tile that has gone is nothing to anyone: dropping it here is what stops a
             // setState landing after unmount when a User leaves the Dashboard mid-read.
             if (live) {
-                setResult(data === undefined ? ERROR : { state: "ready", data, readAt: new Date() });
+                // `null` is a value the Runtime can genuinely produce, and it is not something a Tile can
+                // render — a list that is not there is *nothing to show*, not something to map over.
+                const nothing = data === undefined || data === null;
+                setResult(nothing ? ERROR : { state: "ready", data, readAt: new Date() });
             }
         });
+
         return () => {
             live = false;
+            clearTimeout(deadline);
         };
     }, [fingerprint]);
 

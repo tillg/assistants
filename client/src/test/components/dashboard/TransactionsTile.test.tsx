@@ -102,11 +102,75 @@ describe("TransactionsTile", () => {
         expect(row).toHaveTextContent(`96,50${NBSP}€`);
     });
 
-    it("renders the amount unsigned, because the row carries no direction of its own", () => {
-        renderTile(ready([booking(1)]));
+    it("renders the amount unsigned even when Firefly sends it negative, arrow and all", () => {
+        // The old version of this test used a positive fixture, so nothing it asserted could ever fail.
+        // A negative amount is the case that separates *rendered as given* from *signed by the Tile*:
+        // the row is shown exactly as the books hold it, and the arrow says which way it went.
+        renderTile(ready([booking(1, { amount: "-96.500000000000" })]));
 
-        // The arrow says which way it went; a minus here would be a guess about the chart of accounts.
-        expect(screen.getByTestId("tile-transactions-booking")).not.toHaveTextContent("−");
+        const row = screen.getByTestId("tile-transactions-booking");
+        expect(row).toHaveTextContent(`−96,50${NBSP}€`);
+        expect(row).toHaveTextContent("Payables → Expenses:Health");
+    });
+
+    it("renders a date it cannot parse as the raw string, rather than crashing the Tile", () => {
+        // `parseISO("")` is an Invalid Date and `format` throws `RangeError` on one; with no
+        // ErrorBoundary anywhere in this application that throw blanks the Tile.
+        for (const date of ["", null as unknown as string, "2026-08-32"]) {
+            const { unmount } = renderTile(ready([booking(1, { date })]));
+
+            expect(screen.getByTestId("tile-transactions-booking")).toHaveTextContent(
+                "Consultation and dressing change, 24 July"
+            );
+            unmount();
+        }
+    });
+
+    it("renders both halves of a split, which share one transaction id", () => {
+        const warned = vi.spyOn(console, "error").mockImplementation(() => {});
+        renderTile(
+            ready([
+                booking(1, { description: "Rent", amount: "700.00" }),
+                booking(1, { description: "Service charge", amount: "120.00" })
+            ])
+        );
+
+        expect(screen.getAllByTestId("tile-transactions-booking")).toHaveLength(2);
+        expect(warned).not.toHaveBeenCalled();
+        warned.mockRestore();
+    });
+
+    it("leaves out the arrow when there is nothing on either side of it", () => {
+        renderTile(ready([booking(1, { from: "", to: "", description: "" })]));
+
+        expect(screen.getByTestId("tile-transactions-booking")).not.toHaveTextContent("→");
+    });
+
+    it("drops the arrow when only one side is known, and still shows the side it has", () => {
+        renderTile(ready([booking(1, { from: "", to: "Expenses:Health" })]));
+
+        const row = screen.getByTestId("tile-transactions-booking");
+        expect(row).toHaveTextContent("Expenses:Health");
+        expect(row).not.toHaveTextContent("→");
+    });
+
+    it("says nothing was booked in the window rather than showing an empty body", () => {
+        renderTile(ready([]));
+
+        expect(screen.getByTestId("tile-transactions-empty")).toBeInTheDocument();
+    });
+
+    it("shows nothing rather than slicing an answer that was not a list at all", () => {
+        renderTile({ state: "ready", data: undefined as unknown as Booking[], readAt: READ_AT });
+
+        expect(screen.queryByTestId("tile-transactions-booking")).not.toBeInTheDocument();
+        expect(screen.getByTestId("tile-transactions-empty")).toBeInTheDocument();
+    });
+
+    it("shows no headline placeholder while loading, because it will never have a headline", () => {
+        renderTile({ state: "loading" });
+
+        expect(screen.queryByTestId("tile-transactions-headline-placeholder")).not.toBeInTheDocument();
     });
 
     it("renders each row in its own currency and never totals them", () => {
