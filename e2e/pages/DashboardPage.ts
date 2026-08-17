@@ -17,8 +17,14 @@ import { expect, type Page } from "../fixtures";
 
 import { BasePage } from "./BasePage";
 
-/** The four Tiles, in the order the App Model's `VIEW_ADD` directives place them. */
-export const TILES = ["conversations", "documents", "assistants", "bookkeeping"] as const;
+/**
+ * The Tiles, in the order the App Model's `VIEW_ADD` directives place them.
+ *
+ * Row one is the four that were always there; row two is the books. Slot pairing is positional
+ * **across rows as well as within one**, so this list is the layout and a reordering of the
+ * directives shows up here as a failing assertion rather than as a screenshot nobody looks at.
+ */
+export const TILES = ["conversations", "documents", "assistants", "bookkeeping", "transactions", "accounts"] as const;
 
 export type TileName = (typeof TILES)[number];
 
@@ -42,6 +48,11 @@ export class DashboardPage extends BasePage {
     /** Every Tile on the Dashboard — the four frames, not the slots inside them. */
     allTiles(): Locator {
         return this.page.locator("[data-role^='tile-'][data-state]");
+    }
+
+    /** Every row of a Tile's body carrying one `-<role>` name — accounts, bookings, totals. */
+    rows(name: TileName, role: string): Locator {
+        return this.tile(name).locator(`[data-role="tile-${name}-${role}"]`);
     }
 
     /**

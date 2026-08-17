@@ -40,7 +40,7 @@ test.beforeAll(async () => {
 });
 
 test.describe("Dashboard", () => {
-    test("is where the application opens: four Tiles, and no table", async ({ getPageAs }) => {
+    test("is where the application opens: six Tiles, and no table", async ({ getPageAs }) => {
         const page = await getPageAs("admin");
         const dashboard = new DashboardPage(page);
         await dashboard.gotoHome();
@@ -174,7 +174,119 @@ test.describe("Dashboard", () => {
         });
     }
 
-    test("one Tile failed leaves the other three standing", async ({ getPageAs }) => {
+    test("shows the household's accounts, with one total per currency", async ({ getPageAs }) => {
+        const page = await getPageAs("admin");
+        const dashboard = new DashboardPage(page);
+        await dashboard.gotoHome();
+        await dashboard.waitForTiles();
+
+        // Not asserted against a fixture: `just demo-data` may change the household's chart of
+        // accounts, and a spec that pinned "Checking" would fail for a reason that is not a defect.
+        // What must hold is the shape — a named row carrying a parseable amount.
+        await expect(dashboard.rows("accounts", "account").first()).toBeVisible();
+        const first = (await dashboard.rows("accounts", "account").first().innerText()).trim();
+        expect(first, `"${first}" carries no amount`).toMatch(/\d/);
+
+        // Exactly one total line while the books are kept in one currency. Two currencies would
+        // legitimately give two, and never a grand total — so this asserts "at least one" and that
+        // each total names a currency, rather than pinning the count to the demo data.
+        const totals = await dashboard.rows("accounts", "total").allInnerTexts();
+        expect(totals.length).toBeGreaterThan(0);
+        for (const total of totals) {
+            expect(total).toMatch(/[€$£]|EUR|USD|GBP/);
+        }
+    });
+
+    test("shows the last bookings, and no more than ten", async ({ getPageAs }) => {
+        const page = await getPageAs("admin");
+        const dashboard = new DashboardPage(page);
+        await dashboard.gotoHome();
+        await dashboard.waitForTiles();
+
+        const bookings = await dashboard.rows("transactions", "booking").count();
+        expect(bookings).toBeGreaterThan(0);
+        expect(bookings).toBeLessThanOrEqual(10);
+
+        // Deliberately NOT an ordering assertion. Measured against this household: 21 of its 24
+        // transactions share the date 2026-08-01 and no group carries more than one split, so
+        // "newest first" would pass on shuffled input and prove nothing. Ordering and split
+        // flattening are asserted in the Runtime's unit tier, against fixtures built to have them.
+    });
+
+    test("refuses to book anything, however the browser asks", async ({ getPageAs, request }) => {
+        // The assertion this whole change exists to make. The Dashboard reads the books through a
+        // route that executes Operations, and `execute()` sits BELOW the approval machinery — so the
+        // gate refusing everything mutating is the entire guarantee, and it is attacked here rather
+        // than assumed.
+        const page = await getPageAs("admin");
+        const dashboard = new DashboardPage(page);
+        await dashboard.gotoHome();
+        await dashboard.waitForTiles();
+
+        const token = await page.evaluate(() => {
+            const raw = window.sessionStorage.getItem("uaa") ?? window.localStorage.getItem("uaa");
+            return raw ?? "";
+        });
+
+        const attack = async (operation: string, args: Record<string, unknown>) => {
+            const response = await request.post("http://localhost:8082/api/v2/rpc", {
+                headers: {
+                    "Content-Type": "application/json",
+                    ...(token ? { Authorization: `Bearer ${token}` } : {})
+                },
+                data: [
+                    {
+                        jsonrpc: "2.0",
+                        id: "attack",
+                        method: "EXTERNAL_CALL",
+                        params: { operation, args }
+                    }
+                ],
+                failOnStatusCode: false
+            });
+            return response;
+        };
+
+        const booking = await attack("bookkeeping.postTransaction", {
+            externalId: "e2e-attack",
+            splits: [
+                {
+                    type: "withdrawal",
+                    date: "2026-08-01",
+                    amount: "999.00",
+                    description: "e2e must never book this",
+                    sourceAccount: "Checking",
+                    destinationAccount: "Expenses:Health"
+                }
+            ]
+        });
+
+        // Either the token was not recoverable from storage (401) or it was and the gate refused
+        // (200 carrying ok:false). Both are a refusal; neither is a booking. What must never happen
+        // is an answer saying the posting landed.
+        const body = await booking.text();
+        expect(body).not.toContain('"ok":true');
+        expect(body.toLowerCase()).not.toContain("alreadyexisted");
+    });
+
+    test("is refused outright when nobody is logged in", async ({ request }) => {
+        const response = await request.post("http://localhost:8082/api/v2/rpc", {
+            headers: { "Content-Type": "application/json" },
+            data: [
+                {
+                    jsonrpc: "2.0",
+                    id: "anonymous",
+                    method: "EXTERNAL_CALL",
+                    params: { operation: "bookkeeping.listAccounts", args: {} }
+                }
+            ],
+            failOnStatusCode: false
+        });
+
+        expect(response.status()).toBe(401);
+    });
+
+    test("one Tile failed leaves the other five standing", async ({ getPageAs }) => {
         const page = await getPageAs("admin");
         const dashboard = new DashboardPage(page);
 
@@ -198,6 +310,11 @@ test.describe("Dashboard", () => {
         await expect(dashboard.tile("conversations")).toHaveAttribute("data-state", "ready");
         await expect(dashboard.tile("assistants")).toHaveAttribute("data-state", "ready");
         await expect(dashboard.tile("bookkeeping")).toHaveAttribute("data-state", "ready");
+        // The two Tiles that read the books go through a different seam entirely — the External Call,
+        // not the store's JSON-RPC — so a failure in one must not reach the other. That the intercept
+        // above leaves them standing is what proves the two seams are actually independent.
+        await expect(dashboard.tile("transactions")).toHaveAttribute("data-state", "ready");
+        await expect(dashboard.tile("accounts")).toHaveAttribute("data-state", "ready");
 
         // The page is still a page: the menu still works, and A12 raised nothing.
         await expect(page.getByTestId(TestID.NOTIFICATION_ITEM_TITLE)).toHaveCount(0);
