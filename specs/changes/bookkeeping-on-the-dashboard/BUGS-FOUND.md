@@ -168,6 +168,84 @@ no `type` field. Worse, `money.ts`'s own header asserted "the sign comes from th
 
 ---
 
+## Found by running the suite, not by reading it
+
+### 23. `2-navigation.spec.ts` asserted four tiles for ever · PROVEN · fixed
+`toHaveCount(4)`, written as a literal, and it went on saying four after the Dashboard grew a second
+row — so a correct change failed the suite for the wrong reason. **My defect: I updated
+`10-dashboard.spec.ts` and missed this one.**
+**Fix:** it counts `TILES.length` now. The count belongs to the page object that owns the layout, not
+to whichever spec happens to look at it.
+
+### 24. Two of the four e2e URLs cannot be `127.0.0.1` · PROVEN · fixed
+The move off `localhost` was correct in principle — see finding 25 — but two of the four are pinned
+by Keycloak and moving them broke authentication outright:
+
+| URL | Why it must stay `localhost` |
+|---|---|
+| `BASE_URL` | `a12-spa-client` allows `http://localhost:*` as a redirect URI **and nothing else**, so `127.0.0.1` is bounced with *"Invalid parameter: redirect_uri"* before the application is reached |
+| `KEYCLOAK_URL` | `KC_HOSTNAME` pins the issuer to `KEYCLOAK_PUBLIC_URL`, so the browser lands on `localhost:8089` whatever we ask for — and the `iss` claim says so too. The auth setup waited the full 30s for a navigation that never comes |
+
+`THINGSTORE_URL` and `FIREFLY_URL` keep `127.0.0.1`: bearer-token APIs, no redirect, no issuer.
+The realm template now also allows `http://127.0.0.1:*`, but **a realm is imported once**, so that
+only takes effect after `just clean`.
+
+### 25. Two different applications behind one URL · PROVEN · fixed by the parallel session
+Compose binds every published port to `127.0.0.1` (IPv4). `localhost` resolves to `::1` first on
+macOS, so anything holding the IPv6 wildcard shadows the container. A `webpack` dev server on
+`*:8081` served its own live-compiled bundle to every request for `localhost:8081` while the built
+image sat untouched behind `127.0.0.1:8081`.
+**How it was found:** I read six live tiles via `eval`, screenshotted two seconds later, and got a
+full-page *"Failed to compile"* — a TypeScript error from a file a subagent was mid-edit on.
+**Why it matters more than it looks:** the failure is silent and *flattering*. The suite passes, and
+what it passed against is not what ships.
+**See decision 0** in `DECISIONS-AND-ASSUMPTIONS.md` — my handling of the dev server was wrong.
+
+---
+
+## Confirmed, not fixed — environment, not code
+
+### 26. The agent-dependent e2e specs cannot pass in this environment · PROVEN · **left for you**
+Six specs fail, and none of them is a code defect:
+
+- `9-conversation-transcript.spec.ts` — 5 cases
+- `8-operations-catalogue.spec.ts` — "should stop offering an Operation the User switched off"
+
+All of them wait for a Receptionist or Accountant to do something. `llm.json` is on the
+**`local_qwen`** profile, and the Runtime's log says why nothing happens:
+
+```
+TransientLlmError: The model emitted a tool call as text rather than as a
+structured call, so nothing was invoked.
+  assistant: receptionist, attempt: 1 … 2 … 3
+  ERROR the language model could not be reached
+```
+
+Every Turn fails all three attempts. That is also why the Dashboard reads **406 Conversations in
+flight, 0 running, 212 waiting on you** — a backlog of Conversations that can never advance.
+
+**I did not change `llm.json`.** It is your setting, you presumably set it deliberately, and I had
+already over-reached once tonight (decision 0). To run these specs: set `active` to `scripted` in
+`llm.json` and `just restart runtime`.
+
+### 27. The money tiles are load-sensitive · PROVEN · **left for you, with a recommendation**
+`10-dashboard.spec.ts` → *"shows the last bookings, and no more than ten"* fails in the **full**
+suite at 8 workers, and passes **3 runs out of 3** when run alone.
+
+This is the availability coupling `architecture.md` predicted, now measured. The External Call goes
+browser → server → **Runtime** → Firefly, and the Runtime is a single replica whose event loop is
+simultaneously retrying failed LLM calls every two seconds. Under load the 10s server-side timeout
+wins and the tile greys out.
+
+It is arguably correct behaviour — a busy Runtime *is* a slow door — but two things are worth
+considering:
+1. The tile is indistinguishable from a real failure. A "still reading" state would be honest.
+2. `stop_grace_period` was unset on every service (found by the parallel session; Docker's default
+   10s is under a routine 6s Runtime stop plus a mail poll). They set 60s on `runtime`; **`server`
+   is still unset and is your call**, since a Spring shutdown mid-write is not mine to decide.
+
+---
+
 ## Investigated and NOT a bug
 
 Kept because a rejected finding is worth as much as an accepted one — it stops the same thing being
