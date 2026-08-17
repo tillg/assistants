@@ -44,7 +44,17 @@ tasks.register("e2eTests", NpmTask) {
     dependsOn e2eInstall
     description "Perform e2e test against a running template app"
     // TODO: Replace with your deployment URL
-    String testEnvUrl = project.envName == "local" ? "http://localhost:8081": "https://your-domain.com"
+    //
+    // `127.0.0.1`, not `localhost`, and that is not a style preference. Compose publishes every port
+    // of this stack on `127.0.0.1` only, so anything else holding the IPv6 wildcard on the same port
+    // answers `localhost` first — `localhost` resolves to `::1` before `127.0.0.1`. Measured: a stray
+    // `webpack` dev server on `*:8081` served its own live-compiled bundle to every request for
+    // `localhost:8081` while the built image sat untouched behind `127.0.0.1:8081`.
+    //
+    // The failure mode is silent and flattering: the suite goes green against something that is not
+    // what ships. `e2e/utils/config.ts` pins all four service URLs the same way and for the same
+    // reason.
+    String testEnvUrl = project.envName == "local" ? "http://127.0.0.1:8081": "https://your-domain.com"
     String e2eRun = project.variant != "default" ? "e2e:test-${project.variant}" : "e2e:test"
     args = ["run-script", e2eRun]
     environment.put('BASE_URL', testEnvUrl)
