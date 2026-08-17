@@ -148,15 +148,23 @@ export function setup() {
 
     const a12ExtensionFeatures = combineFeatures(withDirtyHandling, withDeepLinking);
 
+    // Grouped rather than listed flat: `combineFeatures` takes at most nine, and the six Dashboard views
+    // plus the four engines and the layout are eleven.
+    const dashboardFeatures = combineFeatures(
+        addView("ConversationsTile", dashboardViewMap.ConversationsTile),
+        addView("DocumentsTile", dashboardViewMap.DocumentsTile),
+        addView("AssistantsTile", dashboardViewMap.AssistantsTile),
+        addView("BookkeepingButton", dashboardViewMap.BookkeepingButton),
+        addView("TransactionsTile", dashboardViewMap.TransactionsTile),
+        addView("AccountsTile", dashboardViewMap.AccountsTile)
+    );
+
     const viewAndLayoutFeatures = combineFeatures(
         addView("TreeEngine", enginesViewMap.TreeEngine),
         addView("FormEngine", enginesViewMap.FormEngine),
         addView("OverviewEngine", enginesViewMap.OverviewEngine),
         addView("ContentEngine", enginesViewMap.ContentEngine),
-        addView("ConversationsTile", dashboardViewMap.ConversationsTile),
-        addView("DocumentsTile", dashboardViewMap.DocumentsTile),
-        addView("AssistantsTile", dashboardViewMap.AssistantsTile),
-        addView("BookkeepingButton", dashboardViewMap.BookkeepingButton),
+        dashboardFeatures,
         addLayout("ApplicationFrame", { component: CustomApplicationFrameLayout })
     );
 

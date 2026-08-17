@@ -1,9 +1,11 @@
 import type { View } from "@com.mgmtp.a12.client/client-core";
 
+import { AccountsTile } from "./AccountsTile";
 import { AssistantsTile } from "./AssistantsTile";
 import { BookkeepingButton } from "./BookkeepingButton";
 import { ConversationsTile } from "./ConversationsTile";
 import { DocumentsTile } from "./DocumentsTile";
+import { TransactionsTile } from "./TransactionsTile";
 
 type ViewMap = Record<string, View.ViewComponent | undefined>;
 
@@ -24,5 +26,7 @@ export const dashboardViewMap = {
     ConversationsTile,
     DocumentsTile,
     AssistantsTile,
-    BookkeepingButton
+    BookkeepingButton,
+    TransactionsTile,
+    AccountsTile
 } satisfies ViewMap;
