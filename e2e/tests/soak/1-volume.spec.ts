@@ -47,9 +47,7 @@ const identity = (index: number): TestData[] => [
 ];
 
 test.describe("Exploratory: volume, and the Dashboard while it happens", () => {
-    test("creates many Parties, finds them all again, and leaves the Dashboard standing", async ({
-        getPageAs
-    }) => {
+    test("creates many Parties, finds them all again, and leaves the Dashboard standing", async ({ getPageAs }) => {
         test.setTimeout(600_000);
 
         const page = await getPageAs("admin");

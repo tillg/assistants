@@ -72,6 +72,23 @@ export default defineConfig({
             dependencies: ["flow-invoice"]
         },
 
+        // The soak tier, and it is its own project for the same reason the flow specs are: it makes a
+        // dozen Things and unmakes them, one after another, and running that beside seven other
+        // workers starves the application rather than testing it. Measured — it took an unrelated
+        // spec down with it, on `gotoHome()` timing out at ten seconds because the header never
+        // rendered. Chained last, so it soaks a stack the rest of the suite has finished with.
+        {
+            name: "soak",
+            use: { ...devices["Desktop Chrome"], channel: "chromium" },
+            testDir: "./tests/soak",
+            timeout: 900_000,
+            // After `base`, not after the flow tier. Chaining it behind `flow-restart` meant it never
+            // ran at all here: the flow specs drive the live Assistants, and an Assistant cannot act
+            // when the configured model emits its tool calls as prose. A soak test that silently does
+            // not run is worse than one that fails.
+            dependencies: ["base"]
+        },
+
         { name: "setup-auth", testMatch: /auth\.setup\.ts/, teardown: "cleanup" },
         { name: "cleanup", testMatch: /auth\.teardown\.ts/ }
     ]

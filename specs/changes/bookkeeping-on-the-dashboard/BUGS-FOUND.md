@@ -246,6 +246,71 @@ considering:
 
 ---
 
+### 28. The stuck backlog saturates the ThingStore, and it grows · PROVEN · **left for you, and it is the biggest thing here**
+
+Downstream of finding 26, and much more consequential than a few failing specs.
+
+Because `local_qwen` cannot emit a structured tool call, **no Conversation can ever complete**. They
+do not fail and close — they stay `waiting`, and the Runtime re-scans every one of them every two
+seconds, for ever. Measured across this session:
+
+| | Conversations in flight |
+|---|---|
+| ~00:06 | 406 |
+| ~00:45 | 415 |
+| ~01:10 | 436 |
+
+And the cost of carrying them:
+
+```
+assistants_server   cpu=83.96%   mem=1.782GiB
+assistants_runtime  cpu=6.47%    mem=210.7MiB
+```
+
+**The server, not the Runtime, is the one being crushed** — the scan is a read amplifier, and 436
+Conversations re-queried every two seconds is what 84% CPU buys.
+
+**This explains every remaining flake in the suite.** Dashboard specs that passed cleanly at 00:20
+were failing by 01:10 — not because anything changed in the code, but because the store behind them
+had got slower. A test that passes early in a session and fails later, with no commit in between, is
+usually the environment moving rather than the test being weak, and it was.
+
+**What I did not do:** clear the backlog or change the model. Both are destructive to state you may
+want, and I had already over-reached once tonight (decision 0).
+
+**Options, in the order I would try them:**
+1. `active: "scripted"` in `llm.json` + `just restart runtime` — stops the bleeding, makes the six
+   agent-dependent specs pass, and costs nothing.
+2. A model that emits structured tool calls, if `local_qwen` was being evaluated on purpose. The
+   Runtime's error is specific and worth quoting to whoever owns that model:
+   *"The model emitted a tool call as text rather than as a structured call, so nothing was invoked."*
+3. `just clean` to drop the backlog entirely — nuclear, and it takes the books with it.
+
+**Worth considering regardless of the model**: nothing bounds how long a Conversation may sit in
+flight, or how many may accumulate. `maxBirthsPerHour` caps creation; nothing caps the standing
+population. A Conversation that has failed every Turn for thirteen hours is not pending work in any
+useful sense, and it costs a query every two seconds to keep saying so.
+
+---
+
+## Verified by breaking things on purpose
+
+Not bugs — the designed behaviour, watched happening rather than asserted in prose. Each was written
+into `architecture.md` as a claim before it was ever observed.
+
+| What was broken | Dashboard | Verdict |
+|---|---|---|
+| **Firefly stopped** | `transactions=error`, `accounts=error`; conversations, documents, assistants, bookkeeping all `ready` | Fail-soft holds. Four tiles read the store and never notice |
+| **Runtime stopped** | identical — the same two error, the same four stand | The door outward being shut is indistinguishable from the books being down, which is correct: from the browser's side they *are* the same fact |
+| **Both restarted** | all six back to `ready` with no reload beyond the navigation | Recovers on its own; nothing cached a failure |
+| **A full Rancher Desktop restart** | all six `ready` after `just up` | Survives the whole stack bouncing |
+| **12 Parties created, searched, edited and deleted through the UI** | no tile fell into `error` at any point; document count never went backwards | The counting tiles hold up against a store moving underneath them |
+
+The one thing this *cannot* distinguish, and which is finding 27: a Runtime that is merely **busy**
+looks exactly like a Runtime that is **down**.
+
+---
+
 ## Investigated and NOT a bug
 
 Kept because a rejected finding is worth as much as an accepted one — it stops the same thing being

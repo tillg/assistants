@@ -51,8 +51,8 @@ Independent of everything. No server, no Runtime, no network.
   → **Verified:** `just test-models` 29 models 0 errors · `just test-client` 496 passed · `just check` green.
 - [x] **e2e written** — `DashboardPage.variant()`, plus cases asserting the button's shape and that the
   three summary Tiles kept theirs. Typecheck, lint and prettier green.
-- [ ] **Seen.** `just dev`, open the Dashboard. Screenshots into `tmp/`, desktop and narrow.
-- [ ] **e2e run.** `just test-e2e` for the two new cases.
+- [x] **Seen.** `just dev`, open the Dashboard. Screenshots into `tmp/`, desktop and narrow.
+- [x] **e2e run.** `just test-e2e` for the two new cases.
 
 **This phase is shippable on its own.**
 
@@ -193,47 +193,58 @@ Pure logic, no HTTP, no network. The most important phase in the change.
 
 ## F — The tiles
 
-- [ ] **Failing tests first — `money.ts`.** `"96.500000000000"` → `96,50 €` (the real shape, measured);
+- [x] **Failing tests first — `money.ts`.** `"96.500000000000"` → `96,50 €` (the real shape, measured);
   `"-84.2"` → `−84,20 €`; a `withdrawal` renders negative and a `deposit` positive from the same
   unsigned amount; `totals` over a two-currency list returns **two** lines and no grand total.
-- [ ] **`money.ts`.** `Intl.NumberFormat("de-DE", …)`, one module, no arithmetic outside `totals`.
-- [ ] **Failing tests first — `useExternalCall`.** Against a faked `ServerConnector`: loading → ready
+- [x] **`money.ts`.** `Intl.NumberFormat("de-DE", …)`, one module, no arithmetic outside `totals`.
+- [x] **Failing tests first — `useExternalCall`.** Against a faked `ServerConnector`: loading → ready
   with `readAt`; a refusal, a timeout, a malformed body → `error`, no throw; unmount lands no
   `setState`; nothing is cached between mounts.
-- [ ] **`useExternalCall.ts`** over `JsonRpc2Request.build()`, with the five invariants documented in
+- [x] **`useExternalCall.ts`** over `JsonRpc2Request.build()`, with the five invariants documented in
   the file as `useThingCounts`' are.
-- [ ] **Failing tests first — the tiles.** `AccountsTile`: loading, ready (rows + one total per
+- [x] **Failing tests first — the tiles.** `AccountsTile`: loading, ready (rows + one total per
   currency + `as of`), error. `TransactionsTile`: the same three, at most ten rows, a `transfer`
   unsigned.
-- [ ] **`AccountsTile.tsx`, `TransactionsTile.tsx`,** both `href` doors to Firefly, no headline on
+- [x] **`AccountsTile.tsx`, `TransactionsTile.tsx`,** both `href` doors to Firefly, no headline on
   either. The transactions tile asks for a **ninety-day window** and says so on the tile.
-- [ ] **Icons** 💳 and 🏦 into `PLACE_ICONS`; second row and two `VIEW_ADD`s in the App Model; two
+- [x] **Icons** 💳 and 🏦 into `PLACE_ICONS`; second row and two `VIEW_ADD`s in the App Model; two
   `addView` calls; two view-map entries.
   → **Verify:** `just test-models` 29 models · `just test-client` · `just check`.
-- [ ] **Seen.** `just dev`. Screenshots at desktop and narrow width into `tmp/`.
+- [x] **Seen.** `just dev`. Screenshots at desktop and narrow width into `tmp/`.
 
 ## G — End to end, and the prose
 
-- [ ] **`DashboardPage.TILES`** becomes the six in directive order; add a `rows(name)` accessor.
-- [ ] **`10-dashboard.spec.ts`**: six tiles in order; both new tiles `ready`; at most ten rows; at
+- [x] **`DashboardPage.TILES`** becomes the six in directive order; add a `rows(name)` accessor.
+- [x] **`10-dashboard.spec.ts`**: six tiles in order; both new tiles `ready`; at most ten rows; at
   least one named account with a parseable amount and exactly one total line; **`EXTERNAL_CALL` with
   `bookkeeping.postTransaction` refused**; **`EXTERNAL_CALL` unauthenticated → 401**; one tile's call
   intercepted → that tile `error`, the other five render.
   - **Not** an ordering assertion over live data: measured, 21 of the household's 24 transactions share
     the date `2026-08-01` and no group has more than one split, so it would pass on shuffled input.
     Ordering and flattening are asserted in phase C's unit tier with hand-built fixtures.
-- [ ] **Runtime stopped.** A case that stops the Runtime and asserts two tiles error and four render.
-- [ ] **`1-invoice-slice.spec.ts`.** After the slice books an invoice, that booking's description
-  appears in the transactions tile — the loop this change exists to close.
-- [ ] **ADR-0023 — the Runtime is the door outward.** The decision, the three rejected alternatives
+- [x] **Runtime stopped.** A case that stops the Runtime and asserts two tiles error and four render.
+- [ ] **`1-invoice-slice.spec.ts`. — BLOCKED by the configured model, not by this change.** After the
+  slice books an invoice, that booking's description appears in the transactions tile — the loop this
+  change exists to close.
+  - **Why it was not written.** The assertion needs the Accountant to actually book something, and in
+    this environment no Assistant can act at all: `llm.json` is on `local_qwen`, which **emits tool
+    calls as text rather than as structured calls**, so every Turn fails all three attempts with
+    `TransientLlmError` (finding 26 in BUGS-FOUND.md). Writing the assertion now would mean writing a
+    test I had watched fail and could not distinguish from a real defect.
+  - **The half that could be proven, was.** The transactions tile renders the household's real
+    bookings, read live from Firefly through the route, and `10-dashboard.spec.ts` asserts the row cap
+    and the shapes. What is unproven is specifically *a booking made during the run showing up*.
+  - **To finish it:** set `active: "scripted"` in `llm.json`, `just restart runtime`, then add the
+    assertion. It should be a handful of lines against the existing slice.
+- [x] **ADR-0023 — the Runtime is the door outward.** The decision, the three rejected alternatives
   with why each was refused, and the consequences. States explicitly that it amends ADR-0011 and why
   that amendment is narrow.
-- [ ] **ADR-0011** gains a pointer to it.
+- [x] **ADR-0011** gains a pointer to it.
   → **Verify:** `node scripts/check-docs.mjs` — README's ADR count word becomes **twenty-three**.
-- [ ] **`specs/system/architecture.md`.** The Runtime gains an inbound surface; the claim that it
+- [x] **`specs/system/architecture.md`.** The Runtime gains an inbound surface; the claim that it
   "exposes no API and receives no webhooks" is corrected rather than left standing. Same for
   `runtime/src/index.ts`'s own header comment.
-- [ ] **`specs/system/functional.md`, `README.md`, `DECISIONS.md`.** The six tiles; the External Call
+- [x] **`specs/system/functional.md`, `README.md`, `DECISIONS.md`.** The six tiles; the External Call
   and its gate; D-005's wording; phase A's and phase C's observations.
 - [ ] **Full suite.** `just check && just test`.
 
