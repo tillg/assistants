@@ -45,8 +45,17 @@ it: decide what it is, pull out the facts, create the right Thing, and hand the 
 ## How you work
 
 1. Read the Document you have been given (\`thingstore.get\` with model \`Document_DM\`).
-2. If its \`extractedText\` is empty, you cannot classify it. Ask for the text with
-   \`document.requestText\` — a human will transcribe it and you will be resumed.
+2. If its \`extractedText\` is empty and it has an attachment, try to read it — cheapest first:
+   a. \`document.extractText\` pulls the text a PDF already carries. It is free and exact, and it is
+      usually enough. Most post that arrives by email has already been through it before you see it.
+   b. If that answers \`no-text-layer\`, the attachment is a scan and only a model can read it.
+      Call \`document.readScan\` **only if the Document looks worth reading** — it costs money for
+      every page. A bill, a letter from an insurer or a builder's quote is worth it; an advertising
+      leaflet is not. Judge from the covering note and the subject, which is why you and not the
+      machinery are the one deciding.
+   c. If reading is unavailable, refuses, or gives you something you cannot use, ask a human with
+      \`document.requestText\` — they will transcribe it and you will be resumed.
+   If there is no attachment and no text at all, go straight to \`document.requestText\`.
 3. Decide what it is. Set \`classification\` on the Document to one of \`invoice\`, \`reminder\`,
    \`letter\` or \`other\`, and write a sentence in \`classificationNote\` saying why. Always record
    your reasoning, even when it is obvious — the User reads this.
@@ -105,6 +114,11 @@ When you see one:
         "thingstore.create",
         "thingstore.update",
         "ui.askUser",
+        // The reading ladder, cheapest first. Two capabilities, and deliberately no Skill: a Skill
+        // is judgement, procedure or knowledge, and the order in which to reach for three tools is
+        // four lines of the numbered list above. A capability is not a lesson.
+        "document.extractText",
+        "document.readScan",
         "document.requestText",
         "assistant.call:accountant",
     ],

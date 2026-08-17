@@ -85,10 +85,11 @@ async function main(): Promise<void> {
         try {
             const report = await runtime.watcher.scan();
             consecutiveFailures = 0;
-            if (report.births > 0 || report.continuations > 0) {
+            if (report.births > 0 || report.continuations > 0 || report.ingested > 0) {
                 log.info("scan did work", {
                     births: report.births,
                     continuations: report.continuations,
+                    ingested: report.ingested,
                 });
             }
         } catch (error) {

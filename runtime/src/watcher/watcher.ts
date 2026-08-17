@@ -49,6 +49,18 @@ export interface WatcherDeps {
     maxBirthsPerHour: number;
     /** The timezone every `cron` is read in (ADR-0016). */
     scheduleTimezone: string;
+    /**
+     * Go and look in the letterbox (ADR-0024). Absent when no mailbox is configured, which is the
+     * default and not an error.
+     *
+     * A thunk rather than the ingest itself: this file has no business knowing what IMAP is, and
+     * the one thing it needs from the mailbox — *did anything arrive?* — is the same shape as the
+     * question it asks the store seven times already. It returns how many Documents it created, so
+     * the scan can say so; everything else it learned it has already logged.
+     */
+    pollMailbox?: () => Promise<number>;
+    /** How often {@link pollMailbox} is worth calling. Ignored when there is no mailbox. */
+    mailPollIntervalMs?: number;
     /** Create a Conversation for an Assistant, about a Thing. Returns its docRef. */
     birth(input: {
         assistant: Stored<Assistant>;
@@ -93,6 +105,13 @@ export interface ScanReport {
     continuations: number;
     paused: boolean;
     errors: number;
+    /**
+     * Documents created from the letterbox this pass — counted apart from `births` because they are
+     * a different kind of thing. A birth is a Conversation; this is a Document, which may or may not
+     * become one. Folding it into `births` would make the log say a Conversation started when what
+     * happened is that post arrived.
+     */
+    ingested: number;
 }
 
 export class Watcher {
@@ -123,9 +142,24 @@ export class Watcher {
      */
     private catalogueMissing = false;
 
+    /**
+     * When the letterbox was last opened. In memory, so a restart polls at once — which is right:
+     * a Runtime that has just come up is exactly when post is most likely to be waiting.
+     */
+    private mailboxPolledAt: number | undefined;
+
+    /** Is the mailbox currently unreachable? So the complaint is made once per outage. */
+    private mailboxFailing = false;
+
     /** One pass. Returns what it did, so the caller can log and stamp the heartbeat. */
     async scan(): Promise<ScanReport> {
-        const report: ScanReport = { births: 0, continuations: 0, paused: false, errors: 0 };
+        const report: ScanReport = {
+            births: 0,
+            continuations: 0,
+            paused: false,
+            errors: 0,
+            ingested: 0,
+        };
 
         // Before anything else, including the heartbeat: every Turn this pass could start would
         // throw on the catalogue read anyway (ADR-0019), so scanning would produce one identical
@@ -149,6 +183,16 @@ export class Watcher {
         // Conversations already advanced in this pass, so scan 6 does not take a second Turn on
         // the same one.
         const handled = new Set<string>();
+
+        // Scan 0 — the letterbox. First, and deliberately: it is the only scan that does not look
+        // in the store, and anything it creates is a Document that scan 1 can then find in the very
+        // same pass. Putting it last would cost every forwarded invoice a whole extra scan interval
+        // before its Conversation was born.
+        //
+        // It is after the pause check and after the catalogue check, and both are right: `just
+        // pause` should stop post arriving as surely as it stops Turns, and the ingest reads the
+        // `email.receive` Operation Thing to see whether it has been switched off.
+        report.ingested += await this.scanMailbox();
 
         // Scan 1 — Things that have materialised
         report.births += await this.scanMaterialised(state, assistants);
@@ -203,6 +247,53 @@ export class Watcher {
             log.info(`catalogue found: ${operations} Operations; scanning resumed`, { operations });
         }
         return true;
+    }
+
+    // ---------------------------------------------------------------- scan 0: the letterbox
+
+    /**
+     * Go and look in the letterbox, but not on every pass (ADR-0024).
+     *
+     * `SCAN_INTERVAL_MS` is two seconds and an IMAP login every two seconds is abusive enough that
+     * several providers rate-limit or lock the account for it. So this keeps its own clock and
+     * returns immediately when it is not due — household post is not latency-sensitive, and a
+     * minute is invisible against a forward somebody sent from a phone.
+     *
+     * The clock is in memory, so a restart polls at once. That is the right way round: a Runtime
+     * that has just come up is exactly when there is most likely to be post waiting.
+     *
+     * **Nothing escapes this method.** A mailbox that is unreachable, refusing the password or
+     * serving garbage must not take the other seven scans with it — those are the ones that keep
+     * already-running Conversations moving, and they have nothing to do with email. There is no
+     * backoff state and no circuit breaker: the next poll is a minute away, which *is* the backoff.
+     */
+    private async scanMailbox(): Promise<number> {
+        const poll = this.deps.pollMailbox;
+        if (!poll) return 0;
+
+        const interval = this.deps.mailPollIntervalMs ?? 60_000;
+        const now = Date.now();
+        if (this.mailboxPolledAt !== undefined && now - this.mailboxPolledAt < interval) return 0;
+        // Stamped before the call rather than after, so a poll that takes longer than the interval
+        // cannot queue a second one up behind it the moment it returns.
+        this.mailboxPolledAt = now;
+
+        try {
+            const created = await poll();
+            if (this.mailboxFailing) {
+                this.mailboxFailing = false;
+                log.info("the letterbox is reachable again");
+            }
+            return created;
+        } catch (error) {
+            // Once per outage, for the reason every other note in this file gives: a line a minute
+            // about a mailbox that is down is a line a minute nobody reads.
+            if (!this.mailboxFailing) {
+                this.mailboxFailing = true;
+                log.error("could not read the letterbox", { error: describeError(error) });
+            }
+            return 0;
+        }
     }
 
     private noteMissingCatalogue(reason: string): void {
