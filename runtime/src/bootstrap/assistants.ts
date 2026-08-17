@@ -12,6 +12,13 @@ export interface AssistantSeed {
     name: string;
     description: string;
     systemPrompt: string;
+    /**
+     * Empty, and deliberately: an Assistant that names no model follows the active profile in
+     * `llm.json`. Seeding the literal the profile happens to name today would freeze it — switch
+     * the profile to a gateway that does not serve it and both Assistants keep asking for the old
+     * one, which answers 404 and lands on the Conversation as an error. The User can still set a
+     * model per Assistant in the UI, which is the case the field exists for.
+     */
     llmModel: string;
     enabled: boolean;
     maxTurns: number;
@@ -26,7 +33,7 @@ export const RECEPTIONIST: AssistantSeed = {
     description:
         "Works out what an arriving Document really is, extracts what matters from it, and hands it " +
         "to whoever should deal with it.",
-    llmModel: "gpt-4o-mini",
+    llmModel: "",
     enabled: true,
     maxTurns: 20,
     systemPrompt: `You are the **Receptionist** of a household's administrative system.
@@ -109,7 +116,7 @@ export const ACCOUNTANT: AssistantSeed = {
     description:
         "Checks invoices, proposes how to book them, books them once the User agrees, and keeps an " +
         "eye on what is still owed.",
-    llmModel: "gpt-4o-mini",
+    llmModel: "",
     enabled: true,
     maxTurns: 20,
     systemPrompt: `You are the **Accountant** of a household's administrative system.

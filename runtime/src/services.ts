@@ -23,6 +23,7 @@ import { OpenAiProvider } from "./llm/openai.js";
 import { AnthropicProvider } from "./llm/anthropic.js";
 import { ScriptedProvider } from "./llm/scripted.js";
 import type { LlmProvider } from "./llm/provider.js";
+import { loadLlmProfile, type LlmProfile } from "./llm/profiles.js";
 import type { Config } from "./config.js";
 
 export interface Runtime {
@@ -33,6 +34,7 @@ export interface Runtime {
     driver: LoopDriver;
     watcher: Watcher;
     llm: LlmProvider;
+    llmProfile: LlmProfile;
     findAssistant(key: string): Promise<Stored<Assistant> | undefined>;
 }
 
@@ -54,10 +56,22 @@ export function buildRuntime(config: Config): Runtime {
         config.uiBaseUrl,
     );
 
+    // Resolved here, at startup, rather than lazily at the first Turn: a profile that names no key
+    // is somebody's half-finished edit, and the cheap moment to say so is before the Runtime
+    // reports itself healthy — not hours later, inside a Conversation, as an error on a transcript.
+    const llmProfile = loadLlmProfile(config.llmConfigFile);
+    log.info("llm profile selected", {
+        profile: llmProfile.name,
+        provider: llmProfile.provider,
+        model: llmProfile.model,
+        endpoint: llmProfile.baseUrl,
+        from: config.llmConfigFile,
+    });
+
     // ScriptedProvider matches on the Assistant and turn currently being advanced, so the driver
     // publishes that here rather than threading it through every call signature.
     let llmContext = { assistantKey: "", turn: 0 };
-    const llm = buildProvider(config, () => llmContext);
+    const llm = buildProvider(llmProfile, () => llmContext);
 
     const registry = new OperationRegistry();
 
@@ -156,6 +170,7 @@ export function buildRuntime(config: Config): Runtime {
         leaseSeconds: config.leaseSeconds,
         maxEscalations: config.maxEscalations,
         llmMaxAttempts: config.llmMaxAttempts,
+        defaultModel: llmProfile.model,
         raiseQuestion: (input) =>
             createQuestion({
                 conversation: input.conversation,
@@ -207,20 +222,20 @@ export function buildRuntime(config: Config): Runtime {
         birth,
     });
 
-    return { client, things, registry, firefly, driver, watcher, llm, findAssistant };
+    return { client, things, registry, firefly, driver, watcher, llm, llmProfile, findAssistant };
 }
 
 function buildProvider(
-    config: Config,
+    profile: LlmProfile,
     context: () => { assistantKey: string; turn: number },
 ): LlmProvider {
-    switch (config.llmProvider) {
+    switch (profile.provider) {
         case "openai":
-            return new OpenAiProvider(config.llmBaseUrl, config.llmApiKey, fetch, config.llmTemperature);
+            return new OpenAiProvider(profile.baseUrl, profile.apiKey, fetch, profile.temperature);
         case "anthropic":
-            return new AnthropicProvider(config.llmBaseUrl, config.llmApiKey);
+            return new AnthropicProvider(profile.baseUrl, profile.apiKey);
         case "scripted":
-            return ScriptedProvider.fromFile(config.llmScriptFile, context);
+            return ScriptedProvider.fromFile(profile.scriptFile, context);
     }
 }
 

@@ -24,9 +24,10 @@ default:
 # (The blank line below matters: `just --list` shows only the last comment line before a recipe,
 # so the one-line summary has to stand on its own.)
 
-# Write .env from .env.example, generating every machine credential. Run once, per clone.
+# Write .env and llm.json from their samples, generating every machine credential. Run once, per clone.
 setup:
     @node scripts/setup-env.mjs
+    @node scripts/setup-llm.mjs
     @just render-secrets
     @echo ""
     @echo "  The login passwords in .env are development defaults — see README."
@@ -69,6 +70,9 @@ build:
 
 # Start the stack in the background (assumes images are built).
 up: render-secrets
+    # Compose bind-mounts llm.json into the Runtime; a bind mount whose source is missing is
+    # created as a *directory*, so this makes sure the file is there first. No-op once it is.
+    @node scripts/setup-llm.mjs
     {{compose}} --profile server-init up -d
 
 # Wait until every service is answering.
@@ -208,9 +212,23 @@ test-client:
 test-e2e:
     @cd e2e && npm test
 
-# The same end-to-end specs against a live LLM. Skipped without LLM_API_KEY.
+# The specs never knew which model was behind the stack — they drive the browser, and the Runtime
+# is already running by the time they start. So this recipe cannot switch the model, and the
+# variable it used to set never did: point `active` in llm.json at a live profile, restart the
+# Runtime, and then run this. It fails loudly here rather than quietly passing against `scripted`.
+
+# The same end-to-end specs against whatever model the stack is running.
 test-live:
-    @cd e2e && LLM_PROVIDER=openai npm test
+    #!/usr/bin/env bash
+    set -euo pipefail
+    active="$(node -e 'process.stdout.write(require("./llm.json").active)')"
+    if [ "$active" = "scripted" ]; then
+        echo "  llm.json is still on the 'scripted' profile — this would test nothing."
+        echo "  Set \"active\" to a live profile, then: just restart runtime"
+        exit 1
+    fi
+    echo "  running against the '$active' profile"
+    cd e2e && npm test
 
 # ---------------------------------------------------------------------------- housekeeping
 

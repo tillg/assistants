@@ -24,8 +24,6 @@ function number(name: string, fallback: number): number {
     return parsed;
 }
 
-export type LlmProviderName = "openai" | "anthropic" | "scripted";
-
 export interface Config {
     readonly thingStoreUrl: string;
     readonly thingStoreUser: string;
@@ -53,23 +51,21 @@ export interface Config {
     readonly fireflyTokenFile: string;
     readonly fireflyToken: string;
 
-    readonly llmProvider: LlmProviderName;
-    readonly llmBaseUrl: string;
-    readonly llmApiKey: string;
-    readonly llmModel: string;
-    /** Where ScriptedProvider reads its recorded responses from. */
-    readonly llmScriptFile: string;
+    /**
+     * The file that names every LLM configuration and says which one is active — see
+     * {@link loadLlmProfile}. The provider, its endpoint, its model and its temperature all come
+     * from there rather than from five environment variables, because a second endpoint should be
+     * a named entry one switch away and not a second set of exports.
+     *
+     * The path is cwd-relative, and the container's working directory is `/app`, where compose
+     * mounts the project's own `llm.json`.
+     */
+    readonly llmConfigFile: string;
 
     readonly scanIntervalMs: number;
     readonly leaseSeconds: number;
     readonly maxBirthsPerHour: number;
     readonly maxEscalations: number;
-    /**
-     * Sent to the provider only when set, so its own default stands otherwise. Exists because a
-     * local quantized model needs `0` to emit structured tool calls rather than markup as prose —
-     * see `OpenAiProvider`.
-     */
-    readonly llmTemperature: number | undefined;
     readonly llmMaxAttempts: number;
     readonly uiBaseUrl: string;
     /**
@@ -83,10 +79,6 @@ export interface Config {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-    const provider = optional("LLM_PROVIDER", "scripted") as LlmProviderName;
-    if (!["openai", "anthropic", "scripted"].includes(provider)) {
-        throw new Error(`LLM_PROVIDER must be openai, anthropic or scripted; got ${provider}`);
-    }
     void env;
     return {
         thingStoreUrl: optional("THINGSTORE_URL", "http://server:8080"),
@@ -109,20 +101,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         fireflyTokenFile: optional("FIREFLY_TOKEN_FILE", "/run/firefly/pat.txt"),
         fireflyToken: optional("FIREFLY_TOKEN", ""),
 
-        llmProvider: provider,
-        llmBaseUrl: optional("LLM_BASE_URL", "https://api.openai.com/v1"),
-        llmApiKey: optional("LLM_API_KEY", process.env["OPENAI_API_KEY"] ?? ""),
-        llmModel: optional("LLM_MODEL", "gpt-4o-mini"),
-        llmScriptFile: optional("LLM_SCRIPT_FILE", "/run/fixtures/llm-script.json"),
+        llmConfigFile: optional("LLM_CONFIG_FILE", "llm.json"),
 
         scanIntervalMs: number("SCAN_INTERVAL_MS", 2000),
         leaseSeconds: number("LEASE_SECONDS", 120),
         maxBirthsPerHour: number("MAX_BIRTHS_PER_HOUR", 200),
         maxEscalations: number("MAX_ESCALATIONS", 3),
-        llmTemperature:
-            process.env["LLM_TEMPERATURE"] === undefined || process.env["LLM_TEMPERATURE"] === ""
-                ? undefined
-                : number("LLM_TEMPERATURE", 0),
         llmMaxAttempts: number("LLM_MAX_ATTEMPTS", 3),
         uiBaseUrl: optional("UI_BASE_URL", "http://localhost:8081"),
         // The household this system was written for is in Germany — every model is bilingual and the

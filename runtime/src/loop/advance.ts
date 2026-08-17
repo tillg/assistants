@@ -49,6 +49,12 @@ export interface AdvanceDeps {
     leaseSeconds: number;
     maxEscalations: number;
     llmMaxAttempts: number;
+    /**
+     * What a Turn asks for when its Assistant names no model of its own — the active profile's
+     * `model`, from `llm.json`. An Assistant that carries one still wins; this is what makes
+     * switching profiles enough for the ones that do not.
+     */
+    defaultModel: string;
     /** Raise an Open Question — used by the terminal failure tier. */
     raiseQuestion(input: {
         conversation: Stored<Conversation>;
@@ -975,7 +981,7 @@ export class LoopDriver {
     ) {
         const messages = buildMessages(assistant, conversation);
         const tools = toolSchemas(resolution.granted);
-        const model = assistant.llmModel || "gpt-4o-mini";
+        const model = assistant.llmModel || this.deps.defaultModel;
 
         let lastError: unknown;
         for (let attempt = 1; attempt <= this.deps.llmMaxAttempts; attempt += 1) {

@@ -288,7 +288,7 @@ is stale, and `just ps` shows it.
 | An **Assistant definition** | Editing the Assistant form, or the seed file | Markdown prompts and Skills |
 | An **Operation's** prose, approval requirement or kill switch | Editing the Operation form | The rest of the Operation is the code's, and shown read-only. `just bootstrap` does not undo these |
 | **Demo data** | `just demo-data` | Parties, processes, documents, invoices, and matching Firefly books |
-| **LLM configuration** | `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_BASE_URL` | `scripted` by default; costs nothing and needs no key |
+| **LLM configuration** | `active` in `llm.json`, one name; the key in `.env` as `<PROFILE>_KEY` | `scripted` is shipped active; costs nothing and needs no key |
 | A **schedule** | A `cron` on an Assistant's `schedule` Trigger | Read in `SCHEDULE_TIMEZONE`, default `Europe/Berlin`. One timezone for the whole system |
 
 ### Out

@@ -519,10 +519,18 @@ interface LlmProvider {
 ```
 
 `OpenAiProvider`, `AnthropicProvider`, and `ScriptedProvider`, which replays
-`runtime/fixtures/llm-script.json`. The choice is made by the **`LLM_PROVIDER` environment
-variable on the compose service**, not only by a constructor argument — that is what lets the
-end-to-end tier drive the *real* Runtime, ThingStore, Firefly and UI deterministically and for
-free. `scripted` is the default (D-002).
+`runtime/fixtures/llm-script.json`. The choice is **data, not a constructor argument**: `llm.json`
+names every configuration the stack knows — provider, endpoint, model, temperature — and its
+`active` field selects one, which `buildRuntime` resolves at startup (D-057). That is what lets the
+end-to-end tier drive the *real* Runtime, ThingStore, Firefly and UI deterministically and for free.
+`scripted` is the profile shipped active (D-002). `llm.json` is gitignored and written by
+`just setup` from the committed `llm.json.example`, so which model a machine uses is that machine's
+own business.
+
+Each profile's key is read from `.env` under a variable named after the profile — `azure_gpt` takes
+`AZURE_GPT_KEY` — so a secret never enters either file and a new profile needs no change
+anywhere else. A profile that names no key is refused at startup, with a message naming the profile,
+the file it was selected in, the endpoint and model it would have used, and the variable to add.
 
 `LlmResponse` carries an optional `usage: { promptTokens, completionTokens }`. Both real providers
 already received it from their APIs and dropped it; they now return it, and `ScriptedProvider`
@@ -739,8 +747,8 @@ Two loaders, deliberately distinct:
 | **Runtime unit** | vitest | The loop driver against `ScriptedProvider`: birth, one Turn, dispatching a call, grant resolution and the four ways it can drop one, suspension on `askUser`, continuation on answer, `wakeAt` timeout, lease recovery **without re-execution**, one Invoice → exactly one Accountant Conversation, `maxTurns` → Open Question, late child result, self-call rejection |
 | **Integration** | vitest against the live stack | The A12 client's CRUD and query, search-then-create idempotency, the Thing repository, every watcher query, the Firefly connector. Skipped rather than failed when the stack is down |
 | **Client** | vitest | The markdown editor's suite and the client's own |
-| **End-to-end** | Playwright, `LLM_PROVIDER=scripted` | Login as four users, every module opened, Party CRUD, a prompt round-tripped through the markdown editor, localisation, the favicon, the whole invoice slice, and surviving a restart |
-| **Live LLM** (opt-in) | Playwright | The same specs against a real model. Skipped without `LLM_API_KEY` |
+| **End-to-end** | Playwright, the `scripted` profile | Login as four users, every module opened, Party CRUD, a prompt round-tripped through the markdown editor, localisation, the favicon, the whole invoice slice, and surviving a restart |
+| **Live LLM** (opt-in) | Playwright | The same specs against a real model. Refuses to run while `llm.json` is on `scripted` |
 
 The scripted provider is not a mock of a collaborator we own — it is a *recorded* substitute for a
 paid, non-deterministic third party, and it is the only way the loop's branching (pending tool

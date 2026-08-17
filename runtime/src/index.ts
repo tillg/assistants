@@ -7,6 +7,7 @@
  */
 
 import { loadConfig } from "./config.js";
+import { ConfigurationError } from "./llm/profiles.js";
 import { describeError, log } from "./log.js";
 import { buildRuntime } from "./services.js";
 import { sleep } from "./loop/advance.js";
@@ -16,7 +17,9 @@ async function main(): Promise<void> {
     log.info("runtime starting", {
         thingStore: config.thingStoreUrl,
         firefly: config.fireflyUrl,
-        llmProvider: config.llmProvider,
+        // Which model it is about to talk to is logged by `buildRuntime`, once the profile named
+        // in this file has been resolved and its key found.
+        llmConfigFile: config.llmConfigFile,
         scanIntervalMs: config.scanIntervalMs,
     });
 
@@ -72,6 +75,14 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
+    // A misconfiguration is not a crash, and its message is the only useful thing in the log: it
+    // says which profile, in which file, needs which variable. Printed as it was written, rather
+    // than escaped into a JSON field behind a stack trace nobody in this position can use.
+    if (error instanceof ConfigurationError) {
+        process.stderr.write(`\n${error.message}\n\n`);
+        process.exitCode = 1;
+        return;
+    }
     log.error("runtime crashed", { error: describeError(error) });
     process.exitCode = 1;
 });

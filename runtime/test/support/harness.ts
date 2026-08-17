@@ -222,6 +222,7 @@ export function buildHarness(
         leaseSeconds: 120,
         maxEscalations: 3,
         llmMaxAttempts: 2,
+        defaultModel: "test",
         raiseQuestion: (input) => createQuestion(input),
     });
 

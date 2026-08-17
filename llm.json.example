@@ -1,0 +1,57 @@
+{
+  "notesForUsage": [
+    "Every LLM this stack knows how to talk to, by name, and which one it is using.",
+    "",
+    "This is the committed sample. `just setup` copies it to `llm.json`, which is gitignored and",
+    "is what actually runs — so your choice of model is yours and never shows up as a change to",
+    "the repository. Edit `llm.json`, not this file, unless you are changing what a fresh clone",
+    "should start with.",
+    "",
+    "Change `active` and restart the Runtime (`just restart runtime`) — that is the whole switch.",
+    "No secret belongs in either file: each profile's key is read from `.env` under a variable",
+    "named after the profile, so `azure_gpt` takes AZURE_GPT_KEY. Adding a profile means adding an",
+    "entry here and one line to `.env`; nothing else in the stack has to know its name.",
+    "",
+    "Fields: provider (openai | anthropic | scripted), baseUrl, model, temperature (optional),",
+    "requiresKey (optional, for a local server that wants none), scriptFile (scripted only).",
+    "`Assistant.LlmModel` overrides `model` for that one Assistant.",
+    "",
+    "See README.md, 'The language model'."
+  ],
+
+  "active": "scripted",
+
+  "profiles": {
+    "scripted": {
+      "provider": "scripted",
+      "model": "scripted",
+      "scriptFile": "/run/fixtures/llm-script.json"
+    },
+
+    "openai": {
+      "provider": "openai",
+      "baseUrl": "https://api.openai.com/v1",
+      "model": "gpt-4o-mini"
+    },
+
+    "anthropic": {
+      "provider": "anthropic",
+      "baseUrl": "https://api.anthropic.com",
+      "model": "claude-sonnet-4-5"
+    },
+
+    "azure_gpt": {
+      "provider": "openai",
+      "baseUrl": "https://YOUR-RESOURCE.openai.azure.com/openai/v1",
+      "model": "gpt-4o"
+    },
+
+    "local_qwen": {
+      "provider": "openai",
+      "baseUrl": "http://host.docker.internal:8000/v1",
+      "model": "Qwen3-Coder-30B-A3B-Instruct-4bit",
+      "temperature": 0,
+      "requiresKey": false
+    }
+  }
+}

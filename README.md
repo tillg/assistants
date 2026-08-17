@@ -167,10 +167,12 @@ just dev
 just demo-data
 ```
 
-`just setup` writes `.env` from the committed `.env.example` and generates every machine
-credential in it. Run it once per clone; it refuses to overwrite an existing `.env`, because the
-database passwords are baked into the Postgres volume the first time it starts
-([D-023](DECISIONS.md)).
+`just setup` writes the two files that are yours rather than the repository's: `.env` from the
+committed `.env.example`, generating every machine credential in it, and `llm.json` from
+`llm.json.example`, which says which language model to use. Run it once per clone; it refuses to
+overwrite an existing `.env`, because the database passwords are baked into the Postgres volume the
+first time it starts ([D-023](DECISIONS.md)), and it leaves an existing `llm.json` alone for the
+same kind of reason — it is your choice of model, not a default to be reapplied.
 
 `just dev` builds the models, the server jars, the client bundle and every image, brings the
 stack up, waits until the ThingStore, Firefly, Keycloak and the frontend all answer, and loads the
@@ -203,42 +205,121 @@ what, where it stands and what it has cost — and it carries the pending questi
 
 ### The language model
 
-The stack runs with a **scripted** language model by default: `LLM_PROVIDER=scripted` replays
-`runtime/fixtures/llm-script.json`, which scripts the full doctor's-invoice scenario across both
-Assistants. It costs nothing, needs no key, and behaves the same every time — which is what lets
-the end-to-end tier drive the *real* Runtime, ThingStore, Firefly and UI deterministically.
+Every model this stack knows how to talk to is named in `llm.json`, and one line there says which
+of them it is using ([D-057](DECISIONS.md)). `just setup` writes that file from the committed
+[`llm.json.example`](llm.json.example); `llm.json` itself is gitignored, so which model your machine
+uses is your business and not a change to the repository. Here is the sample it starts from:
 
-To point it at a real model, set the environment before `just up` (or `just dev`):
+```jsonc
+{
+  "active": "scripted",
+
+  "profiles": {
+    "scripted":   { "provider": "scripted", "scriptFile": "/run/fixtures/llm-script.json" },
+    "openai":     { "provider": "openai",    "baseUrl": "https://api.openai.com/v1", "model": "gpt-4o-mini" },
+    "anthropic":  { "provider": "anthropic", "baseUrl": "https://api.anthropic.com",  "model": "claude-sonnet-4-5" },
+    "azure_gpt":  { "provider": "openai",    "baseUrl": "https://YOUR-RESOURCE.openai.azure.com/openai/v1", "model": "gpt-4o" },
+    "local_qwen": { "provider": "openai",    "baseUrl": "http://host.docker.internal:8000/v1",
+                    "model": "Qwen3-Coder-30B-A3B-Instruct-4bit", "temperature": 0, "requiresKey": false }
+  }
+}
+```
+
+Switching model is editing `active` and `just restart runtime`. Nothing else moves — no exports,
+no second copy of an endpoint, no variable that means one thing this week and another the next.
+
+The profile shipped active is **`scripted`**, which replays `runtime/fixtures/llm-script.json` —
+the full doctor's-invoice scenario across both Assistants. It costs nothing, needs no key, and
+behaves the same every time, which is what lets the end-to-end tier drive the *real* Runtime,
+ThingStore, Firefly and UI deterministically.
+
+#### Adapting it
+
+**To use one of the profiles that is already there** — say OpenAI:
+
+1. Put the key in `.env`, on a line named after the profile:
+   ```
+   OPENAI_KEY='sk-...'
+   ```
+2. Set `"active": "openai"` in `llm.json`.
+3. `just restart runtime`, and check it took: `just logs runtime` prints
+   `llm profile selected {"profile":"openai","provider":"openai","model":"gpt-4o-mini",…}` as its
+   second line.
+
+**To add one of your own** — a colleague's gateway, a second Azure deployment, another local
+server — add an entry under `profiles` and give it a name you would recognise in a log:
+
+```jsonc
+"work_gateway": {
+  "provider": "openai",                          // openai | anthropic | scripted
+  "baseUrl": "https://gateway.example.com/v1",   // no trailing slash needed
+  "model": "gpt-4o",                             // what the Turn asks for
+  "temperature": 0,                              // optional; omitted means the provider's default
+  "requiresKey": true                            // optional; false for a server that wants no key
+}
+```
+
+Then `WORK_GATEWAY_KEY='...'` in `.env`, `"active": "work_gateway"`, and restart. **The name is
+the only thing that has to agree between the two files** — the key's variable is the profile name
+uppercased with `_KEY` on the end. Nothing in compose, the justfile or the code has to learn the
+name, which is the point of the convention.
+
+Rules worth knowing before you write one:
+
+| | |
+|---|---|
+| `provider` | Only `openai`, `anthropic` and `scripted` have implementations. `openai` means the chat-completions API, so it fits any OpenAI-compatible gateway, not just OpenAI |
+| `model` | Required for `openai` and `anthropic`. It is the *default*: an Assistant with its own `LlmModel` overrides it, and both seeded ones leave that empty so they follow the profile |
+| `baseUrl` | Defaults to the provider's own (`https://api.openai.com/v1`, `https://api.anthropic.com`) if you leave it out |
+| `temperature` | Sent only when present. Set it to `0` for a local quantized model — see below |
+| `requiresKey` | Set `false` only for a server that genuinely wants no key. Otherwise the startup check below is what you want |
+| the name | Letters, digits and underscores, starting with a letter — because it becomes the name of an environment variable |
+
+**The keys live in `.env`, one per profile.** That is why adding a profile touches two files and no
+code: each profile keeps its own key, so switching `active` never means pasting one key over
+another, and nothing in compose has to enumerate a name nobody has invented yet (which is why the
+Runtime service takes `.env` whole rather than a list of variables).
+
+**If a key is missing, the Runtime says so at startup** rather than at the first Turn, and says
+everything needed to fix it — which profile, chosen where, talking to what, and the exact line to
+add to which file:
 
 ```
-export LLM_PROVIDER=openai
-export LLM_API_KEY=sk-...
-export LLM_MODEL=gpt-4o-mini          # optional; this is the default
-export LLM_BASE_URL=https://api.openai.com/v1   # optional; any OpenAI-compatible endpoint
+The LLM profile "azure_gpt" has no API key.
+
+  profile     azure_gpt
+  selected    by "active" in /app/llm.json
+  provider    openai
+  endpoint    https://YOUR-RESOURCE.openai.azure.com/openai/v1
+  model       gpt-4o
+
+Add its key to .env in the project root — the gitignored file `just setup` writes, which
+is where every secret in this stack lives:
+
+  AZURE_GPT_KEY='<the key for azure_gpt>'
+
+Then `just restart runtime`. …
 ```
 
-`LLM_PROVIDER=anthropic` selects the Anthropic Messages API implementation instead. The choice is
-a compose-level environment variable rather than a constructor argument, on purpose
-([D-002](DECISIONS.md)).
-
-**`Assistant.LlmModel` overrides `LLM_MODEL`.** The environment variable is only the default; each
-Assistant carries its own model on its Thing, and that is what the Turn uses. Changing the variable
-alone leaves both seeded Assistants asking for `gpt-4o-mini`, which a gateway that does not serve it
-answers with a 404 — recorded as an error on the Conversation, which is how it announces itself.
+**`Assistant.LlmModel` overrides the profile's `model`,** for that one Assistant. Both seeded
+Assistants leave it empty, so they follow whatever profile is active; set it in the UI when one
+Assistant should use a different model from the rest.
 
 #### Against a local model
 
-Any OpenAI-compatible server works — the endpoint is the only thing that has to be true. Two settings
-are not optional in that case, and both were learned the hard way ([D-054](DECISIONS.md)):
+Any OpenAI-compatible server works — the endpoint is the only thing that has to be true. Two
+settings on the profile are not optional in that case, and both were learned the hard way
+([D-054](DECISIONS.md)), which is what the `local_qwen` profile above is showing:
 
-```
-export LLM_BASE_URL=http://host.docker.internal:8000/v1   # NOT 127.0.0.1: the Runtime is in a container
-export LLM_TEMPERATURE=0
-```
+- `"baseUrl": "http://host.docker.internal:8000/v1"` — **not** `127.0.0.1`: the Runtime is in a
+  container, and `127.0.0.1` there is the container.
+- `"temperature": 0` — sent only when the profile sets it, so the provider's own default stands
+  otherwise. A quantized model needs `0` to emit **structured** tool calls: at its default it
+  writes the call as prose instead, which the Runtime now catches and retries rather than
+  mistaking for an answer.
 
-`LLM_TEMPERATURE` is sent only when set, so the provider's own default stands otherwise. A quantized
-model needs `0` to emit **structured** tool calls: at its default temperature it writes the call as
-prose instead, which the Runtime now catches and retries rather than mistaking for an answer.
+`"requiresKey": false` is the third thing worth knowing: a local server usually wants no key, and
+without it the startup check above would refuse to run.
 
 Completions are bounded at 4096 tokens, as the Anthropic provider has always bounded them. Without a
 bound a local server's own default applies — 32768 is common, which at a quantized model's speed is
@@ -266,7 +347,7 @@ makes both of those cases unreachable.
 | Recipe | What it does | When you want it |
 |---|---|---|
 | `just` | Lists every recipe, unsorted | To remember what exists |
-| `just setup` | Writes `.env` from `.env.example`, generating every machine credential, then renders the Keycloak files. Refuses to overwrite an existing `.env` | Once, on a fresh clone, before anything else |
+| `just setup` | Writes `.env` from `.env.example`, generating every machine credential, and `llm.json` from `llm.json.example`, then renders the Keycloak files. Refuses to overwrite either | Once, on a fresh clone, before anything else |
 | `just dev` | `build` → `up` → `wait` → `bootstrap`, then prints the URLs. Idempotent | The one command to get from a set-up clone to a running system |
 | `just build` | Converts the models, builds the server jars and images, builds the runtime image | After changing a model, the client, the server or the Runtime |
 | `just up` | Renders the Keycloak secrets, then starts the stack in the background, including the `server-init` profile | When the images are already built |
@@ -320,7 +401,7 @@ running it on a fresh stack, or twice, does nothing.
 | `just test-integration` | The A12 client, the Thing repository, the watcher's queries and the Firefly connector against the **live** stack, one file at a time. Skipped rather than failed when the stack is down | After touching `runtime/src/a12/`, the watcher's queries or the Firefly connector — the tier that catches what the unit fakes cannot see. Requires the stack to be up |
 | `just test-client` | The markdown editor's unit tests and the client's own | After touching `client/src/` |
 | `just test-e2e` | Playwright against the running stack with the scripted model | Before a commit that touches the UI. Requires the stack to be up |
-| `just test-live` | The same end-to-end specs against a live LLM. Skipped without `LLM_API_KEY` | Rarely, and deliberately — it costs money and is non-deterministic |
+| `just test-live` | The same end-to-end specs against whatever model the stack is running. Refuses to run while `llm.json` is on `scripted` | Rarely, and deliberately — it costs money and is non-deterministic |
 
 ### Housekeeping
 
@@ -624,9 +705,11 @@ This is one running vertical slice, not a finished system. What is honestly miss
 │   ├── auth/                 roles.yaml — realm role → A12 access rights
 │   └── validate-models.mjs   the model validator just test-models runs
 ├── .env.example              every credential the stack needs; just setup turns it into .env
+├── llm.json.example          the LLM profiles; just setup turns it into llm.json
 ├── compose/                  docker-compose.yml, the Firefly and postgres bootstrap scripts
 │   └── keycloak/             the A12Realm import, as *.template + the renderer
 ├── scripts/setup-env.mjs     writes .env and generates the machine credentials
+├── scripts/setup-llm.mjs     writes llm.json from its sample, once
 ├── e2e/                      Playwright
 ├── RESEARCH_INDEX.md         what each research paper settled, and what it left open
 ├── specs/

@@ -15,6 +15,12 @@
 .env
 compose/.env.local
 
+# The same split, for the same reason (D-057): `llm.json.example` is committed so a clone knows
+# what a profile looks like, and `llm.json` is the working copy `just setup` writes. It holds no
+# secret — it is ignored so that switching model, which is the one line `active`, stays a local
+# act rather than a change to the repository.
+llm.json
+
 # Rendered from compose/keycloak/*.template by `just render-secrets`, because Keycloak's realm
 # import stores `${env.VAR}` literally instead of substituting it (D-023). The templates are
 # committed; these outputs carry the passwords and are not.

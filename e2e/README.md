@@ -15,7 +15,7 @@ KIND, either express or implied.
 
 Playwright, driving the **real** stack: the A12 web application, the ThingStore, the Runtime and
 Firefly III. Nothing here is mocked. The only substitution is the LLM itself — the Runtime runs
-with `LLM_PROVIDER=scripted`, replaying `runtime/fixtures/llm-script.json`, which is what makes a
+on the `scripted` profile in `llm.json`, replaying `runtime/fixtures/llm-script.json`, which is what makes a
 loop driven by a paid, non-deterministic third party assertable at all.
 
 ## Running them
@@ -45,11 +45,15 @@ npm run e2e:report      # open the last HTML report
 npm run typecheck       # tsc --noEmit
 ```
 
-Against a live model instead of the scripted one, from the repository root:
+Against a live model instead of the scripted one: point `active` in `llm.json` at a live profile,
+`just restart runtime`, then from the repository root:
 
 ```bash
-just test-live          # LLM_PROVIDER=openai; needs LLM_API_KEY
+just test-live          # refuses to run while llm.json is on `scripted`
 ```
+
+These specs drive the browser and never knew which model was behind the stack, which is why the
+switch is the Runtime's configuration rather than a variable on this command.
 
 Environment overrides: `BASE_URL` (8081), `THINGSTORE_URL` (8082), `FIREFLY_URL` (8084),
 `KEYCLOAK_URL` (8089), `KEYCLOAK_REALM`, `KEYCLOAK_CLIENT_ID`,

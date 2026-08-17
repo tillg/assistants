@@ -3,9 +3,9 @@
  *
  * This is not a mock of a collaborator we own — it is a recorded substitute for a paid,
  * non-deterministic third party, and it is the only way the loop's branching (pending tool call
- * → suspend → resume → recover) can be asserted at all. Selecting it through `LLM_PROVIDER`
- * means the end-to-end tier drives the *real* Runtime, ThingStore, Firefly and UI, and only the
- * model is substituted.
+ * → suspend → resume → recover) can be asserted at all. Selecting it as a named profile in
+ * `llm.json` means the end-to-end tier drives the *real* Runtime, ThingStore, Firefly and UI, and
+ * only the model is substituted.
  *
  * Scripts match on the assistant key and the turn number, so one file can drive a whole
  * multi-Assistant scenario.
@@ -80,8 +80,8 @@ export class ScriptedProvider implements LlmProvider {
                 error: {
                     message:
                         `The scripted language model has no step for assistant "${assistantKey}" ` +
-                        `turn ${turn}. This stack is running with LLM_PROVIDER=scripted; set ` +
-                        `LLM_PROVIDER=openai and LLM_API_KEY to use a real model.`,
+                        `turn ${turn}. This stack is running the "scripted" profile; point ` +
+                        `"active" in llm.json at a real model and restart the Runtime.`,
                     transient: false,
                 },
             };

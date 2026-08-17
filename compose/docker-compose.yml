@@ -183,6 +183,10 @@ services:
       # Import is create-only: once the realm exists in Postgres, editing these files changes
       # nothing until the volume is dropped. `just clean` is the way to reload them.
       - ./keycloak:/opt/keycloak/data/import:ro
+      # The Assistants login theme, which the realm selects with `loginTheme`. Mounted rather
+      # than baked into an image so editing the CSS is a `just restart keycloak`, not a
+      # rebuild; `start-dev` disables the theme cache, so even that is usually a reload.
+      - ./keycloak/themes:/opt/keycloak/themes:ro
     command: ["start-dev", "--import-realm"]
     healthcheck:
       # KC_HEALTH_ENABLED puts /health/ready on the management port, 9000. The image ships no
@@ -367,6 +371,17 @@ services:
     scale: 1
     deploy:
       replicas: 1
+    # The whole of `.env`, not a list of names, and that is what makes named LLM profiles work:
+    # each profile in `llm.json` reads its key from a variable named after it (AZURE_GPT_KEY for
+    # `azure_gpt`), so adding a profile must not mean editing this file too. Nothing here can
+    # enumerate a name nobody has invented yet.
+    #
+    # The cost is that the Runtime container also sees the rest of `.env` -- the database and
+    # Keycloak credentials it has no use for. Accepted: this is a single-household stack whose
+    # every port binds to 127.0.0.1, and the alternative is a second secrets file that D-023
+    # exists to prevent. `environment:` below still wins over anything of the same name here.
+    env_file:
+      - ../.env
     environment:
       THINGSTORE_URL: http://server:8080
       THINGSTORE_USER: runtime
@@ -388,15 +403,11 @@ services:
       FIREFLY_TOKEN_FILE: /run/firefly/pat.txt
       UI_BASE_URL: http://localhost:8081
 
-      # `scripted` keeps the stack free and deterministic, which is what lets the end-to-end
-      # tier drive the REAL Runtime, ThingStore, Firefly and UI. Set LLM_PROVIDER=openai (and
-      # LLM_API_KEY) to run it against a live model.
-      LLM_PROVIDER: ${LLM_PROVIDER:-scripted}
-      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
-      LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
-      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-}
-      LLM_SCRIPT_FILE: /run/fixtures/llm-script.json
+      # Which model the Assistants talk to is `active` in ../llm.json, mounted below -- not a
+      # variable here. The profile it ships active is `scripted`, which keeps the stack free and
+      # deterministic, and that is what lets the end-to-end tier drive the REAL Runtime,
+      # ThingStore, Firefly and UI. Change `active` there and `just restart runtime`.
+      LLM_CONFIG_FILE: /app/llm.json
 
       SCAN_INTERVAL_MS: ${SCAN_INTERVAL_MS:-2000}
       # Every Schedule Trigger's cron is read in this timezone and resolved to a UTC instant before
@@ -406,6 +417,9 @@ services:
     volumes:
       - firefly_token:/run/firefly:ro
       - ../runtime/fixtures:/run/fixtures:ro
+      # Mounted rather than baked into the image: switching model is editing one line and
+      # restarting, not rebuilding. Read-only -- the Runtime never writes it.
+      - ../llm.json:/app/llm.json:ro
     depends_on:
       server:
         condition: service_started

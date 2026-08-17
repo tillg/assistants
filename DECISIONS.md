@@ -1800,3 +1800,50 @@ minute — *even when both succeed*. Parallel workers each call `ThingStore.conn
 `beforeAll`, so they collide. My first fix waited the lockout out; the wait must exceed 60 seconds
 and a `beforeAll` only gets a 60-second budget, so the hook died before the retry could land and one
 failure became another. Jitter over a window wider than the check means the burst never forms.
+
+## D-057 — Named LLM profiles in one file, with the keys named after them
+
+*2026-08-17, after a second endpoint made the first one unmanageable.*
+
+The LLM was five environment variables — `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`,
+`LLM_API_KEY`, `LLM_TEMPERATURE`. That holds exactly one configuration and gives it no name. Keeping
+a local server *and* a hosted one around meant keeping two sets of exports somewhere they would
+drift, and switching between them meant retyping four values correctly — with the failure mode being
+a 404 from a gateway rather than anything that says which value was wrong.
+
+**`llm.json` holds the shape of every configuration; `active` selects one.** A profile is a name and
+four fields, and switching model is editing one line and `just restart runtime`. The file has no
+secrets in it, which is why the committed sample can carry real, usable examples — `azure_gpt`,
+`local_qwen` — rather than a comment describing them.
+
+It is split the same way `.env` is, and for a different reason than secrecy: `llm.json.example` is
+committed so a clone knows what a profile looks like, `llm.json` is gitignored and is what runs. The
+point is that `active` is a *local* choice — switching to a local model for an afternoon should not
+show up as a change to the repository, and should not be something two people can disagree about in
+a merge. `just setup` writes it, and `just up` writes it too if it is missing, because compose
+bind-mounts it and a bind mount with no source file is silently created as a directory.
+
+**Each profile's key is read from `.env` under a variable named after it.** `azure_gpt` takes
+`AZURE_GPT_KEY`. That is what makes a profile a self-contained thing: adding one touches two files
+and no code, switching `active` never means pasting one key over another, and no key has to be
+enumerated anywhere. It is also the reason the Runtime service now takes `env_file: ../.env` whole
+instead of a list of names — nothing in compose can name a variable nobody has invented yet. The
+cost is that the container sees the rest of `.env` too; accepted for a single-household stack whose
+every port binds to 127.0.0.1, and the alternative was a second secrets file, which is what D-023
+exists to prevent.
+
+**The error message is the feature.** A profile that will not start is always a half-finished edit
+across those two files, so the check runs in `buildRuntime` — at startup, before the Runtime reports
+itself healthy, not hours later as an error on somebody's transcript — and it names the profile, the
+file it was selected in, the provider, the endpoint and model it would have used, the exact variable
+to add to `.env`, and the command to restart. Eight of the eleven tests on `profiles.ts` assert
+message content rather than behaviour, which is the right ratio for a thing whose whole job is to be
+read by someone who is stuck.
+
+**Two things fell out of it.** `Assistant.LlmModel` used to fall back to a literal `"gpt-4o-mini"`
+in `advance.ts`, and both seeded Assistants carried that same literal on their Thing — so changing
+`LLM_MODEL` moved nothing at all, which README had to document as a gotcha (D-054's four defects
+were found *around* this). The fallback is now the active profile's `model` and the seeds are empty,
+so switching profile switches the model for every Assistant that has no opinion of its own. And
+`"requiresKey": false` exists because a local server usually wants no key, and the startup check
+would otherwise have made D-054's setup unreachable.
