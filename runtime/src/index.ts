@@ -32,27 +32,15 @@ async function main(): Promise<void> {
 
     const runtime = buildRuntime(config);
 
-    // Wait for the ThingStore rather than crash-looping against it while the stack comes up.
-    for (let attempt = 1; ; attempt += 1) {
-        if (await runtime.client.isReachable()) break;
-        if (attempt % 15 === 0) log.info("still waiting for the ThingStore", { attempt });
-        await sleep(2000);
-    }
-    await runtime.client.login();
-    log.info("connected to the ThingStore");
-
-    let inbox: Inbox | undefined;
-    if (config.inboundPort > 0) {
-        inbox = await startInbox({
-            port: config.inboundPort,
-            secret: config.inboundSecret,
-            allowlist: config.clientCallable,
-            registry: runtime.registry,
-            things: runtime.things,
-        });
-    }
-
+    // Declared, and the handlers registered, BEFORE the wait below rather than after it.
+    //
+    // They used to come after, and the effect was that a Runtime asked to stop while it was still
+    // waiting for the ThingStore ignored the signal completely: no handler was installed yet, and
+    // the wait loop had no flag to consult even once one was. On a cold stack that is not a
+    // theoretical window — the store can take minutes, and compose kills the container at the end
+    // of its timeout, which reads in the log exactly like a shutdown bug in the scan loop.
     let stopping = false;
+    let inbox: Inbox | undefined;
     const stop = (signal: string) => {
         log.info(`received ${signal}, finishing the current scan and stopping`);
         stopping = true;
@@ -65,6 +53,32 @@ async function main(): Promise<void> {
     };
     process.on("SIGTERM", () => stop("SIGTERM"));
     process.on("SIGINT", () => stop("SIGINT"));
+
+    // Wait for the ThingStore rather than crash-looping against it while the stack comes up.
+    for (let attempt = 1; !stopping; attempt += 1) {
+        if (await runtime.client.isReachable()) break;
+        if (attempt % 15 === 0) log.info("still waiting for the ThingStore", { attempt });
+        await sleep(2000);
+    }
+    if (stopping) {
+        // Asked to stop before we ever connected. Nothing has been started, so there is nothing to
+        // wind down — but say so, because "runtime stopped" with no "connected" line above it is
+        // otherwise a puzzle.
+        log.info("stopped while waiting for the ThingStore");
+        return;
+    }
+    await runtime.client.login();
+    log.info("connected to the ThingStore");
+
+    if (config.inboundPort > 0) {
+        inbox = await startInbox({
+            port: config.inboundPort,
+            secret: config.inboundSecret,
+            allowlist: config.clientCallable,
+            registry: runtime.registry,
+            things: runtime.things,
+        });
+    }
 
     let consecutiveFailures = 0;
     while (!stopping) {

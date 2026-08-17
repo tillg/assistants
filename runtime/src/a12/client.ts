@@ -187,6 +187,27 @@ export class A12Client {
         return this.token!;
     }
 
+    /**
+     * The same token, for the one caller that is not JSON-RPC.
+     *
+     * Attachments do not go through `rpc()`: they are a REST POST to `/api/v2/attachment` with the
+     * bytes as the body ({@link ContentStoreClient}). That is a second shape of request against the
+     * same server and the same identity, so it takes the same token rather than a second login —
+     * two logins would mean two tokens expiring at different moments and two 401 paths to get
+     * right.
+     *
+     * `invalidateToken` exists for the same reason `rpc()` clears `this.token` on a 401: whoever
+     * gets the 401 has to be able to say so, or the next call re-presents the credential the server
+     * has just refused.
+     */
+    async currentToken(): Promise<string> {
+        return this.ensureToken();
+    }
+
+    invalidateToken(): void {
+        this.token = undefined;
+    }
+
     /** Send a batch. Retries exactly once after a re-login when the store answers 401. */
     async rpc(requests: RpcRequest[]): Promise<unknown[]> {
         if (requests.length === 0) return [];

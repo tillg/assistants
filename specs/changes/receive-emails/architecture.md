@@ -221,9 +221,28 @@ The A12 attachment mechanism stores bytes in `assistants-cs` and puts the identi
 Document's attachment group. So `a12/content.ts` needs to upload, with the Runtime's own Keycloak
 token, and return what `ADD_DOCUMENT` must carry.
 
-**This is spiked first** ([plan](plan.md) step 1), because if it turns out to need a route the
-server does not expose to a non-browser client, the shape of the change moves. The fallback is
-staged rather than abandoned:
+**This was spiked first** ([plan](plan.md) step 1), and the answer is **Stage B: the route is fully
+reachable from the Runtime.** It is a plain REST POST carrying the same Keycloak `Bearer` token the
+JSON-RPC client already holds — no browser session, no cookie, no multipart.
+
+**The premise above was wrong in one detail, and it is worth correcting rather than quietly
+fixing:** `/cs` is *download*-only (`/cs/download/<uuid>`), and the frontend does not even proxy it
+for upload. Uploads go to **`/api/v2/attachment`**, which the Runtime already talks to. Three
+details that could not have been guessed and came from reading the web application's own uploader:
+the query string carries the metadata (`filename`, `documentModelName`, `pathToField`) and is
+encoded exactly once; the body is the raw bytes; and the `Content-Type` is
+`application/json;charset=utf8` even though the body is binary, because A12's `HeadersFilter`
+replaces the header set wholesale for every REST call. We mirror the browser's request because the
+browser's request is the one demonstrably accepted.
+
+`Document_DM` carries an `AttachmentIdOrContentFilled` rule — `NotExactlyOneFieldFilled(attachment_id, content)` — so setting both is a validation error rather than belt and braces. We set `attachment_id`
+and leave `content` absent.
+
+Two configuration blockers were found by the same spike, and both are one-line fixes this change
+makes: the `runtime` role had no `ATTACHMENT_UPLOAD` right (a 403 on every forwarded invoice), and
+the server's `allowedMimeTypes` listed only `image/png,image/jpeg` (a rejection of every PDF, which
+is the whole point). The staged fallback below is therefore **not needed** and is kept only as the
+record of what would have happened:
 
 | | Documents created | Attachment | Usable? |
 |---|---|---|---|

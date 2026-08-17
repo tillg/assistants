@@ -60,3 +60,8 @@ roles:
       - DOCUMENT_PARTIAL_UPDATE
       - MODEL_READ
       - QUERY
+      # Added with the letterbox: the mail ingest is the first writer of a binary in this system,
+      # and without this the Runtime gets a 403 on every forwarded invoice. It is a *narrower* right
+      # than the ones above it — an attachment is content hung off a Document the Runtime is already
+      # permitted to create — so it takes nothing back from D-007 or D-007a.
+      - ATTACHMENT_UPLOAD
