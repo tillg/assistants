@@ -164,6 +164,17 @@ an IMAP folder, so `assistant` is one string that means a label to Gmail and a f
 everyone else. The state machine is therefore Gmail's own, reached through a protocol that is not
 Gmail's — which is what keeps the Connector swappable if the household ever leaves.
 
+**The `/` is a Gmail assumption, and it is worth knowing which kind.** Gmail's hierarchy delimiter is
+`/`, so `assistant/processed` is a sub-label of `assistant`. Other servers differ — GreenMail, which
+the integration tier runs against, uses `.`, so there the same four names are four *sibling*
+mailboxes that happen to contain a slash rather than a parent and three children. Both work, and
+they work for the same reason: **neither the connector nor the ingest ever asks about hierarchy.**
+The four names are opaque strings handed to `CREATE`, `SELECT` and `MOVE`, and nothing reads a tree.
+So the nesting is cosmetic — it is how the household sees the labels grouped in Gmail's sidebar, not
+something the code depends on. The one server that would break this is one that *rejects* `/` in a
+mailbox name, and nothing currently detects that; it would fail loudly at `ensureFolders` on the
+first poll, which is the right place to fail.
+
 Nothing here ever deletes mail, and nothing is ever marked read. Every message ends in a folder that
 says what happened to it, and all three outcomes are visible to a human in Gmail without opening this
 repository. That is deliberate: a silent drop and a silent success look identical from the outside,
@@ -289,8 +300,19 @@ address is a default that turns spam into Conversations and LLM spend on the fir
 misconfigured. The startup log says how many senders are allowed, so "0" is visible rather than
 inferred.
 
-TLS is implicit (port 993) and certificate verification is never disabled — there is no
-`MAIL_INSECURE` flag, because the moment one exists someone sets it.
+TLS is implicit (port 993) and **certificate verification is never disabled** — there is no
+`MAIL_INSECURE` flag, and no `tls` passthrough, because the moment either exists someone sets it and
+the connection still looks encrypted in every log.
+
+There is one qualification, added when the connector was first tested against a real IMAP server.
+`MailboxOptions` carries an optional `secure`, defaulting to `true`, which the integration tier sets
+to `false`. The obvious alternative — trusting the test server's certificate — is impossible:
+GreenMail's is self-signed with no SAN, so hostname verification can never pass however the trust
+store is configured. Between a `tls: { rejectUnauthorized: false }` passthrough and a plain
+`secure: false`, the second is the smaller lie: a `tls` option is exactly the one that ends up in a
+production config with verification quietly off while still *reading* as encrypted, whereas
+`secure: false` is plaintext, obvious at the call site, and greppable. The sentence above therefore
+stays literally true — **there is still no way to have TLS and skip verifying it.**
 
 ## The Operation Thing
 
