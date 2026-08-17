@@ -24,6 +24,7 @@
 
 import { expect, test } from "../../fixtures";
 import { BasePage } from "../../pages/BasePage";
+import { TILES } from "../../pages/DashboardPage";
 import { TestID } from "../../types/testIds";
 
 const MODULES: Array<{ menu: string; column: string }> = [
@@ -54,7 +55,10 @@ test.describe("Navigation", () => {
 
         await app.clickMenuItem("Dashboard");
 
-        await expect(page.locator("[data-role^='tile-'][data-state]")).toHaveCount(4);
+        // Counted from `TILES` rather than written as a literal: this assertion said `4` and went on
+        // saying it after the Dashboard grew a second row, so the suite failed for a change that was
+        // correct. The count belongs to whoever owns the layout, and that is the page object.
+        await expect(page.locator("[data-role^='tile-'][data-state]")).toHaveCount(TILES.length);
         await expect(page.getByTestId(TestID.TABLE)).toHaveCount(0);
         await expect(page.getByTestId(TestID.NOTIFICATION_ITEM_TITLE)).toHaveCount(0);
     });
