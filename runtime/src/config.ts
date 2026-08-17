@@ -24,6 +24,19 @@ function number(name: string, fallback: number): number {
     return parsed;
 }
 
+/**
+ * A comma-separated list, trimmed, with blanks dropped.
+ *
+ * Unset and empty both mean the empty list rather than a default, because the one list read this way
+ * grants access: a typo that produced a non-empty fallback would be a widening nobody wrote down.
+ */
+function list(name: string): readonly string[] {
+    return (process.env[name] ?? "")
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry !== "");
+}
+
 export interface Config {
     readonly thingStoreUrl: string;
     readonly thingStoreUser: string;
@@ -76,10 +89,35 @@ export interface Config {
      * would be a field nobody sets correctly and everybody has to reason about.
      */
     readonly scheduleTimezone: string;
+
+    /**
+     * The port the inbox listens on, or `0` for "do not listen at all" (ADR-0023).
+     *
+     * Zero is the default because the Runtime's job is the scan loop and the inbox is an addition to
+     * it: a deployment that does not want the door open should not have to know a setting exists to
+     * keep it shut. Compose sets it; a test binds an ephemeral port; nothing else opens a socket.
+     */
+    readonly inboundPort: number;
+    /**
+     * The secret the server presents to the inbox. Not the User's authentication — that already
+     * happened at the server, against Keycloak — this is what stops any other container on the
+     * compose network calling the door outward.
+     */
+    readonly inboundSecret: string;
+    /**
+     * The Operations an External Call may name. Deployment's half of the gate, and deliberately
+     * separate from `clientReadable`: that flag says an Operation is *safe* to call without a
+     * Conversation, and this list says we have decided to *offer* it. Empty means the inbox admits
+     * nothing, which is the right default for a list that grants access.
+     */
+    readonly clientCallable: readonly string[];
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     void env;
+    // Read before the object literal because `inboundSecret` is conditional on it: the secret is
+    // required exactly when the door is open, and optional when it is not.
+    const inboundPort = number("INBOUND_PORT", 0);
     return {
         thingStoreUrl: optional("THINGSTORE_URL", "http://server:8080"),
         thingStoreUser: optional("THINGSTORE_USER", "runtime"),
@@ -113,6 +151,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         // invoices are GOÄ. UTC would have been the neutral choice and would have put the
         // daylight-saving cases ADR-0016 exists for out of reach in practice.
         scheduleTimezone: optional("SCHEDULE_TIMEZONE", "Europe/Berlin"),
+
+        inboundPort,
+        // `required`, and only when the port is open: a listener that would execute Operations for
+        // anyone who can reach it is not something to start with an empty default. Failing at
+        // startup is the correct behaviour — the alternative is a door that opens quietly.
+        inboundSecret: inboundPort === 0 ? "" : required("INBOUND_SECRET"),
+        clientCallable: list("CLIENT_CALLABLE_OPERATIONS"),
     };
 }
 

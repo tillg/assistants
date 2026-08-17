@@ -79,6 +79,15 @@ export class DashboardPage extends BasePage {
         return this.page.locator("[data-role^='tile-'][data-state='error']");
     }
 
+    /**
+     * Which shape a Tile got — `tile` for a summary, `button` for the control that opens the books.
+     * Asserted because a Tile silently reverting to the wrong shape is the exact regression the
+     * bookkeeping door was changed to fix: drawn as a Tile it read as one whose number had failed.
+     */
+    async variant(name: TileName): Promise<string | null> {
+        return this.tile(name).getAttribute("data-variant");
+    }
+
     /** The leading integer of a headline: `318 in flight` is 318, and `49` is 49. */
     async headlineNumber(name: TileName): Promise<number> {
         const text = await this.headline(name);

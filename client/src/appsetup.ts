@@ -156,7 +156,7 @@ export function setup() {
         addView("ConversationsTile", dashboardViewMap.ConversationsTile),
         addView("DocumentsTile", dashboardViewMap.DocumentsTile),
         addView("AssistantsTile", dashboardViewMap.AssistantsTile),
-        addView("BookkeepingTile", dashboardViewMap.BookkeepingTile),
+        addView("BookkeepingButton", dashboardViewMap.BookkeepingButton),
         addLayout("ApplicationFrame", { component: CustomApplicationFrameLayout })
     );
 

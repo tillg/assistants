@@ -1,12 +1,19 @@
 /**
  * The Runtime's entry point: scan, act, sleep, repeat.
  *
- * There is nothing else. No HTTP server, no queue, no scheduler — the ThingStore is the only
- * Authority for pending work, so scanning it is all there is to do (D-005). A crash here is a
- * non-event: everything the Runtime knows is already written down.
+ * No queue and no scheduler — the ThingStore is the only Authority for **pending work**, so scanning
+ * it is all there is to do (D-005). A crash here is a non-event: everything the Runtime knows is
+ * already written down.
+ *
+ * There is now one other thing, and it does not touch that sentence. When `INBOUND_PORT` is set, the
+ * Runtime opens **the door outward** (ADR-0023): a read-only route that lets the client ask for an
+ * allowed Operation to be executed against an External System, because the Runtime is the only
+ * component that can reach one. It carries no pending work, answers no question about what is
+ * waiting, and keeps nothing between requests. Unset — the default — and nothing listens at all.
  */
 
 import { loadConfig } from "./config.js";
+import { startInbox, type Inbox } from "./inbound/server.js";
 import { ConfigurationError } from "./llm/profiles.js";
 import { describeError, log } from "./log.js";
 import { buildRuntime } from "./services.js";
@@ -34,10 +41,27 @@ async function main(): Promise<void> {
     await runtime.client.login();
     log.info("connected to the ThingStore");
 
+    let inbox: Inbox | undefined;
+    if (config.inboundPort > 0) {
+        inbox = await startInbox({
+            port: config.inboundPort,
+            secret: config.inboundSecret,
+            allowlist: config.clientCallable,
+            registry: runtime.registry,
+            things: runtime.things,
+        });
+    }
+
     let stopping = false;
     const stop = (signal: string) => {
         log.info(`received ${signal}, finishing the current scan and stopping`);
         stopping = true;
+        // Closed here rather than after the loop: an open listener keeps the event loop alive, so a
+        // Runtime that only set the flag would go on running until compose lost patience and killed
+        // it. The scan loop's own exit is what ends the process; this is what lets it.
+        void inbox?.close().catch((error: unknown) => {
+            log.warn("the door outward did not close cleanly", { error: describeError(error) });
+        });
     };
     process.on("SIGTERM", () => stop("SIGTERM"));
     process.on("SIGINT", () => stop("SIGINT"));

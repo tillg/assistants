@@ -66,6 +66,13 @@ services:
       MGMTP_A12_UAA_AUTHENTICATION_CLIENT-SELFCONFIGURATION_OIDC_PUBLIC-CLIENT_IDP-BASE_URL: ${KEYCLOAK_PUBLIC_URL}
       MGMTP_A12_UAA_AUTHENTICATION_CLIENT-SELFCONFIGURATION_OIDC_PUBLIC-CLIENT_REALM-NAME: ${KEYCLOAK_REALM}
 
+      # The door outward (ADR-0023). This server holds no Firefly credential -- only the address of
+      # the component that does, and the secret that lets it knock. The allowlist is deployment's
+      # half of the gate; the Runtime holds the authoritative half in code.
+      ASSISTANTS_RUNTIME_URL: http://runtime:8090
+      ASSISTANTS_RUNTIME_SHARED-SECRET: ${RUNTIME_INBOUND_SECRET}
+      ASSISTANTS_RUNTIME_ALLOWED-OPERATIONS: ${CLIENT_CALLABLE_OPERATIONS:-bookkeeping.listAccounts,bookkeeping.listTransactions}
+
     depends_on:
       postgres:
         condition: service_healthy
@@ -84,6 +91,11 @@ services:
       # Read-only: roles.yaml and the models are inputs, never outputs.
       - ../import:/var/lib/a12/data/import:ro
       - ../build/wcf-output/data/models:/var/lib/a12/data/models
+      # The same personal access token the Runtime reads, mounted the same way, for the Bookkeeping
+      # Reader (ADR-0023). Read-only, and deliberately NOT accompanied by a `depends_on: firefly`:
+      # this application must serve when the books are down, and two Tiles showing their error line is
+      # the designed behaviour that waiting for Firefly would defeat.
+      - firefly_token:/run/firefly:ro
 
   server-init:
     image: ${SERVER_INIT_IMAGE}
@@ -414,6 +426,16 @@ services:
       # that instant becomes the schedule's identity (ADR-0016).
       SCHEDULE_TIMEZONE: ${SCHEDULE_TIMEZONE:-Europe/Berlin}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+
+      # The door outward (ADR-0023): a read-only route the server forwards a client's question to,
+      # because the Runtime is the only component that can reach an External System.
+      #
+      # Deliberately NOT under `ports:` -- this service still publishes nothing to the host, and
+      # container-to-container traffic on this network needs neither `ports` nor `expose`. The
+      # boundary that faces the world stays Keycloak, at the server.
+      INBOUND_PORT: ${RUNTIME_INBOUND_PORT:-8090}
+      INBOUND_SECRET: ${RUNTIME_INBOUND_SECRET}
+      CLIENT_CALLABLE_OPERATIONS: ${CLIENT_CALLABLE_OPERATIONS:-bookkeeping.listAccounts,bookkeeping.listTransactions}
     volumes:
       - firefly_token:/run/firefly:ro
       - ../runtime/fixtures:/run/fixtures:ro

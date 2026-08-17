@@ -79,4 +79,42 @@ describe("DashboardTile", () => {
         expect(anchor).toHaveAttribute("target", "_blank");
         expect(anchor).toHaveAttribute("rel", "noopener noreferrer");
     });
+
+    it("says which variant it is, because a control and a summary are not the same thing on screen", () => {
+        renderTile();
+
+        expect(screen.getByTestId("tile-test")).toHaveAttribute("data-variant", "tile");
+
+        renderTile({ variant: "button" });
+
+        expect(screen.getAllByTestId("tile-test")[1]).toHaveAttribute("data-variant", "button");
+    });
+
+    it("drops all three slots in the button variant — a control has nothing to summarise", () => {
+        renderTile({
+            variant: "button",
+            headline: "7",
+            body: <p>three lines</p>,
+            footer: "as of 14:32"
+        });
+
+        expect(screen.queryByTestId("tile-test-headline")).not.toBeInTheDocument();
+        expect(screen.queryByTestId("tile-test-body")).not.toBeInTheDocument();
+        expect(screen.queryByTestId("tile-test-footer")).not.toBeInTheDocument();
+        expect(screen.getByText("Conversations")).toBeInTheDocument();
+    });
+
+    it("is still a real anchor in the button variant, which is the whole of what it does", () => {
+        renderTile({
+            variant: "button",
+            href: "http://localhost:8084",
+            title: "Bookkeeping",
+            icon: "💰"
+        });
+
+        const anchor = screen.getByRole("link", { name: /Bookkeeping/ });
+        expect(anchor).toHaveAttribute("href", "http://localhost:8084");
+        expect(anchor).toHaveAttribute("target", "_blank");
+        expect(anchor).toHaveAttribute("rel", "noopener noreferrer");
+    });
 });

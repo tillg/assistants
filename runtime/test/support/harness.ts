@@ -80,14 +80,78 @@ export class FakeFirefly {
     // `liabilities`, PLURAL, because that is what Firefly's read API answers — its write API takes
     // the singular. The fake used to say `liability`, which is exactly the mistake that made
     // `listOpenItems` report nothing while thousands were owed: a fake agreeing with the bug.
+    // `currentBalance` and `currencyCode` are the connector's own field names, and they are here
+    // because a fake that answers a narrower shape than the real thing lets a projection drop a field
+    // without any test noticing — which is how `currency` went missing from `listAccounts` for as long
+    // as it did.
     accounts = [
-        { id: "1", name: "Checking", type: "asset" },
-        { id: "2", name: "Payables", type: "liabilities" },
-        { id: "3", name: "Expenses:Health", type: "expense" },
+        { id: "1", name: "Checking", type: "asset", currentBalance: "8400.00", currencyCode: "EUR" },
+        { id: "2", name: "Payables", type: "liabilities", currentBalance: "-340.00", currencyCode: "EUR" },
+        { id: "3", name: "Expenses:Health", type: "expense", currentBalance: "0.00", currencyCode: "EUR" },
     ];
 
     async listAccounts() {
         return this.accounts;
+    }
+
+    /**
+     * Firefly's *group* shape, because that is what `projectTransactionGroup` consumes.
+     *
+     * Deliberately unlike the demo household, which cannot exercise what matters here: measured
+     * against the live stack, 21 of its 24 transactions share one date and **no group has more than
+     * one split**. So the second group below carries two, and the dates descend — the flattening and
+     * the ordering are only really asserted against fixtures built to have them.
+     *
+     * Amounts carry twelve decimal places because that is what Firefly returns (`"96.500000000000"`),
+     * and a fake that tidies them up would hide every formatting bug in the tile that renders them.
+     */
+    transactions: Array<Record<string, unknown>> = [
+        {
+            id: "163",
+            attributes: {
+                transactions: [
+                    {
+                        type: "withdrawal",
+                        date: "2026-08-01T00:00:00+02:00",
+                        amount: "96.500000000000",
+                        description: "Consultation and dressing change, 24 July",
+                        currency_code: "EUR",
+                        source_name: "Payables",
+                        destination_name: "Expenses:Health",
+                    },
+                ],
+            },
+        },
+        {
+            id: "142",
+            attributes: {
+                transactions: [
+                    {
+                        type: "withdrawal",
+                        date: "2026-07-02T00:00:00+02:00",
+                        amount: "84.200000000000",
+                        description: "Stadtwerke Frechen",
+                        currency_code: "EUR",
+                        source_name: "Checking",
+                        destination_name: "Expenses:Utilities",
+                    },
+                    {
+                        type: "deposit",
+                        date: "2026-07-02T00:00:00+02:00",
+                        amount: "12.000000000000",
+                        description: "Stadtwerke refund",
+                        currency_code: "EUR",
+                        source_name: "Expenses:Utilities",
+                        destination_name: "Checking",
+                    },
+                ],
+            },
+        },
+    ];
+
+    async listTransactions(input: { start: string; end: string; accountName?: string; limit?: number }) {
+        void input;
+        return this.transactions;
     }
     async resolveAccountId(name: string) {
         const found = this.accounts.find((account) => account.name === name);
@@ -133,7 +197,15 @@ export class FakeFirefly {
     }
     async setBudgetLimit() {}
     async createAccount(input: { name: string; type: string }) {
-        const created = { id: String(this.accounts.length + 1), name: input.name, type: input.type };
+        const created = {
+            id: String(this.accounts.length + 1),
+            name: input.name,
+            type: input.type,
+            // Firefly answers a freshly created account with a zero balance in the stack's currency;
+            // omitting them here would make a created account the one shape the fake cannot produce.
+            currentBalance: "0.00",
+            currencyCode: "EUR",
+        };
         this.accounts.push(created);
         return created;
     }

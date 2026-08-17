@@ -1,14 +1,14 @@
 import type { View } from "@com.mgmtp.a12.client/client-core";
 
 import { AssistantsTile } from "./AssistantsTile";
-import { BookkeepingTile } from "./BookkeepingTile";
+import { BookkeepingButton } from "./BookkeepingButton";
 import { ConversationsTile } from "./ConversationsTile";
 import { DocumentsTile } from "./DocumentsTile";
 
 type ViewMap = Record<string, View.ViewComponent | undefined>;
 
 /**
- * The Dashboard's four views, named exactly as `AssistantsAppModel_AM.json` names them in its `VIEW_ADD`
+ * The Dashboard's views, named exactly as `AssistantsAppModel_AM.json` names them in its `VIEW_ADD`
  * directives. Each entry must be registered via a corresponding `addView()` call in `appsetup.ts`.
  *
  * **The order of the directives is the layout.** `DashboardLayout` walks the region settings' columns and
@@ -24,5 +24,5 @@ export const dashboardViewMap = {
     ConversationsTile,
     DocumentsTile,
     AssistantsTile,
-    BookkeepingTile
+    BookkeepingButton
 } satisfies ViewMap;

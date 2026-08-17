@@ -3,36 +3,36 @@ import { render, screen } from "@testing-library/react";
 
 import { ConnectorLocator, type ServerConnector } from "@com.mgmtp.a12.utils/utils-connector";
 
-import { BookkeepingTile } from "../../../components/dashboard/BookkeepingTile";
+import { BookkeepingButton } from "../../../components/dashboard/BookkeepingButton";
 
 import { Frame } from "../conversation/harness";
 
 /**
- * The Tile that asks nothing. Its test is mostly about what is *absent*: no number, no read instant, and
- * — the assertion that matters — no request at all.
+ * The door that asks nothing. Its test is mostly about what is *absent*: no number, no read instant,
+ * no body — and the assertion that matters — no request at all.
  */
 
 let asked = 0;
 
-function renderTile() {
+function renderButton() {
     asked = 0;
     ConnectorLocator.createInstance({
         fetchData: () => {
             asked++;
-            return Promise.reject(new Error("the bookkeeping Tile must not ask the store anything"));
+            return Promise.reject(new Error("the bookkeeping door must not ask the store anything"));
         }
     } as unknown as ServerConnector);
 
     return render(
         <Frame>
-            <BookkeepingTile />
+            <BookkeepingButton />
         </Frame>
     );
 }
 
-describe("BookkeepingTile", () => {
+describe("BookkeepingButton", () => {
     it("is an anchor to Firefly, opened safely in a new tab", () => {
-        renderTile();
+        renderButton();
 
         const anchor = screen.getByRole("link", { name: /Bookkeeping/ });
         expect(anchor).toHaveAttribute("href", "http://localhost:8084");
@@ -40,23 +40,28 @@ describe("BookkeepingTile", () => {
         expect(anchor).toHaveAttribute("rel", "noopener noreferrer");
     });
 
-    it("issues no query, because the fact it would show belongs to another Authority", () => {
-        renderTile();
+    it("issues no query — it is a way in, not a summary", () => {
+        renderButton();
 
         expect(asked).toBe(0);
     });
 
-    it("shows no headline and no footer, and is a Tile anyway", () => {
-        renderTile();
+    it("is drawn as a control, not as a Tile with a missing number", () => {
+        renderButton();
 
-        expect(screen.getByTestId("tile-bookkeeping")).toHaveAttribute("data-state", "ready");
+        expect(screen.getByTestId("tile-bookkeeping")).toHaveAttribute("data-variant", "button");
+    });
+
+    it("shows none of the three slots, because it has nothing to put in them", () => {
+        renderButton();
+
         expect(screen.queryByTestId("tile-bookkeeping-headline")).not.toBeInTheDocument();
+        expect(screen.queryByTestId("tile-bookkeeping-body")).not.toBeInTheDocument();
         expect(screen.queryByTestId("tile-bookkeeping-footer")).not.toBeInTheDocument();
-        expect(screen.getByTestId("tile-bookkeeping-body")).toBeInTheDocument();
     });
 
     it("is permanently ready — it has nothing to load and nothing that can fail", () => {
-        renderTile();
+        renderButton();
 
         expect(screen.getByTestId("tile-bookkeeping")).toHaveAttribute("data-state", "ready");
         expect(screen.queryByTestId("tile-bookkeeping-headline-placeholder")).not.toBeInTheDocument();

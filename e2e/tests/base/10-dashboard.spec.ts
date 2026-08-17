@@ -126,6 +126,31 @@ test.describe("Dashboard", () => {
         await expect(anchor).toHaveAttribute("rel", "noopener noreferrer");
     });
 
+    test("is drawn as a control, and carries none of a Tile's slots", async ({ getPageAs }) => {
+        const page = await getPageAs("admin");
+        const dashboard = new DashboardPage(page);
+        await dashboard.gotoHome();
+        await dashboard.waitForTiles();
+
+        // A door has nothing to summarise. Beside three Tiles carrying a big figure it used to read as
+        // a Tile whose number had failed to load — the one sentence a working door must not say.
+        expect(await dashboard.variant("bookkeeping")).toBe("button");
+        await expect(dashboard.line("bookkeeping", "headline")).toHaveCount(0);
+        await expect(dashboard.line("bookkeeping", "body")).toHaveCount(0);
+        await expect(dashboard.line("bookkeeping", "footer")).toHaveCount(0);
+    });
+
+    test("draws every Tile that summarises something as a Tile", async ({ getPageAs }) => {
+        const page = await getPageAs("admin");
+        const dashboard = new DashboardPage(page);
+        await dashboard.gotoHome();
+        await dashboard.waitForTiles();
+
+        for (const name of ["conversations", "documents", "assistants"] as const) {
+            expect(await dashboard.variant(name), `the ${name} Tile`).toBe("tile");
+        }
+    });
+
     const DOORS: Array<{ tile: "conversations" | "documents" | "assistants"; column: string }> = [
         { tile: "conversations", column: "Waiting for" },
         { tile: "documents", column: "Classification" },

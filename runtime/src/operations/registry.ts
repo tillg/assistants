@@ -91,6 +91,23 @@ export interface OperationImplementation {
     name: string;
     /** Whether `execute` changes state. Authoritative here, and NOT read from the Thing. */
     mutating: boolean;
+    /**
+     * May the client execute this directly, with no Conversation behind it? (ADR-0023.)
+     *
+     * Two obligations come with setting it, and neither can be checked by the compiler:
+     *
+     *   1. **`mutating` must be `false`.** The inbox refuses otherwise, but the flag is a claim about
+     *      safety and setting it on a write is a lie the reader of this file should not have to
+     *      catch.
+     *   2. **`execute` may not read its `context`.** There is no Conversation, no Assistant and no
+     *      idempotency key when the caller is a browser — the Operation was not called from a Turn.
+     *      An Operation that needs any of those is not client-readable, however harmless it looks.
+     *
+     * It is deliberately a property of the *Implementation* rather than of the Operation Thing: the
+     * Thing is editable, and this is a safety decision. Same argument as `mutating` above, and the
+     * same one `resolve()` makes further down.
+     */
+    clientReadable?: true;
     execute(args: Record<string, unknown>, context: OperationContext): Promise<OperationOutcome>;
     reconcile?(
         args: Record<string, unknown>,

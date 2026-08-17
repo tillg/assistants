@@ -8,18 +8,31 @@ import { Card } from "@com.mgmtp.a12.widgets/widgets-core";
  * slots — a headline, a body, and a footer. It renders the three states itself, so no Tile writes its
  * own spinner and no Tile writes its own error line.
  *
- * Headline and footer are optional because the bookkeeping Tile has neither: it issues no query, so it
- * has no read instant to put in a footer, and domain.md is explicit that a Tile with no honest headline
- * shows none rather than inventing one. Making the slots optional is the smaller decision than a second
- * chrome — three of four Tiles share the click target, the link role, the theming and the three states,
- * and only the *contents* differ.
+ * Headline and footer are optional because not every Tile has one: a Tile with no honest headline shows
+ * none rather than inventing one (domain.md). Making the slots optional is the smaller decision than a
+ * second chrome — the Tiles share the click target, the link role, the theming and the three states, and
+ * only the *contents* differ.
+ *
+ * There are two **variants**, and the second exists because the bookkeeping door has nothing to say at
+ * all. A *tile* is a summary: a frame, a minimum height, and the three slots. A *button* is a control:
+ * a label, a destination, an `↗`, and none of the slots. A thing with nothing to say should not be
+ * shaped like the things that do — drawn as a tile it read as a tile whose number had failed to load,
+ * which is exactly the wrong sentence for a door that is working perfectly.
+ *
+ * It is still one component rather than two. Both variants share the anchor, the `rel`, the theming and
+ * the `data-role` convention; a second chrome would duplicate all of that to change a background colour
+ * and delete three slots.
  *
  * `data-state` exists for Playwright. The Tiles fetch outside the activity machinery, so no progress
  * overlay appears and `BasePage.finishedLoading()` returns while the numbers are still in flight; an
- * attribute the spec can wait on is the alternative to an arbitrary sleep.
+ * attribute the spec can wait on is the alternative to an arbitrary sleep. `data-variant` is there for
+ * the same reason: a Tile silently reverting to the wrong shape is a thing a spec should catch.
  */
 
 export type TileState = "loading" | "ready" | "error";
+
+/** A summary, or the control that opens the place a summary came from. */
+export type TileVariant = "tile" | "button";
 
 export interface DashboardTileProps {
     /** The `data-role` this Tile is found by, in tests and in the e2e page object. */
@@ -27,6 +40,8 @@ export interface DashboardTileProps {
     readonly icon: string;
     readonly title: string;
     readonly state: TileState;
+    /** Defaults to `"tile"`. A `"button"` renders none of the three slots. */
+    readonly variant?: TileVariant;
     /** The one big number. Absent on a Tile that has no honest one. */
     readonly headline?: ReactNode;
     readonly body?: ReactNode;
@@ -115,27 +130,65 @@ const Anchor = styled.a`
     text-decoration: none;
 `;
 
-export function DashboardTile({ role, icon, title, state, headline, body, footer, onOpen, href }: DashboardTileProps) {
-    const inside = (
-        <Inside>
-            <Heading>
-                <span aria-hidden>{icon}</span>
-                <span>{title}</span>
-            </Heading>
+/**
+ * The control. No minimum height, so it sits short at the top of a stretched grid cell rather than
+ * filling it, and the secondary background is what makes it read as grey in both themes without a
+ * per-Tile colour decision — the same reason the frame's border is a theme token.
+ */
+const ButtonFrame = styled(Frame)`
+    min-height: 0;
+    background: ${({ theme }) => theme.colors.background.secondaryBackground};
+`;
 
-            {state === "loading" && <Placeholder data-role={`${role}-headline-placeholder`}>—</Placeholder>}
-            {state === "error" && <Sorry data-role={`${role}-error`}>could not read this</Sorry>}
+const ButtonInside = styled(Heading)`
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    color: ${({ theme }) => theme.colors.text.color};
+    font-weight: 600;
+`;
 
-            {state === "ready" && headline !== undefined && (
-                <Headline data-role={`${role}-headline`}>{headline}</Headline>
-            )}
-            {state === "ready" && body !== undefined && <Body data-role={`${role}-body`}>{body}</Body>}
-            {state === "ready" && footer !== undefined && <Footer data-role={`${role}-footer`}>{footer}</Footer>}
-        </Inside>
-    );
+export function DashboardTile({
+    role,
+    icon,
+    title,
+    state,
+    variant = "tile",
+    headline,
+    body,
+    footer,
+    onOpen,
+    href
+}: DashboardTileProps) {
+    const inside =
+        variant === "button" ? (
+            <ButtonInside>
+                <span>
+                    <span aria-hidden>{icon}</span> {title}
+                </span>
+                <span aria-hidden>↗</span>
+            </ButtonInside>
+        ) : (
+            <Inside>
+                <Heading>
+                    <span aria-hidden>{icon}</span>
+                    <span>{title}</span>
+                </Heading>
+
+                {state === "loading" && <Placeholder data-role={`${role}-headline-placeholder`}>—</Placeholder>}
+                {state === "error" && <Sorry data-role={`${role}-error`}>could not read this</Sorry>}
+
+                {state === "ready" && headline !== undefined && (
+                    <Headline data-role={`${role}-headline`}>{headline}</Headline>
+                )}
+                {state === "ready" && body !== undefined && <Body data-role={`${role}-body`}>{body}</Body>}
+                {state === "ready" && footer !== undefined && <Footer data-role={`${role}-footer`}>{footer}</Footer>}
+            </Inside>
+        );
+
+    const Outside = variant === "button" ? ButtonFrame : Frame;
 
     return (
-        <Frame data-role={role} data-state={state}>
+        <Outside data-role={role} data-state={state} data-variant={variant}>
             <Card>
                 {href === undefined ? (
                     <Card.ActionArea onClick={onOpen}>{inside}</Card.ActionArea>
@@ -148,6 +201,6 @@ export function DashboardTile({ role, icon, title, state, headline, body, footer
                     </Anchor>
                 )}
             </Card>
-        </Frame>
+        </Outside>
     );
 }

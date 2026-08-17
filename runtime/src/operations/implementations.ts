@@ -691,24 +691,60 @@ export function buildOperations(deps: OperationDeps): OperationImplementation[] 
     const listAccounts: OperationImplementation = {
         name: "bookkeeping.listAccounts",
         mutating: false,
+        // Reads nothing from its context — it takes no arguments at all — so the Dashboard's Accounts
+        // Tile can call it with no Conversation behind it (ADR-0023).
+        clientReadable: true,
         seed: {
             name: "List accounts",
             system: "Bookkeeping",
             kind: "connector",
             description:
                 "List the chart of accounts. Always look here before booking — account names must match " +
-                "exactly, and you may not invent one.",
-            parameters: { type: "object", properties: {} },
+                "exactly, and you may not invent one. Pass `type` to see only one kind: 'asset' is the " +
+                "money the household holds, 'expense' and 'revenue' are the other side of a booking, " +
+                "and 'liabilities' — plural — covers payables and receivables.",
+            parameters: {
+                type: "object",
+                properties: {
+                    type: str(
+                        "Optional: only accounts of this Firefly type. " +
+                            "asset | expense | revenue | liabilities.",
+                    ),
+                },
+            },
         },
-        async execute(): Promise<OperationOutcome> {
+        async execute(args): Promise<OperationOutcome> {
             const accounts = await firefly.listAccounts(true);
+            // Filtered here rather than in the Connector's request, deliberately: the Connector caches
+            // the whole chart of accounts and `resolveAccountId` reads that same cache, so a
+            // type-narrowed fetch would either poison it or need a second one. The list is a
+            // household's, not an enterprise's.
+            //
+            // Compared case-insensitively because Firefly's *read* API answers `liabilities` where its
+            // *write* API accepts `liability` — the exact mismatch that made `listOpenItems` report
+            // nothing while thousands were owed (BUG-02). A caller who says either gets what they meant.
+            const wanted = String(args["type"] ?? "").trim().toLowerCase();
+            const matches = (accountType: string) =>
+                wanted === "" ||
+                accountType.toLowerCase() === wanted ||
+                // "liability" and "liabilities" are one kind under two spellings, and no caller
+                // should have to know which side of Firefly's API they are talking to.
+                (accountType.toLowerCase().startsWith("liabilit") && wanted.startsWith("liabilit"));
+
             return {
                 kind: "value",
-                value: accounts.map((account) => ({
-                    name: account.name,
-                    type: account.type,
-                    balance: account.currentBalance,
-                })),
+                value: accounts
+                    .filter((account) => matches(account.type))
+                    .map((account) => ({
+                        name: account.name,
+                        type: account.type,
+                        balance: account.currentBalance,
+                        // The connector has always read this and this projection has always dropped
+                        // it. A balance without its currency is a number, not an amount — the Accounts
+                        // Tile cannot format one and a model reasoning about two accounts cannot
+                        // compare them.
+                        currency: account.currencyCode,
+                    })),
             };
         },
     };
@@ -829,6 +865,8 @@ export function buildOperations(deps: OperationDeps): OperationImplementation[] 
     const listTransactions: OperationImplementation = {
         name: "bookkeeping.listTransactions",
         mutating: false,
+        /** Reads only its `args`; the Transactions Tile supplies a date window (ADR-0023). */
+        clientReadable: true,
         seed: {
             name: "List transactions",
             system: "Bookkeeping",
@@ -863,6 +901,8 @@ export function buildOperations(deps: OperationDeps): OperationImplementation[] 
     const getBalance: OperationImplementation = {
         name: "bookkeeping.getBalance",
         mutating: false,
+        /** Reads only its `args`. Marked for symmetry; the Dashboard uses listAccounts instead. */
+        clientReadable: true,
         seed: {
             name: "Account balance",
             system: "Bookkeeping",
