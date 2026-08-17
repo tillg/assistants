@@ -4,7 +4,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { LoggerFactory } from "@com.mgmtp.a12.utils/utils-logging";
 
 import { PendingQuestion } from "../../../components/conversation/PendingQuestion";
-import { ICONS } from "../../../components/conversation/icons";
+import { ICONS } from "../../../components/icons";
 import { OPEN_FOREIGN_FORM } from "../../../sagas/openForeignForm";
 
 import { Frame, recordingStore, serveDocuments } from "./harness";

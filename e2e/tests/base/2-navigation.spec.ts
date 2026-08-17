@@ -40,6 +40,25 @@ const MODULES: Array<{ menu: string; column: string }> = [
 ];
 
 test.describe("Navigation", () => {
+    /*
+     * The Dashboard is the one menu entry that opens no table, so it cannot use the shared column
+     * assertion below — it has no overview model and declares no column. It is checked here instead, and
+     * first, because it is also the first entry in the menu and the application's landing page.
+     */
+    test("should open the Dashboard, which is first in the menu and has no table", async ({ getPageAs }) => {
+        const page = await getPageAs("admin");
+        const app = new BasePage(page);
+        await app.gotoHome();
+
+        await expect(page.getByTestId(TestID.MENU_ITEM).first()).toHaveText("Dashboard");
+
+        await app.clickMenuItem("Dashboard");
+
+        await expect(page.locator("[data-role^='tile-'][data-state]")).toHaveCount(4);
+        await expect(page.getByTestId(TestID.TABLE)).toHaveCount(0);
+        await expect(page.getByTestId(TestID.NOTIFICATION_ITEM_TITLE)).toHaveCount(0);
+    });
+
     for (const { menu, column } of MODULES) {
         test(`should open the ${menu} module from the menu`, async ({ getPageAs }) => {
             const page = await getPageAs("admin");

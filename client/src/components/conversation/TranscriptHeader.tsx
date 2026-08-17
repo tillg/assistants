@@ -4,9 +4,10 @@ import styled from "styled-components";
 
 import { openForeignForm } from "../../sagas/openForeignForm";
 
+import { ICONS } from "../icons";
+
 import { formatRecordedCost, recordedCost } from "./cost";
 import type { TranscriptEntry } from "./entries";
-import { ICONS } from "./icons";
 import { subjectDescriptor } from "./subject";
 
 /**

@@ -90,7 +90,13 @@ export const eq = (field: string, value: string | number | boolean): Constraint 
 });
 
 export const unset = (field: string): Constraint => ({ operator: "undefined_match", field });
-export const not = (operand: Constraint): Constraint => ({ operator: "not", operands: [operand] });
+/**
+ * NOTE the singular `operand`. `and` and `or` take `operands` (plural, an array); `not` takes `operand`
+ * (singular), exactly as `runtime/src/a12/things.ts` documents. The plural form is rejected with
+ * *"JSON-RPC Request failed and rollback was performed"* — measured against the live store, which is how
+ * this was found: the helper had no caller until the dashboard spec became its first.
+ */
+export const not = (operand: Constraint): Constraint => ({ operator: "not", operand });
 export const and = (...operands: Constraint[]): Constraint => ({ operator: "and", operands });
 
 export class ThingStore {
@@ -255,6 +261,27 @@ export class ThingStore {
             thingId: thingIdOf(entry.docRef),
             document: entry.document
         }));
+    }
+
+    /**
+     * How many Things match, without reading them.
+     *
+     * `fullSize` is computed independently of the page, so this asks for the smallest page the store
+     * will serve — one. (It will not serve none: `pageSize: 0` is rejected outright.) The Dashboard's
+     * spec needs this because the overviews it would otherwise count run to forty pages.
+     */
+    async count(model: string, constraint?: Constraint): Promise<number> {
+        const query: Record<string, unknown> = {
+            targetDocumentModel: model,
+            projectionName: "document",
+            paging: { pageNumber: 0, pageSize: 1 }
+        };
+        if (constraint) {
+            query["constraint"] = constraint;
+        }
+
+        const result = await this.rpc<{ fullSize?: number }>("count", "QUERY", { query });
+        return result.fullSize ?? 0;
     }
 
     /** The body of a Thing, i.e. what sits under its root group: `{ Party: { … } }` → `{ … }`. */

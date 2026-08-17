@@ -1886,3 +1886,98 @@ the User an Open Question rather than a Conversation that looked finished having
 What it costs to know: the difference between "the local model is configured" and "the local model
 can drive this loop" is now measured rather than assumed, and the remaining work is the prompt, not
 the plumbing. `"active": "scripted"` is one line away for anyone who needs a working stack today.
+
+## D-059 — The Dashboard's four platform claims, all of them checked in the browser first
+
+*2026-08-17. Phase A of the dashboard change was a walking skeleton for exactly this reason: four
+claims about A12 that the types permitted and nothing in this application had ever done.*
+
+All four held, and the fallbacks written into the plan were never needed.
+
+| Claim | Observed |
+|---|---|
+| `"Dashboard"` resolves as a region layout | **With no registration at all.** `DefaultLayoutProvider` in client-core has it built in beside `MasterDetail`, `Stack` and `Null`, so no `addLayout` call for it exists in `appsetup.ts` — the only one there is `ApplicationFrame`'s |
+| A sub-region's declared layout can be overridden | `REGION_CLEAR` overrides the CONTENT region's declared `MasterDetail` without complaint. No scene in this application had cleared to a *different* name before |
+| A `VIEW_ADD` with no `models` renders | It renders. The props such a view receives are exactly `{ name, activityId, ariaLevel }` — no `modelDescriptors`, which is the whole point: a Tile is a component with a name and nothing loaded for it |
+| Slot pairing is positional | `VIEW_ADD` order is **left to right** at desktop width and **top to bottom** when stacked. Slot *i* takes view *i*, so the order of four adjacent lines in the App Model *is* the layout |
+
+**And the per-view error boundary is real, not a documented intention.** One view made to throw on
+render shows A12's *"Oops! An error occurred!"* fallback **in that slot only**, with its own dismiss
+control, while the other three render untouched. That is the fact that justifies four views rather
+than one view holding four tiles in React: the isolation is the platform's, drawn for free, and one
+Tile that cannot load does not take the landing page down with it.
+
+Worth noting which mechanism that is. It catches a **render throw**. A query that *rejects* is a
+different path entirely — the hooks fail soft and the Tile renders its own error line — and the two
+are tested separately, because a change that broke one would leave the other passing.
+
+## D-060 — `paging.pageSize: 0` is refused, so every count also drags back a document
+
+*2026-08-17, measured against the live stack rather than guessed, which is why phase B existed.*
+
+The load-bearing claim of the whole change held: **`QUERY` through `Dispatcher.rpc` returns
+`fullSize` for a constrained count.** Measured against the demo household — 398 Conversations, 318 of
+them `waiting`, 0 `running`, matching what the Conversations overview shows. If that had been false
+there was nothing to fall back to.
+
+**`paging.pageSize: 0` is not accepted.** Every request in the batch comes back *"JSON-RPC Request
+failed and rollback was performed"* — not the one bad request, the whole batch. `fullSize` is
+computed independently of the page, so a page of nothing is exactly what a counting hook wants, and
+the store will not serve one. So `PAGE_SIZE` is **1** and the constant carries the reason, which
+means each count also returns one document body:
+
+| Tile | Counts in one batch | Payload |
+|---|---|---|
+| Documents | 14 (one total, thirteen `date_range` windows) | **~3.6 kB** over 49 Documents |
+| Conversations | 3 | **~12 kB** — a Conversation carries its transcript |
+
+Kilobytes, once per visit, and the smaller Tile is the expensive one. Recorded because the intuition
+is backwards: the fourteen-query Tile is cheap and the three-query Tile is not, and the reason is
+what a document of that Model weighs, not how many were asked for.
+
+**Two things about the dispatcher, found while faking it in a unit test.** First, `Dispatcher.rpc`
+**already resolves each request against its own response `id`** and returns the responses in request
+order, throwing if one is missing — so a caller that gives every request a distinct id need not
+re-match by hand, and wire order never reaches it. The hook reads results positionally *after* the
+dispatcher has matched them, and the test proves it by replying in reverse. Second, a faked QUERY
+response must carry `page`, `fullSize`, `entries`, `links` **and** `otherResults`, or
+`QueryJsonRpc2Response.isInstance` refuses **the whole batch** and every count fails at once. A
+plausible-looking fixture missing one field does not produce one wrong number; it produces a Tile in
+`error`, which is a much more confusing thing to debug than it sounds.
+
+## D-061 — The `not` constraint takes one `operand`, and the helper that had it wrong had never had a caller
+
+*2026-08-17.*
+
+`not` in an A12 query constraint takes a **singular `operand`**, not `operands: [...]`. The plural
+form is rejected the same way an unacceptable page size is — *"JSON-RPC Request failed and rollback
+was performed"*, with nothing in the message pointing at the shape.
+
+The e2e helper in `e2e/utils/thingstore.ts` had built the plural form since the day it was written,
+and it had **never had a caller**. The dashboard spec's *waiting on something else* count — `and(status
+= waiting, not(waitingFor = user))` — was the first, and it failed immediately. The helper was fixed
+in the same step, and `ThingStore.count()` added beside it so the spec can ask the store directly
+rather than counting rows.
+
+The lesson is the ordinary one and it is worth having in writing: **a helper with no caller is not
+tested code, it is a guess with a signature.** It typechecked, it read correctly, and it was wrong.
+
+## D-062 — The `Card` widget has no chrome here, and there is only one theme to check it in
+
+*2026-08-17, both found in the browser in phase D.*
+
+**A12's `Card` ships transparent and borderless in this application.** Its chrome comes from a
+stylesheet the app does not load, and the Dashboard layout's grid row stretches its columns to equal
+height — so four Tiles over four `Card`s rendered as four unbounded blocks of text with nothing
+saying where one ended and the next began. `DashboardTile` therefore draws its own edge, in theme
+tokens rather than literals, and fits its content over a shared minimum height. The Tiles look
+deliberate because the shared chrome component is the only place that knows what a Tile looks like;
+had each Tile styled itself, this would have been four fixes.
+
+**And "check it in both themes" is not currently possible.** `client/src/themes/themes.generated.ts`
+discovers none, so `THEMES` holds `Base` alone and `ThemeChooser` renders nothing at all. The plan
+said to verify the Tiles in both themes and there is only one. What the requirement was actually
+protecting — that no Tile hard-codes a colour — is met by construction instead: every colour comes
+from a theme token, `theme.colors.text`, `theme.colors.divider`,
+`theme.colors.variant.text.warning`, as `TranscriptHeader`'s do. A second theme cannot be checked
+until one exists, and when one does the Tiles are the wrong place to look for trouble.

@@ -1,8 +1,9 @@
 import styled from "styled-components";
 
+import { ICONS } from "../icons";
+
 import { ConversationTranscript, TranscriptBox } from "./ConversationTranscript";
 import { Band, Who } from "./TranscriptHeader";
-import { ICONS } from "./icons";
 import { Message } from "./PendingQuestion";
 import { readOpenQuestion } from "./question";
 import { useThingById } from "./useThingById";

@@ -1,7 +1,9 @@
-import { call, put, select, takeEvery, type SagaGenerator } from "typed-redux-saga";
+import { put, takeEvery, type SagaGenerator } from "typed-redux-saga";
 
-import { ActivityActions, ActivitySagas, ActivitySelectors } from "@com.mgmtp.a12.client/client-core";
+import { ActivityActions } from "@com.mgmtp.a12.client/client-core";
 import { LoggerFactory } from "@com.mgmtp.a12.utils/utils-logging";
+
+import { cancelTopLevelActivities } from "./openModule";
 
 /**
  * Opening a form that belongs to another navigation module.
@@ -9,10 +11,8 @@ import { LoggerFactory } from "@com.mgmtp.a12.utils/utils-logging";
  * Region content is a pure derivation over the activity map, so nothing routes and nothing has to be
  * taught what a module is. Three steps do it, and all three are load-bearing:
  *
- * 1. **Tear down what we are leaving.** `create` alone leaks the source module's activities: nothing
- *    garbage-collects them, the master-detail layout renders only the last two views, and a leaked
- *    activity vetoes the module registry's REMOVE at logout. This is also the dirty-handling veto point
- *    — on a read-only form it completes with no dialog, but the answer may still be *no*.
+ * 1. **Tear down what we are leaving.** `cancelTopLevelActivities` in {@link ./openModule}, which owns
+ *    that handshake for both sagas and documents why it is not optional.
  * 2. **Push a master.** A lone top-level form activity has nowhere to go: `event_cancel` removes it and
  *    the region renders an empty div. Which module the master is, is the caller's decision, which is why
  *    `masterModule` is a parameter — answering a question keeps a Conversations master, while opening an
@@ -74,12 +74,8 @@ export function* openForeignFormWorker(action: OpenForeignFormAction): SagaGener
     const { module, documentModel, thingId, masterModule } = action.payload;
 
     try {
-        const openActivities = Object.keys(yield* select(ActivitySelectors.topLevelActivities()));
-        if (openActivities.length > 0) {
-            yield* put(ActivityActions.cancelRequested({ activityIds: openActivities }));
-            if (!(yield* call(ActivitySagas.waitForResponseCancelRequested))) {
-                return;
-            }
+        if (!(yield* cancelTopLevelActivities())) {
+            return;
         }
 
         const master = ActivityActions.create({ activityDescriptor: { module: masterModule } });

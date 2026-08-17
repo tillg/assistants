@@ -35,7 +35,7 @@ Spelling throughout the project is British English.
 [DECISIONS.md](DECISIONS.md) (decisions taken while building, with their alternatives and
 reversal costs) · [BUGS.md](BUGS.md) (43 reproduced defects from the 2026-08-09 hunt; each entry
 records whether it still stands) ·
-[docs/adr/](docs/adr/) (twenty-one architecture decisions) ·
+[docs/adr/](docs/adr/) (twenty-two architecture decisions) ·
 [RESEARCH_INDEX.md](RESEARCH_INDEX.md) (the four research papers in
 [specs/research/](specs/research/), each with what it settled and what it left open: what
 Bookkeeping must provide and why Firefly III, how the agentic loop should work and why no workflow
@@ -185,10 +185,16 @@ Then:
 
 - **<http://localhost:8081>** — the A12 web application. It redirects to Keycloak; log in as
   `human` / `human`, on a login screen wearing the application's own clothes rather than
-  Keycloak's ([the login theme](#the-login-theme)). The navigation has eight entries: Documents,
-  Invoices, Processes, Parties,
-  Assistants, Operations, Conversations, Runtime. Start at **Conversations** — the rows marked 🛑 are
-  waiting for you. **Assistants** is where you read and edit a prompt, in the markdown editor;
+  Keycloak's ([the login theme](#the-login-theme)). The navigation has nine entries: Dashboard,
+  Documents, Invoices, Processes, Parties,
+  Assistants, Operations, Conversations, Runtime. It opens on the **Dashboard**: four Tiles saying
+  how much work is in flight and how much of it is waiting on you, how many Documents there are and
+  how that number grew over the last twelve months, which Assistants exist, and where the books are.
+  Each Tile is a door to the module behind it. Every number on it is counted by the ThingStore at the
+  moment you look and held nowhere ([ADR-0022](docs/adr/0022-a-dashboard-counts-it-does-not-keep.md)),
+  which is also why the bookkeeping Tile has no number — the books are Firefly's fact and the browser
+  cannot ask it. From there, **Conversations** is where the rows marked 🛑 are waiting for you;
+  **Assistants** is where you read and edit a prompt, in the markdown editor;
   **Operations** is the catalogue of what any Assistant can be granted.
 - **<http://localhost:8084>** — Firefly III, the books, behind oauth2-proxy. The same
   `human` / `human` through the same Keycloak, and if you are already signed in at 8081 it lets you
@@ -455,13 +461,20 @@ UserInterface reads it, the Runtime polls it, and nothing else talks to anything
 Models, each with a document model, a form model and an overview model, plus one application model
 for navigation.
 
-**UserInterface** (`client/`) — the A12 web application, generated from those models, with one
-addition: the **markdown editor lifted from `w12-on-a12`** (`client/src/components/markdown-editor/`,
+**UserInterface** (`client/`) — the A12 web application, generated from those models, with two
+additions. The first is the **markdown editor lifted from `w12-on-a12`** (`client/src/components/markdown-editor/`,
 Lexical-based, with the collaborative-editing subsystem dropped). A field becomes a markdown field
 by three coordinated facts — `lineBreaksPermitted` on the `StringType`, `"exposition": "AREA"` in
 the form model, and a `widget: markdown-editor` annotation on the Control — which is what makes an
 Assistant's prompts editable in the ordinary UI, as [ADR-0003](docs/adr/0003-assistants-are-things.md)
 requires. See [MARKDOWN_FIELDS.md](specs/research/MARKDOWN_FIELDS.md).
+
+The second is the **Dashboard** (`client/src/components/dashboard/`) — the landing page, four Tiles
+in the App Model's own `Dashboard` region layout, so where they sit and how many there are is four
+adjacent `VIEW_ADD` directives in `AssistantsAppModel_AM.json` rather than a layout written in React. Each Tile fetches its own numbers
+straight through `Dispatcher.rpc` and reads only `fullSize`, so nothing on the page is a second copy
+of a Thing, and each is its own view and so has its own error boundary: one Tile that cannot read
+leaves the other three standing.
 
 **Runtime** (`runtime/`) — TypeScript on Node 24, in two halves. The **Trigger Watcher** scans the
 ThingStore every two seconds, in seven passes: things that materialised, questions that were
@@ -619,6 +632,11 @@ silently returns nothing.
 - **One Authority per fact**, which is why an Invoice has no `paid` field and no reference to its
   booking: "is this paid?" and "how was this booked?" are both searches against Firefly, where the
   ThingID travels as `external_id` ([ADR-0006](docs/adr/0006-one-authority-per-fact.md)).
+- **The Dashboard counts; it does not keep.** Every number on it is a count the ThingStore returned
+  for a query issued moments earlier — no counter on a Thing, no cache, no polling — so a Tile states
+  the instant it read and leaving the page and coming back re-reads it. Where the Authority is out of
+  the browser's reach, the Tile is a door with no number rather than a number somebody else worked
+  out ([ADR-0022](docs/adr/0022-a-dashboard-counts-it-does-not-keep.md)).
 - **An Assistant declares the Operations it is granted**, one row per Operation, and a call to
   another Assistant is declared per callee as `assistant.call:<key>`; the registry filters the
   schemas offered to the model, so an ungranted Operation is not refused, it is invisible
@@ -705,7 +723,9 @@ This is one running vertical slice, not a finished system. What is honestly miss
 - **The end-to-end suite covers the slice, and writes to whatever stack it is pointed at.**
   `cd e2e && npx playwright test --list` is the authority on what it runs. Today: login as all four
   users, every module opened from the menu, Party CRUD, the Receptionist's prompt round-tripped
-  through the markdown editor, localisation, the favicon, a row opened in each of the eight modules,
+  through the markdown editor, localisation, the favicon, a row opened in each of the eight modules
+  that have a table, the Dashboard's four Tiles — including one whose query is failed on purpose, to
+  prove the other three still stand —
   the Operations catalogue and its kill switch, a Conversation's transcript and the 🛑 that marks a
   blocked one, the whole invoice slice (an arriving Document → an Open Question answered through its
   Conversation → the booking checked in Firefly) and surviving a restart of the Runtime and the
@@ -761,7 +781,7 @@ This is one running vertical slice, not a finished system. What is honestly miss
 │   ├── system/               the system as it stands: domain, architecture, functional
 │   ├── research/             the research papers, and the sources they were read from
 │   └── changes/              proposal, domain, architecture and plan, per change in flight
-├── docs/                     adr/ — twenty-one architecture decision records; logo/ — design explorations
+├── docs/                     adr/ — twenty-two architecture decision records; logo/ — design explorations
 ├── assets/                   the logo and its derived files
 ├── buildSrc/, quality/       Gradle build logic and the Checkstyle configuration
 └── licenses/                 licence texts for the third-party notices

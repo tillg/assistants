@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 
 import { TranscriptHeader } from "../../../components/conversation/TranscriptHeader";
 import { readEntries } from "../../../components/conversation/entries";
-import { ICONS } from "../../../components/conversation/icons";
+import { ICONS } from "../../../components/icons";
 import { OPEN_FOREIGN_FORM } from "../../../sagas/openForeignForm";
 
 import { Frame, recordingStore } from "./harness";

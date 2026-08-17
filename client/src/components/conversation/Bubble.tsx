@@ -1,8 +1,9 @@
 import { useState } from "react";
 import styled from "styled-components";
 
+import { iconFor } from "../icons";
+
 import type { TranscriptEntry } from "./entries";
-import { iconFor } from "./icons";
 import { speakerFor, type Shape, type Side } from "./speaker";
 
 /**

@@ -14,7 +14,8 @@ machine identity, the **Runtime**, and the test identities the end-to-end tier u
 The User's actual inbox, and the feature the rest exists to serve.
 
 **A question is answered inside its Conversation** (ADR-0021). There is no separate inbox of
-questions: the **Conversations** module is the landing page, a Conversation waiting on the User is
+questions: the **Dashboard** counts what is waiting on the User and opens the **Conversations**
+module, which is where the questions are; a Conversation waiting on the User is
 marked **🛑** in its overview, and opening one shows the thread that leads up to the question with the
 question itself as the last bubble, carrying an **Answer** button. An open question is always the end
 of a Conversation, so a list of Conversations is already a list of questions — sorted by the thing they
@@ -64,12 +65,42 @@ that can say *"here is the list of open questions"* — a `ui.showList`-shaped O
 in front of an overview — would need an overview scene to put them in front of. No such Operation
 exists, and until one does those three models are read by nobody and covered by no test.
 
+### The Dashboard
+
+**The way in.** The first menu entry, and the page the User lands on. Four **Tiles**, each answering a
+question the User has on arriving and each a door to the module that answers it properly:
+
+| Tile | What it says | Where it goes |
+|---|---|---|
+| 🗣 **Conversations** | how much work is **in flight** — `running` + `waiting` — split into *running*, *waiting on you*, *waiting on something else* | Conversations |
+| 📄 **Documents** | how many Documents there are, over the **createdOn curve**: how that number grew across the last twelve months | Documents |
+| 🤖 **Assistants** | how many there are, each by name, dimmed when disabled | Assistants |
+| 💰 **Bookkeeping** | that the books are elsewhere, and opens them | Firefly III, in a new tab |
+
+**The Dashboard counts; it does not keep** (ADR-0022). Every number on it is a `fullSize` the ThingStore
+returned for a query issued moments earlier — no count is stored on a Thing, cached, polled or
+aggregated. Each Tile that queries therefore states the instant it read (*as of 14:32*), and returning to the
+Dashboard re-reads it. One Tile that cannot read shows a single line saying so and the other three
+stand.
+
+The bookkeeping Tile has **no number**, and that is architectural rather than unfinished: Bookkeeping is
+the Authority for balances, the browser holds no Firefly credential, and the only component that holds
+one is the Runtime, which offers no API (ADR-0011). It is a door, and it says so.
+
+The **createdOn curve** can run behind the Documents headline, because `Document.createdAt` is the
+Runtime's field and a Document created in the web application carries none until the next scan stamps
+it. That gap is named — the **createdOn lag** — and stated on the Tile rather than hidden.
+
+Which Tiles exist, and where they sit, is **App Model configuration** rather than code: a fifth Tile is
+a component, its `addView` registration, and one more `VIEW_ADD` directive beside a fifth column in
+`AssistantsAppModel_AM.json`.
+
 ### Browsing and editing Things
 
-Eight navigation modules: **Documents**, **Invoices**, **Processes**, **Parties**, **Assistants**,
-**Operations**, **Conversations**, **Runtime**, and **Conversations** is the landing page. Each is
-an ordinary A12 master-detail: an overview of scalars, and a form for one row. `OpenQuestion` is the
-ninth Model with a module and the one without a menu entry — its form is reached through a
+Nine navigation modules: **Dashboard**, **Documents**, **Invoices**, **Processes**, **Parties**,
+**Assistants**, **Operations**, **Conversations**, **Runtime**, and the **Dashboard** is the landing
+page. All but the Dashboard are an ordinary A12 master-detail: an overview of scalars, and a form for
+one row. `OpenQuestion` is the Model with a module and no menu entry — its form is reached through a
 Conversation, as above.
 
 Four are freely editable by the User — `Party`, `Document`, `Invoice`, `Process`. Creating an
@@ -193,7 +224,7 @@ What to expect from one, because none of it is obvious:
 
 Firefly III at `http://localhost:8084`, behind oauth2-proxy, through the same Keycloak login. The
 User works in it directly — it is the Authority, and nothing in this system holds a second copy of
-what it says.
+what it says. The **Dashboard**'s bookkeeping Tile is the door: one click, the same session, a new tab.
 
 An Invoice's booking is found by searching Firefly for the tag `thing:<thingId>` or the
 `external_id`; there is no field on the Invoice to read.

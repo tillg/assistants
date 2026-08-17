@@ -56,7 +56,9 @@ import { isProduction } from "./config";
 import { enableReduxDevTools } from "./config/devtools";
 import { LoadModelGraphSaga } from "./sagas/loadModelGraph";
 import { OpenForeignFormSaga } from "./sagas/openForeignForm";
+import { OpenModuleSaga } from "./sagas/openModule";
 import { enginesViewMap } from "./app/EnginesViewMap";
+import { dashboardViewMap } from "./components/dashboard/dashboardViewMap";
 import { stabilizeModifications } from "./app/stabilizeModifications";
 import { CustomApplicationFrameLayout } from "./app/LayoutProvider";
 import { DEFAULT_TRANSLATIONS, supportedLocales, getDateTimeResource } from "./localization";
@@ -151,13 +153,17 @@ export function setup() {
         addView("FormEngine", enginesViewMap.FormEngine),
         addView("OverviewEngine", enginesViewMap.OverviewEngine),
         addView("ContentEngine", enginesViewMap.ContentEngine),
+        addView("ConversationsTile", dashboardViewMap.ConversationsTile),
+        addView("DocumentsTile", dashboardViewMap.DocumentsTile),
+        addView("AssistantsTile", dashboardViewMap.AssistantsTile),
+        addView("BookkeepingTile", dashboardViewMap.BookkeepingTile),
         addLayout("ApplicationFrame", { component: CustomApplicationFrameLayout })
     );
 
     const applicationFeatures = combineFeatures(
         viewAndLayoutFeatures,
         addAdditionalMiddlewares(registerModulesOnSetModelGraphMiddleware, unregisterModulesOnLogoutMiddleware),
-        addCustomSagas(LoadModelGraphSaga, OpenForeignFormSaga)
+        addCustomSagas(LoadModelGraphSaga, OpenForeignFormSaga, OpenModuleSaga)
     );
 
     const configured = stabilizeModifications(

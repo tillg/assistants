@@ -32,7 +32,11 @@ test.describe("Login flow", () => {
             await expect(popupTrigger).toBeVisible();
 
             await expect(page.getByTestId(TestID.MENU_ITEM).first()).toBeVisible();
-            await expect(page.getByTestId(TestID.CONTENTBOX_TITLE).first()).toBeVisible();
+
+            // …and something in the content region. That used to be a ContentBox title, because the
+            // landing page was the Conversations overview; it is the Dashboard now, and a Dashboard
+            // renders no ContentBox at all. Its Tiles are the same claim about the same region.
+            await expect(page.locator("[data-role^='tile-'][data-state]").first()).toBeVisible();
 
             await popupTrigger.click();
             await expect(page.getByTestId(TestID.POPUP_MENU)).toContainText("Logged in as");

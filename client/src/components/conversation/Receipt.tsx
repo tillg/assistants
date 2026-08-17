@@ -1,8 +1,9 @@
 import { useState } from "react";
 import styled from "styled-components";
 
+import { ICONS } from "../icons";
+
 import type { Receipt as ReceiptItem } from "./entries";
-import { ICONS } from "./icons";
 
 /**
  * A `tool-intent` and its `tool-result`, as one Bubble.

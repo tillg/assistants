@@ -32,6 +32,106 @@
   "content": {
     "modules": [
       {
+        "name": "DashboardModule",
+        "menu": {
+          "name": "Dashboard",
+          "label": [
+            {
+              "locale": "en",
+              "text": "Dashboard"
+            },
+            {
+              "locale": "de",
+              "text": "Dashboard"
+            }
+          ],
+          "initialActivity": {
+            "descriptor": {
+              "module": "Dashboard"
+            }
+          }
+        },
+        "flows": [
+          {
+            "name": "DashboardFlow",
+            "scenes": [
+              {
+                "name": "DashboardOverview",
+                "description": "The Dashboard: one activity, four views",
+                "matchConditions": [
+                  {
+                    "key": "module",
+                    "mustEqual": "Dashboard"
+                  }
+                ],
+                "sceneChange": {
+                  "onEnter": [
+                    {
+                      "type": "REGION_CLEAR",
+                      "layout": {
+                        "name": "Dashboard",
+                        "settings": {
+                          "rows": [
+                            {
+                              "columns": [
+                                {
+                                  "width": {
+                                    "sm": 12,
+                                    "md": 6,
+                                    "lg": 3
+                                  }
+                                },
+                                {
+                                  "width": {
+                                    "sm": 12,
+                                    "md": 6,
+                                    "lg": 3
+                                  }
+                                },
+                                {
+                                  "width": {
+                                    "sm": 12,
+                                    "md": 6,
+                                    "lg": 3
+                                  }
+                                },
+                                {
+                                  "width": {
+                                    "sm": 12,
+                                    "md": 6,
+                                    "lg": 3
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "type": "VIEW_ADD",
+                      "name": "ConversationsTile"
+                    },
+                    {
+                      "type": "VIEW_ADD",
+                      "name": "DocumentsTile"
+                    },
+                    {
+                      "type": "VIEW_ADD",
+                      "name": "AssistantsTile"
+                    },
+                    {
+                      "type": "VIEW_ADD",
+                      "name": "BookkeepingTile"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
         "name": "OpenQuestionModule",
         "flows": [
           {
@@ -891,7 +991,7 @@
     ],
     "initialActivity": {
       "descriptor": {
-        "module": "Conversation"
+        "module": "Dashboard"
       }
     }
   }

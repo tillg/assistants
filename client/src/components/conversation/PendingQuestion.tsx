@@ -4,8 +4,8 @@ import styled from "styled-components";
 import { openForeignForm } from "../../sagas/openForeignForm";
 
 import { MarkdownRichTextEditor } from "../markdown-editor";
+import { ICONS } from "../icons";
 
-import { ICONS } from "./icons";
 import { readOpenQuestion } from "./question";
 import { useThingById } from "./useThingById";
 

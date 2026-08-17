@@ -177,19 +177,25 @@ prompts editable in the ordinary UI as ADR-0003 requires. See
 [MARKDOWN_FIELDS.md](../research/MARKDOWN_FIELDS.md).
 
 **Constraint**: `lexical` must resolve to a single instance shared with `widgets-core`, or
-Lexical's `$`-functions break. Verified in the build with `npm ls lexical`.
+Lexical's `$`-functions break. Verified in the build with `npm ls lexical`. The same holds for
+`recharts`, which the Dashboard's createdOn curve draws with directly — widgets-core's own `LineChart`
+is deprecated as of 38.1.1 with the note *"Use Recharts directly instead"* — so `client/package.json`
+declares it at the `^2.15.4` widgets-core asks for and `npm ls recharts` must report one copy.
 
-The transcript is the second piece, and the last. `Conversation.entries[]` renders as a message
-thread rather than as an inline repeat, which needs three client seams the markdown editor did not —
-all three of them platform seams, nothing forked and no engine replaced:
+The transcript is the second piece, and the Dashboard the third. `Conversation.entries[]` renders as a
+message thread rather than as an inline repeat, and the Dashboard places four model-less views in a
+platform layout; between them they need five client seams the markdown editor did not — all five of
+them platform seams, nothing forked and no engine replaced:
 
 | Seam | What it is | Where |
 |---|---|---|
 | **A custom screen element** | `formModelMap.CustomScreenElement`, dispatched on a `widget` annotation exactly as the markdown Control is. The form engine hands the component `config.renderOptions.state.data.document`, so the Transcript needs no data flow of its own for the document its form is already on. An optional `exposes: <groupId>` annotation is the ADR-0008 coverage claim that replaces the repeat, and `import/validate-models.mjs` both honours it and errors when it names a group the bound Document Model does not have | `client/src/components/CustomScreenElements.tsx` |
 | **A read by id** | `useThingById(model, thingId)` — one document, read through `dataservices-access`, no write, no activity, no dirty state, no polling. It fails soft: no id, a deleted Thing or a failed request renders a message line, never a broken form | `client/src/components/conversation/useThingById.ts` |
-| **Cross-module navigation** | `openForeignForm` — cancel every top-level activity and honour the veto, push a master activity for `masterModule`, then push the detail with `initiatingActivityId`. A saga rather than a click handler, because the teardown is an asynchronous handshake whose answer may be *no*. The teardown is not optional: an activity leaves the map only on cancel, commit or `resetState`, and a leaked one breaks the master-detail layout and vetoes module removal at logout | `client/src/sagas/openForeignForm.ts` |
+| **Cross-module navigation** | `openForeignForm` — cancel every top-level activity and honour the veto, push a master activity for `masterModule`, then push the detail with `initiatingActivityId`. A saga rather than a click handler, because the teardown is an asynchronous handshake whose answer may be *no*. The teardown is not optional: an activity leaves the map only on cancel, commit or `resetState`, and a leaked one breaks the master-detail layout and vetoes module removal at logout. `openModule` is the same recipe without the detail push, and it **owns** the shared teardown that both sagas use | `client/src/sagas/openModule.ts`, `client/src/sagas/openForeignForm.ts` |
+| **A region layout, chosen by name** | The Dashboard's scene clears `CONTENT` to `layout: { name: "Dashboard", settings: { rows: […] } }`. `DefaultLayoutProvider` resolves that name with **no registration** — it is a built-in beside `MasterDetail`, `Stack` and `Null` — and fills each leaf column with `views[i++]`, each inside its own error boundary. **Slot pairing is positional**: the order of the `VIEW_ADD` directives *is* the layout, so `dashboardViewMap.tsx` lists the four Tiles in exactly the order the directives declare them. The four Tiles are views with **no model at all** (`Directive.Add.models` is optional), so each is a plain React component that fetches its own numbers | `import/models/AssistantsAppModel_AM.json`, `client/src/components/dashboard/dashboardViewMap.tsx` |
+| **A count by query** | `useThingCounts(queries)` — N `QUERY` requests in **one** `Dispatcher.rpc` call, of which the only field read is `fullSize`; `entries` is discarded, so no count can become a second copy of a Thing (ADR-0022). Read-only, fails soft, never polls. `paging.pageSize: 0` is rejected by the store, so it asks for 1 and throws the document away. `useAssistants` is its sibling and the one hook that touches a document body — three fields lifted per Assistant, the rest discarded | `client/src/components/dashboard/useThingCounts.ts`, `useAssistants.ts` |
 
-All three need the same composition, and it is worth stating once because no Thing carries it: an
+The first three need the same composition, and it is worth stating once because no Thing carries it: an
 activity descriptor's `instance`, and a document read, both want a **docRef** — `<Model>/<ThingID>` —
 while `Conversation.currentQuestionId`, `Conversation.subjectThingId` and `OpenQuestion.conversationId`
 all hold **bare ThingIDs**. [ADR-0002](../../docs/adr/0002-thingid-identifies-only.md) is why: a
@@ -204,9 +210,9 @@ engine through `OpenQuestion_FM` and by nothing else — a second writer for one
 stayed on the question's own form rather than moving into the Transcript
 ([ADR-0021](../../docs/adr/0021-a-question-is-answered-in-its-conversation.md)).
 
-There is no custom client code beyond these two. The User answers an Open Question by opening it in
+There is no custom client code beyond these three pieces. The User answers an Open Question by opening it in
 the ordinary A12 instance form and saving it (D-005) — reached now through its Conversation rather
-than from a menu.
+than from a menu, or through the Dashboard's conversations Tile, which counts the ones waiting.
 
 **If a Thing is ever reached outside the web application — a messenger, a push notification, mail —
 it hooks `raiseQuestion` and nothing else.** Every Open Question in the system passes through that
