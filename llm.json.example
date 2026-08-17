@@ -13,8 +13,9 @@
     "entry here and one line to `.env`; nothing else in the stack has to know its name.",
     "",
     "Fields: provider (openai | anthropic | scripted), baseUrl, model, temperature (optional),",
-    "requiresKey (optional, for a local server that wants none), scriptFile (scripted only).",
-    "`Assistant.LlmModel` overrides `model` for that one Assistant.",
+    "requiresKey (optional; set false for a server that wants no key at all — an mlx/omlx server",
+    "does want one, so `local_qwen` reads LOCAL_QWEN_KEY like any other profile), scriptFile",
+    "(scripted only). `Assistant.LlmModel` overrides `model` for that one Assistant.",
     "",
     "See README.md, 'The language model'."
   ],
@@ -50,8 +51,7 @@
       "provider": "openai",
       "baseUrl": "http://host.docker.internal:8000/v1",
       "model": "Qwen3-Coder-30B-A3B-Instruct-4bit",
-      "temperature": 0,
-      "requiresKey": false
+      "temperature": 0
     }
   }
 }

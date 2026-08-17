@@ -101,14 +101,20 @@ down:
 # failed scans, while a *fresh* process in the same container reached `server:8080` perfectly well.)
 # Restarting the server therefore takes both of them with it.
 
+# `up -d --force-recreate` rather than `restart`, because `docker restart` reuses the environment the
+# container was created with. A key added to `.env` — which is how a new LLM profile gets its key —
+# would then not arrive, and the Runtime would print the same "no API key" message it printed before
+# the edit. Re-creating is what "restart with the current configuration" has to mean here; the data
+# all lives in Postgres, so nothing is lost by it.
+
 # Restart one service, or all of them.
 restart service="":
     #!/usr/bin/env bash
     set -uo pipefail
     if [ "{{service}}" = "server" ]; then
-        {{compose}} restart server frontend runtime
+        {{compose}} up -d --force-recreate server frontend runtime
     else
-        {{compose}} restart {{service}}
+        {{compose}} up -d --force-recreate {{service}}
     fi
 
 # Show what is running.

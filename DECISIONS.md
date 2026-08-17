@@ -1845,5 +1845,44 @@ in `advance.ts`, and both seeded Assistants carried that same literal on their T
 `LLM_MODEL` moved nothing at all, which README had to document as a gotcha (D-054's four defects
 were found *around* this). The fallback is now the active profile's `model` and the seeds are empty,
 so switching profile switches the model for every Assistant that has no opinion of its own. And
-`"requiresKey": false` exists because a local server usually wants no key, and the startup check
-would otherwise have made D-054's setup unreachable.
+`"requiresKey": false` exists for a server that wants no key at all, so the startup check cannot
+make such a setup unreachable. Not the local one here, as it turns out: an mlx/omlx server answers
+`API key required` like any hosted endpoint, so `local_qwen` reads `LOCAL_QWEN_KEY` and the shipped
+sample says so. The escape hatch is still right to have; assuming "local" means "open" was not.
+
+## D-058 — The stack now runs on the local Qwen, and the first live Turn escalated
+
+*2026-08-17, immediately after switching `active` to `local_qwen`.*
+
+The switch itself is one line and it worked: the Runtime logs
+`llm profile selected {"profile":"local_qwen","model":"Qwen3-Coder-30B-A3B-Instruct-4bit","endpoint":"http://host.docker.internal:8000/v1"}`
+and reaches the server. Two things had to be corrected to get there, and both are recorded in the
+shipped sample rather than in anyone's memory:
+
+1. **A local server wants a key.** The omlx server answers `{"error":{"message":"API key
+   required"}}` to an unauthenticated request exactly like a hosted one, so `local_qwen` carries no
+   `"requiresKey": false` and reads `LOCAL_QWEN_KEY` from `.env` like every other profile. The
+   escape hatch is still right to have for a server that genuinely wants none; assuming "local"
+   means "open" was not.
+2. **`just restart` had to start re-creating containers.** `docker restart` reuses the environment
+   the container was created with, so a key just added to `.env` did not arrive and the Runtime
+   printed the very message it prints when the key is missing — while the key sat in the file.
+   Since the "no API key" message *tells the reader* to `just restart runtime`, that advice had to
+   become true: the recipe is now `up -d --force-recreate`.
+
+**Then the first live Document escalated to the User**, and the configuration is not why. Measured:
+
+| | |
+|---|---|
+| profile resolved in the container | `temperature` is `number 0`, key present, endpoint reachable |
+| the server, asked directly | returns a structured `tool_calls` array — for a trivial prompt **and** for the Receptionist's real 3337-character system prompt with seven tools |
+| the Receptionist's actual first Turn | `The model emitted a tool call as text rather than as a structured call` on **all three** attempts, then `conversation escalated to the User {"reason":"error"}` |
+
+So this is D-054's second defect recurring under the full request — the real parameter schemas and
+the Conversation's Entries on top of the prompt — not a wiring fault. The Runtime behaved exactly as
+that decision intended: it refused to read the markup as an answer, retried to its bound, and handed
+the User an Open Question rather than a Conversation that looked finished having done nothing.
+
+What it costs to know: the difference between "the local model is configured" and "the local model
+can drive this loop" is now measured rather than assumed, and the remaining work is the prompt, not
+the plumbing. `"active": "scripted"` is one line away for anyone who needs a working stack today.

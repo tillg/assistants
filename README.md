@@ -222,7 +222,7 @@ uses is your business and not a change to the repository. Here is the sample it 
     "anthropic":  { "provider": "anthropic", "baseUrl": "https://api.anthropic.com",  "model": "claude-sonnet-4-5" },
     "azure_gpt":  { "provider": "openai",    "baseUrl": "https://YOUR-RESOURCE.openai.azure.com/openai/v1", "model": "gpt-4o" },
     "local_qwen": { "provider": "openai",    "baseUrl": "http://host.docker.internal:8000/v1",
-                    "model": "Qwen3-Coder-30B-A3B-Instruct-4bit", "temperature": 0, "requiresKey": false }
+                    "model": "Qwen3-Coder-30B-A3B-Instruct-4bit", "temperature": 0 }
   }
 }
 ```
@@ -274,7 +274,7 @@ Rules worth knowing before you write one:
 | `model` | Required for `openai` and `anthropic`. It is the *default*: an Assistant with its own `LlmModel` overrides it, and both seeded ones leave that empty so they follow the profile |
 | `baseUrl` | Defaults to the provider's own (`https://api.openai.com/v1`, `https://api.anthropic.com`) if you leave it out |
 | `temperature` | Sent only when present. Set it to `0` for a local quantized model — see below |
-| `requiresKey` | Set `false` only for a server that genuinely wants no key. Otherwise the startup check below is what you want |
+| `requiresKey` | Set `false` only for a server that genuinely wants no key — a local one usually does want one. Otherwise the startup check below is what you want |
 | the name | Letters, digits and underscores, starting with a letter — because it becomes the name of an environment variable |
 
 **The keys live in `.env`, one per profile.** That is why adding a profile touches two files and no
@@ -320,12 +320,22 @@ settings on the profile are not optional in that case, and both were learned the
   writes the call as prose instead, which the Runtime now catches and retries rather than
   mistaking for an answer.
 
-`"requiresKey": false` is the third thing worth knowing: a local server usually wants no key, and
-without it the startup check above would refuse to run.
+**A local server still wants a key.** An mlx/omlx server answers `{"error":{"message":"API key
+required"}}` to an unauthenticated request like any hosted one, so `local_qwen` reads
+`LOCAL_QWEN_KEY` from `.env` — whatever token the server was started with. `"requiresKey": false`
+exists for the servers that genuinely want none; setting it when the server does want one turns a
+clear startup message into a 401 on somebody's transcript.
 
 Completions are bounded at 4096 tokens, as the Anthropic provider has always bounded them. Without a
 bound a local server's own default applies — 32768 is common, which at a quantized model's speed is
 several minutes inside a single Turn, long enough to stall the scan that owns it.
+
+**Being configured is not the same as being able to drive the loop.** On `local_qwen` the
+Receptionist's first Turn returned its tool call as *text* on all three attempts and the
+Conversation escalated to the User — while the same server, asked directly with the same prompt and
+tools, answers with a structured `tool_calls` array ([D-058](DECISIONS.md)). That is the Runtime
+working as intended rather than a misconfiguration, but it means a local model is not yet a
+drop-in: expect escalations, and `"active": "scripted"` is one line away.
 
 ### Schedules and the timezone they are read in
 
