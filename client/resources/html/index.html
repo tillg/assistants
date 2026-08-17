@@ -82,6 +82,69 @@
                     <rect x="4755" y="68" width="718" height="149" fill="#1d4e86" style="--n: 6" />
                     <rect x="5535" y="68" width="718" height="149" fill="#b0e341" style="--n: 7" />
                 </svg>
+                <script>
+                    // After 5 to 10 orderly left-to-right rounds (the count is drawn anew every
+                    // time), exactly ONE round runs in a shuffled order -- a small nudge that
+                    // someone is home. The CSS animation keeps running untouched; we only rewrite
+                    // the --n offsets while all bars are hidden, near the end of a round.
+                    (function () {
+                        var ROUND = 4000;
+                        var bars = document.querySelectorAll("#root svg rect");
+                        if (!bars.length || !bars[0].getAnimations) {
+                            return;
+                        }
+
+                        var animation = bars[0].getAnimations()[0];
+                        var roundZero = performance.now() - (animation ? Number(animation.currentTime) : 0);
+
+                        var orderlyRounds = function () {
+                            return 5 + Math.floor(Math.random() * 6);
+                        };
+
+                        var setOrder = function (order) {
+                            for (var i = 0; i < bars.length; i++) {
+                                bars[i].style.setProperty("--n", order[i]);
+                            }
+                        };
+
+                        var leftToRight = function () {
+                            var order = [];
+                            for (var i = 0; i < bars.length; i++) {
+                                order.push(i);
+                            }
+                            return order;
+                        };
+
+                        var shuffled = function () {
+                            var order = leftToRight();
+                            for (var j = order.length - 1; j > 0; j--) {
+                                var k = Math.floor(Math.random() * (j + 1));
+                                var swap = order[j];
+                                order[j] = order[k];
+                                order[k] = swap;
+                            }
+                            return order;
+                        };
+
+                        // Run `callback` shortly before round `round` begins, while every bar is
+                        // scaled away -- changing --n there shifts the phase invisibly.
+                        var beforeRound = function (round, callback) {
+                            setTimeout(callback, Math.max(0, roundZero + round * ROUND - 100 - performance.now()));
+                        };
+
+                        var scheduleCrazyRound = function (round) {
+                            beforeRound(round, function () {
+                                setOrder(shuffled());
+                                beforeRound(round + 1, function () {
+                                    setOrder(leftToRight());
+                                    scheduleCrazyRound(round + 1 + orderlyRounds());
+                                });
+                            });
+                        };
+
+                        scheduleCrazyRound(orderlyRounds());
+                    })();
+                </script>
             </div>
         </div>
         <noscript>
