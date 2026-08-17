@@ -43,9 +43,11 @@ flowchart LR
 ```
 
 The architectural style is not microservices and not a monolith. It is **one shared store with two
-independent clients**. The ThingStore is the only integration surface in the system: the
-UserInterface writes to it, the Runtime polls it, and neither knows the other exists. There is no
-service-to-service call anywhere in the product code.
+independent clients**. The ThingStore is the only Authority for pending work: the UserInterface
+writes to it, the Runtime polls it, and neither knows the other exists. There is one
+service-to-service call in the product code, and it goes the other way — the server forwarding a
+client's read to the Runtime, which is the only component that can reach an External System
+(ADR-0023). Nothing about pending work travels on it.
 
 Every host port is published on `127.0.0.1` only.
 
@@ -61,8 +63,8 @@ ThingStore with no privileged access, exactly like the UserInterface.
 
 ### Why the Runtime polls (ADR-0011)
 
-The Runtime offers no API and receives no webhooks. It asks the store every two seconds what has
-materialised, what has been answered and what is due to wake.
+The Runtime receives no webhooks and is told nothing about pending work. It asks the store every
+two seconds what has materialised, what has been answered and what is due to wake.
 
 The ThingStore is the Authority for Conversations and Open Questions, so "is there anything to
 do?" is a question about the store and nothing else is entitled to answer it. An API on the
@@ -70,6 +72,25 @@ Runtime would be a second place to ask, and it would hold in memory — a pendin
 subscription, a callback — exactly the live state ADR-0004 exists to remove. The cost is a handful
 of indexed queries every two seconds and a latency of one scan interval. At one household's volume
 that is free; at another scale the interval is the first thing that would have to give.
+
+### The one inbound surface (ADR-0023)
+
+The Runtime does have an inbox, and it carries no pending work. `runtime/src/inbound/` is a
+`node:http` listener on the compose network, published to no host port, which accepts one thing:
+*execute this named Operation and return its result*. It exists because the Runtime is the **door
+outward** — every Connector and every foreign credential lives there — and the Dashboard's
+bookkeeping Tiles need a fact whose Authority is Firefly rather than the store.
+
+Four checks, `and`ed: the Operation is on a deployment allowlist, its Implementation declares
+`clientReadable`, its Implementation is `mutating: false`, and its Operation Thing is not switched
+off. The first and last are also checked by the server before it forwards, so a mistake in one
+process is not the only thing standing between a browser and the books; the checks that carry the
+guarantee are the ones in code, in the process that would do the executing. `Mutating` is
+deliberately *not* read from the Thing — an editable flag may not carry a safety decision, which is
+the same refusal `registry.ts` already makes for crash recovery.
+
+Nothing on that path stores an answer: no Thing, no cache, no copy in the server. Foreign data is
+routed, not copied.
 
 ## Technology stack
 
@@ -192,7 +213,7 @@ them platform seams, nothing forked and no engine replaced:
 | **A custom screen element** | `formModelMap.CustomScreenElement`, dispatched on a `widget` annotation exactly as the markdown Control is. The form engine hands the component `config.renderOptions.state.data.document`, so the Transcript needs no data flow of its own for the document its form is already on. An optional `exposes: <groupId>` annotation is the ADR-0008 coverage claim that replaces the repeat, and `import/validate-models.mjs` both honours it and errors when it names a group the bound Document Model does not have | `client/src/components/CustomScreenElements.tsx` |
 | **A read by id** | `useThingById(model, thingId)` — one document, read through `dataservices-access`, no write, no activity, no dirty state, no polling. It fails soft: no id, a deleted Thing or a failed request renders a message line, never a broken form | `client/src/components/conversation/useThingById.ts` |
 | **Cross-module navigation** | `openForeignForm` — cancel every top-level activity and honour the veto, push a master activity for `masterModule`, then push the detail with `initiatingActivityId`. A saga rather than a click handler, because the teardown is an asynchronous handshake whose answer may be *no*. The teardown is not optional: an activity leaves the map only on cancel, commit or `resetState`, and a leaked one breaks the master-detail layout and vetoes module removal at logout. `openModule` is the same recipe without the detail push, and it **owns** the shared teardown that both sagas use | `client/src/sagas/openModule.ts`, `client/src/sagas/openForeignForm.ts` |
-| **A region layout, chosen by name** | The Dashboard's scene clears `CONTENT` to `layout: { name: "Dashboard", settings: { rows: […] } }`. `DefaultLayoutProvider` resolves that name with **no registration** — it is a built-in beside `MasterDetail`, `Stack` and `Null` — and fills each leaf column with `views[i++]`, each inside its own error boundary. **Slot pairing is positional**: the order of the `VIEW_ADD` directives *is* the layout, so `dashboardViewMap.tsx` lists the four Tiles in exactly the order the directives declare them. The four Tiles are views with **no model at all** (`Directive.Add.models` is optional), so each is a plain React component that fetches its own numbers | `import/models/AssistantsAppModel_AM.json`, `client/src/components/dashboard/dashboardViewMap.tsx` |
+| **A region layout, chosen by name** | The Dashboard's scene clears `CONTENT` to `layout: { name: "Dashboard", settings: { rows: […] } }`. `DefaultLayoutProvider` resolves that name with **no registration** — it is a built-in beside `MasterDetail`, `Stack` and `Null` — and fills each leaf column with `views[i++]`, each inside its own error boundary. **Slot pairing is positional**: the order of the `VIEW_ADD` directives *is* the layout, so `dashboardViewMap.tsx` lists the six Tiles in exactly the order the directives declare them — positional **across rows as well as within one**, which is what the second row made worth stating. The Tiles are views with **no model at all** (`Directive.Add.models` is optional), so each is a plain React component that fetches its own numbers | `import/models/AssistantsAppModel_AM.json`, `client/src/components/dashboard/dashboardViewMap.tsx` |
 | **A count by query** | `useThingCounts(queries)` — N `QUERY` requests in **one** `Dispatcher.rpc` call, of which the only field read is `fullSize`; `entries` is discarded, so no count can become a second copy of a Thing (ADR-0022). Read-only, fails soft, never polls. `paging.pageSize: 0` is rejected by the store, so it asks for 1 and throws the document away. `useAssistants` is its sibling and the one hook that touches a document body — three fields lifted per Assistant, the rest discarded | `client/src/components/dashboard/useThingCounts.ts`, `useAssistants.ts` |
 
 The first three need the same composition, and it is worth stating once because no Thing carries it: an

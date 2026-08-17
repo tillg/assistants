@@ -67,33 +67,41 @@ exists, and until one does those three models are read by nobody and covered by 
 
 ### The Dashboard
 
-**The way in.** The first menu entry, and the page the User lands on. Four **Tiles**, each answering a
-question the User has on arriving and each a door to the module that answers it properly:
+**The way in.** The first menu entry, and the page the User lands on. Six **Tiles** in two rows, each
+answering a question the User has on arriving and each a door to the module that answers it properly:
 
 | Tile | What it says | Where it goes |
 |---|---|---|
 | 🗣 **Conversations** | how much work is **in flight** — `running` + `waiting` — split into *running*, *waiting on you*, *waiting on something else* | Conversations |
 | 📄 **Documents** | how many Documents there are, over the **createdOn curve**: how that number grew across the last twelve months | Documents |
 | 🤖 **Assistants** | how many there are, each by name, dimmed when disabled | Assistants |
-| 💰 **Bookkeeping** | that the books are elsewhere, and opens them | Firefly III, in a new tab |
+| 💰 **Bookkeeping** | nothing — it is a grey **button**, not a summary: a control with a label and a destination, no headline, no body, no footer | Firefly III, in a new tab |
+| 💳 **Transactions** | the last ten **Bookings** in the last ninety days, newest first — date, description, the two accounts, the amount | Firefly III, in a new tab |
+| 🏦 **Accounts** | every **Bank Account** by name with its balance, and one total per currency — never a total across them | Firefly III, in a new tab |
 
 **The Dashboard counts; it does not keep** (ADR-0022). Every number on it is a `fullSize` the ThingStore
 returned for a query issued moments earlier — no count is stored on a Thing, cached, polled or
 aggregated. Each Tile that queries therefore states the instant it read (*as of 14:32*), and returning to the
-Dashboard re-reads it. One Tile that cannot read shows a single line saying so and the other three
+Dashboard re-reads it. One Tile that cannot read shows a single line saying so and the others
 stand.
 
-The bookkeeping Tile has **no number**, and that is architectural rather than unfinished: Bookkeeping is
-the Authority for balances, the browser holds no Firefly credential, and the only component that holds
-one is the Runtime, which offers no API (ADR-0011). It is a door, and it says so.
+**The books are reachable from the application** (ADR-0023), and they are still not held by it. The
+last two Tiles read Firefly through the one component that can — the Runtime, the door outward — over
+a route that executes a named, allowlisted, non-mutating Operation and returns its result. Nothing
+about the household's money is stored on the way: no Thing, no cache, nothing kept between visits.
+The browser still holds no Firefly credential and never will, which is why the 💰 Tile is a plain
+button rather than a summary: opening the books is a different act from reading a number out of them.
+Stop the Runtime and those two Tiles grey out while the other four render — the honest answer to
+*"what do the books say?"* when the only component that can ask is down.
 
 The **createdOn curve** can run behind the Documents headline, because `Document.createdAt` is the
 Runtime's field and a Document created in the web application carries none until the next scan stamps
 it. That gap is named — the **createdOn lag** — and stated on the Tile rather than hidden.
 
-Which Tiles exist, and where they sit, is **App Model configuration** rather than code: a fifth Tile is
-a component, its `addView` registration, and one more `VIEW_ADD` directive beside a fifth column in
-`AssistantsAppModel_AM.json`.
+Which Tiles exist, and where they sit, is **App Model configuration** rather than code: a seventh Tile is
+a component, its `addView` registration, and one more `VIEW_ADD` directive beside one more column in
+`AssistantsAppModel_AM.json`. The second row was added exactly that way, and slot pairing is positional
+across rows as well as within one — the order of the directives *is* the layout.
 
 ### Browsing and editing Things
 

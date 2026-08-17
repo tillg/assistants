@@ -35,7 +35,7 @@ Spelling throughout the project is British English.
 [DECISIONS.md](DECISIONS.md) (decisions taken while building, with their alternatives and
 reversal costs) · [BUGS.md](BUGS.md) (43 reproduced defects from the 2026-08-09 hunt; each entry
 records whether it still stands) ·
-[docs/adr/](docs/adr/) (twenty-two architecture decisions) ·
+[docs/adr/](docs/adr/) (twenty-three architecture decisions) ·
 [RESEARCH_INDEX.md](RESEARCH_INDEX.md) (the four research papers in
 [specs/research/](specs/research/), each with what it settled and what it left open: what
 Bookkeeping must provide and why Firefly III, how the agentic loop should work and why no workflow
@@ -103,8 +103,11 @@ except Keycloak** ([D-022](DECISIONS.md)):
   that header itself.
 
 The Runtime is a client of the ThingStore with no privileged access, exactly like the
-UserInterface. It polls; it exposes no API and receives no webhooks. That is the whole
-integration surface ([D-005](DECISIONS.md)).
+UserInterface. It polls; it receives no webhooks and is told nothing about pending work. That is
+the whole of how work reaches it ([D-005](DECISIONS.md)). It does answer one inbound call — the
+server forwarding a client's read of an External System, because the Runtime is the only component
+that can reach one ([ADR-0023](docs/adr/0023-the-runtime-is-the-door-outward.md)) — and that route
+carries no pending work, executes nothing that mutates, and stores nothing.
 
 ### Internal, external, and the seam between them
 
@@ -268,13 +271,15 @@ Then:
   `human` / `human`, on a login screen wearing the application's own clothes rather than
   Keycloak's ([the login theme](#the-login-theme)). The navigation has nine entries: Dashboard,
   Documents, Invoices, Processes, Parties,
-  Assistants, Operations, Conversations, Runtime. It opens on the **Dashboard**: four Tiles saying
+  Assistants, Operations, Conversations, Runtime. It opens on the **Dashboard**: six Tiles saying
   how much work is in flight and how much of it is waiting on you, how many Documents there are and
-  how that number grew over the last twelve months, which Assistants exist, and where the books are.
-  Each Tile is a door to the module behind it. Every number on it is counted by the ThingStore at the
-  moment you look and held nowhere ([ADR-0022](docs/adr/0022-a-dashboard-counts-it-does-not-keep.md)),
-  which is also why the bookkeeping Tile has no number — the books are Firefly's fact and the browser
-  cannot ask it. From there, **Conversations** is where the rows marked 🛑 are waiting for you;
+  how that number grew over the last twelve months, which Assistants exist, a grey button that opens
+  the books, and — underneath — the last ten bookings and every bank account with its balance.
+  Each Tile is a door to the module behind it. Every number on it is read at the moment you look and
+  held nowhere ([ADR-0022](docs/adr/0022-a-dashboard-counts-it-does-not-keep.md)): the first three
+  are counted by the ThingStore, and the last two are read out of Firefly through the Runtime, the
+  only component that can reach it ([ADR-0023](docs/adr/0023-the-runtime-is-the-door-outward.md)).
+  Nothing about the household's money is stored on the way. From there, **Conversations** is where the rows marked 🛑 are waiting for you;
   **Assistants** is where you read and edit a prompt, in the markdown editor;
   **Operations** is the catalogue of what any Assistant can be granted.
 - **<http://localhost:8084>** — Firefly III, the books, behind oauth2-proxy. The same
@@ -537,8 +542,8 @@ Nothing else holds a credential. The files Keycloak imports would, so they are g
 passwords — `.env.example` and `e2e/fixtures/users.json` — out of secret scanning, and nothing else.
 
 **ThingStore** (`server/`, `import/models/`) — an A12 Data Service holding every Thing and
-exposing A12's JSON-RPC interface. It is the only integration surface in the system: the
-UserInterface reads it, the Runtime polls it, and nothing else talks to anything directly. Nine
+exposing A12's JSON-RPC interface. It is the only Authority for pending work in the system: the
+UserInterface reads it, the Runtime polls it, and nothing else is entitled to say what is waiting. Nine
 Models, each with a document model, a form model and an overview model, plus one application model
 for navigation.
 
@@ -550,12 +555,13 @@ the form model, and a `widget: markdown-editor` annotation on the Control — wh
 Assistant's prompts editable in the ordinary UI, as [ADR-0003](docs/adr/0003-assistants-are-things.md)
 requires. See [MARKDOWN_FIELDS.md](specs/research/MARKDOWN_FIELDS.md).
 
-The second is the **Dashboard** (`client/src/components/dashboard/`) — the landing page, four Tiles
-in the App Model's own `Dashboard` region layout, so where they sit and how many there are is four
-adjacent `VIEW_ADD` directives in `AssistantsAppModel_AM.json` rather than a layout written in React. Each Tile fetches its own numbers
+The second is the **Dashboard** (`client/src/components/dashboard/`) — the landing page, six Tiles in
+two rows in the App Model's own `Dashboard` region layout, so where they sit and how many there are is
+six adjacent `VIEW_ADD` directives in `AssistantsAppModel_AM.json` rather than a layout written in React. Each counting Tile fetches its own numbers
 straight through `Dispatcher.rpc` and reads only `fullSize`, so nothing on the page is a second copy
-of a Thing, and each is its own view and so has its own error boundary: one Tile that cannot read
-leaves the other three standing.
+of a Thing; the two bookkeeping Tiles ask the Runtime instead, through the read-only route
+[ADR-0023](docs/adr/0023-the-runtime-is-the-door-outward.md) opens, and keep nothing either. Each is
+its own view and so has its own error boundary: one Tile that cannot read leaves the others standing.
 
 **Runtime** (`runtime/`) — TypeScript on Node 24, in two halves. The **Trigger Watcher** scans the
 ThingStore every two seconds, in seven passes: things that materialised, questions that were
@@ -703,9 +709,14 @@ silently returns nothing.
 - **Waiting is never a running process.** An Assistant's entire state is its Conversation Thing, so
   a question that waits three weeks costs nothing and survives every restart
   ([ADR-0004](docs/adr/0004-assistants-suspend-and-resume.md)).
-- **The ThingStore is the only integration surface.** The Runtime polls it and exposes no API; the
-  UserInterface writes to it and calls nothing else. There is no second authority for pending work
+- **The ThingStore is the only Authority for pending work.** The Runtime polls it and is told
+  nothing; the UserInterface writes to it. There is no second place to ask what is waiting
   ([D-005](DECISIONS.md)).
+- **The Runtime is the door outward.** Every External System is reached through a Connector there
+  and every foreign credential lives there, and that stays true when the *client* wants the answer:
+  the one inbound call the Runtime accepts executes a named, allowlisted, non-mutating Operation and
+  returns its result, storing nothing on the way
+  ([ADR-0023](docs/adr/0023-the-runtime-is-the-door-outward.md)).
 - **The Conversation is an intent log, not a result log.** A tool call and its idempotency key are
   written *before* the operation executes, so recovery after a crash asks the connector whether the
   key landed rather than re-running it — which is the difference between a bug and booking €96.50
@@ -805,8 +816,8 @@ This is one running vertical slice, not a finished system. What is honestly miss
   `cd e2e && npx playwright test --list` is the authority on what it runs. Today: login as all four
   users, every module opened from the menu, Party CRUD, the Receptionist's prompt round-tripped
   through the markdown editor, localisation, the favicon, a row opened in each of the eight modules
-  that have a table, the Dashboard's four Tiles — including one whose query is failed on purpose, to
-  prove the other three still stand —
+  that have a table, the Dashboard's six Tiles — including one whose query is failed on purpose, to
+  prove the others still stand, and a browser attempting a mutating Operation and being refused —
   the Operations catalogue and its kill switch, a Conversation's transcript and the 🛑 that marks a
   blocked one, the whole invoice slice (an arriving Document → an Open Question answered through its
   Conversation → the booking checked in Firefly) and surviving a restart of the Runtime and the
@@ -862,7 +873,7 @@ This is one running vertical slice, not a finished system. What is honestly miss
 │   ├── system/               the system as it stands: domain, architecture, functional
 │   ├── research/             the research papers, and the sources they were read from
 │   └── changes/              proposal, domain, architecture and plan, per change in flight
-├── docs/                     adr/ — twenty-two architecture decision records; logo/ — design explorations
+├── docs/                     adr/ — twenty-three architecture decision records; logo/ — design explorations
 ├── assets/                   the logo and its derived files
 ├── buildSrc/, quality/       Gradle build logic and the Checkstyle configuration
 └── licenses/                 licence texts for the third-party notices
