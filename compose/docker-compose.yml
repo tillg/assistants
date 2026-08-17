@@ -382,6 +382,17 @@ services:
     image: ${PROJECT_NAME:-assistants}/runtime:${PROJECT_VERSION:-dev}
     container_name: ${PROJECT_NAME:-assistants}_runtime
     restart: unless-stopped
+    # Docker's default is 10s, and a clean stop here is routinely longer than that.
+    #
+    # SIGTERM sets a flag the scan loop reads *between* passes, so what actually ends the process is
+    # the current pass finishing. Six seconds was the measured norm before the letterbox; a mail poll
+    # can add an IMAP round trip and a large attachment on top of it. At 10s the container was being
+    # SIGKILLed mid-pass — possibly mid-upload — and the log ended with "finishing the current scan
+    # and stopping" and no "runtime stopped", which reads exactly like a hang rather than a timeout.
+    #
+    # Sixty is not a target. It is the ceiling before something is genuinely wedged, and reaching it
+    # is worth investigating rather than waiting out.
+    stop_grace_period: 60s
     # Stated, not merely implied by container_name: `--scale runtime=3` must fail on the
     # constraint above, not on an incidental name clash whose error suggests removing the name.
     scale: 1

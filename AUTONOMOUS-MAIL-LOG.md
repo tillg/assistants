@@ -257,3 +257,175 @@ session's tier and was mid-run.
 session began, which makes it the User's own process. Two agents agreeing to kill a human's
 long-running process at midnight is not a call either of them should make, and the config fix
 removes the problem without touching it.
+
+---
+
+## Second pass — an adversarial review of the finished change
+
+The eleven above were found by building. These twelve were found by an agent whose only instruction
+was to assume the code was wrong and try to prove it, with throwaway probe scripts rather than
+argument. Most are reproduced. Two of them lose an invoice.
+
+That is the lesson of this run, stated once: **the suite was green at 343 tests before this review
+started, and stayed green through every finding.** Tests pin the behaviour you thought of.
+
+### B-12 — part numbering shifts when an attachment is skipped, losing an invoice · REPRODUCED · FIXED
+
+`connectors/email.ts`. `externalRef` was `#<index+1>` over the *kept* attachments, so the size cap
+changed the numbering of everything behind it:
+
+```
+cap=1000    <m1@example.com>#1 = small.pdf
+cap=100000  <m1@example.com>#1 = big.pdf   <m1@example.com>#2 = small.pdf
+```
+
+The failure is exactly the case the feature exists for. A mail arrives with `big.pdf` (over the cap)
+and `small.pdf`; `small.pdf` is filed as `#1`. The User raises `MAIL_MAX_ATTACHMENT_BYTES` and moves
+the mail back to `assistant`. Now `big.pdf` *is* `#1`, so the ingest finds it already present and
+skips it — **the invoice is never ingested** — while `small.pdf` has become `#2`, which does not
+exist, so it is created a **second time**. One lost invoice, one duplicate, and the message moves to
+`processed` looking like a success.
+
+The reference for a MIME part must not depend on a configuration value.
+
+### B-13 — a successful message was filed as a failure · REPRODUCED · FIXED
+
+`watcher/mail.ts`. The final `move` sat inside the same `try` as the ingest, so a transient IMAP
+error on the last statement — after every Document had landed — put the message in
+`assistant/failed` and counted it failed. Worse than wrong: it is not self-healing, because the
+message is no longer in `incoming`, so it sits in a human's failure inbox for ever for a poll that
+actually worked.
+
+The file's own comment described the correct design. The code did not implement it.
+
+### B-14 — a rejected message was filed as a failure, and counted twice · REPRODUCED · FIXED
+
+Same cause. One hiccup moving to `rejected` and a stranger's mail landed in the folder reserved for
+*"we broke"* — collapsing the *"not for us"* / *"we broke"* distinction that the four-folder design
+is entirely about — and the same message was counted in both `summary.rejected` and
+`summary.failed`.
+
+### B-15 — the size cap bounded nothing that mattered · REPRODUCED · FIXED
+
+The cap was applied *after* mailparser had decoded every part. Measured: a 30 MB attachment against
+a 1 MB cap parsed in **9.4 seconds** and cost **255 MB of RSS** — and was then discarded. `fetch`
+also buffered every raw message before parsing any, so the worst case at the defaults was ~700 MB
+held at once and ~188 s of synchronous CPU, in the single-threaded loop that also runs the seven
+ThingStore scans. `health.ts` calls the Runtime stale after 90 s, so an ordinary spam batch would
+have reported the whole system **unhealthy**.
+
+It also falsified a comment written in this run: the envelope check does avoid the *decode*, but the
+raw bytes were already in memory before it ran, and the raw is the larger of the two.
+
+### B-16 — the 100-character threshold misclassified real invoices · REPRODUCED · FIXED
+
+Measured against realistic born-digital PDFs: a short dentist invoice at **84** characters, a
+one-line payment reminder at **44**, a parking receipt at **49** — every one reported
+`no-text-layer`, and `document.extractText`'s own description then tells the model to spend money
+reading it with `document.readScan`.
+
+So the change's central economic argument **inverted**: money spent on a model that can invent an
+amount, to read a document whose amount was free and exact. The original calibration — 21 characters
+against 576 — was honest arithmetic against a population of two.
+
+The fix is not a different number. It is to stop discarding the text: report that it is sparse and
+hand it over, and let the Receptionist judge. Deciding whether eighty-four characters are an invoice
+or a scanner artefact is judgement, and this system's whole argument is that judgement belongs to an
+Assistant rather than to a constant in a library.
+
+### B-17 — the watcher's once-per-outage suppression was dead code · FIXED
+
+`runMailIngest` caught everything and returned a summary, so the `mailboxFailing` state in
+`watcher.ts` was unreachable and a mailbox that was down logged an error **once a minute, for
+ever** — precisely the flood the suppression was written to prevent. A test pinned the swallowing,
+which is how it survived.
+
+### B-18 — SIGTERM cannot interrupt a mail poll · PARTLY FIXED
+
+The stop flag is only read between scans, and a poll can exceed Docker's 10 s default grace, so the
+container was SIGKILLed mid-pass — possibly mid-upload. `stop_grace_period: 60s` is set. Threading
+an abort signal into the ingest so a stop is honoured *within* a poll is the remaining half.
+
+This is the same defect class as B-05, which this run had already fixed for startup — found again
+one layer down.
+
+### B-19 — a vision profile's provider was ignored · FIXED
+
+`createVisionReader` always built the Anthropic reader. An `openai` profile named under `vision`
+would start cleanly, log `provider: openai`, and then POST Anthropic-shaped JSON with an `x-api-key`
+header to an OpenAI endpoint. Every read fails and the log says the opposite of what is happening,
+which sends whoever debugs it to the wrong place.
+
+### B-20 — negative token counts were accepted · FIXED
+
+`Number.isFinite(-999999)` is true, so an Operation returning a negative `usage` **subtracted** from
+the Turn's recorded cost, falsifying the lower-bound property `CONTEXT.md` builds on. D-054
+explicitly supports pointing a profile at a local server, which is where an odd `usage` block is
+most likely to originate.
+
+### B-21 — one IMAP login per moved message · FIXED
+
+Every public method opened, authenticated and closed its own connection: one poll was
+`2 + N` logins. At `maxPerPoll = 20` that is 22 TLS handshakes a minute against Gmail, which
+throttles rapid reconnects — and 20 handshake-plus-login latencies inside the scan loop.
+
+### B-22 — `extractedText` was unbounded · FIXED
+
+Capped nowhere: not in the connector, not in the ingest, not in the Model. A forwarded 500-page PDF
+would be extracted in full inside the scan loop, stored whole, and then loaded into the
+Receptionist's prompt on the next Turn, where it is paid for by the token. Every other field written
+by the ingest is capped at 200.
+
+### B-23 — the synthesised message id drops the mailbox identity · FIXED
+
+A message with no `Message-ID` got `<uid.N@local>`. IMAP UIDs are unique only within one
+`(mailbox, UIDVALIDITY)` generation, and `@local` is a constant — so deleting and recreating the
+`assistant` label restarts UIDs at 1, and a later message can compute a reference an earlier,
+different message already holds. The ingest then skips it as a duplicate and moves it to
+`processed`: **a silently dropped invoice, counted as `skipped`.**
+
+The spec said `<uid>@<mailbox-host>` and gave the reason — *"the UID is stable within a mailbox"*.
+The code dropped the half that made the sentence true.
+
+### Categories the review could not break
+
+Worth recording, because a clean result only counts if it was genuinely attacked.
+
+- **The sender allowlist.** Seventeen hostile inputs — uppercase, surrounding whitespace,
+  `"user@example.com" <attacker@evil.com>`, two `<>` pairs, nested `<<…>>`, a trailing dot,
+  `undisclosed-recipients:;`, an empty envelope, `user@example.com.attacker.io`, Turkish dotted-İ,
+  Kelvin-sign case folding — all correctly refused or correctly allowed, and IDN mismatches fail
+  **closed**. The residual weakness is architectural rather than a defect: an attacker who forges
+  both the SMTP envelope and the `From:` header passes both checks, so the gate ultimately rests on
+  Gmail's SPF/DKIM enforcement at the edge.
+- **Refusal before spend.** Both readers refuse a non-empty `extractedText` before anything is
+  downloaded and before any vision call; whitespace-only counts as empty; `replace: "false"` is not
+  truthy.
+- **Turn cost attribution.** `costEntry` is the right Entry on every path traced, including several
+  tool calls in one Turn and the unresolved-call branch.
+- **MIME nesting.** 50, 500 and 2000-deep nested multiparts parsed in under 100 ms without throwing.
+
+## Third pass — against a real IMAP server
+
+The IMAP half had never touched a server; every ingest test used an in-memory fake. Twelve
+integration tests now run against a real GreenMail instance in a throwaway container
+(`test/integration/mail-imap.itest.ts`, outside the unit tier).
+
+**The real server agreed with the fake on every behaviour the fake asserts.** No defect in
+`EmailConnector`. What the exercise did surface:
+
+- **`/` is a Gmail assumption.** GreenMail's hierarchy delimiter is `.`, so `assistant/processed` is
+  not a child of `assistant` there — it is one flat mailbox whose name contains a slash. Harmless
+  here, because neither the connector nor the ingest ever asks about hierarchy: the four names are
+  opaque strings passed to `CREATE`/`SELECT`/`MOVE`. On Gmail they are a label and three sub-labels;
+  elsewhere they are four siblings. A server that *rejects* `/` in a mailbox name would break, and
+  nothing detects that.
+- **A move to a missing folder succeeds**, because `move` creates the destination first. Without
+  that the server answers `NO [TRYCREATE]`.
+- **UIDs are the server's and change on a move** — which nothing depends on today, but a future
+  "look it up again in `processed` by UID" would pass against the fake and fail for real.
+- One test-only field was added: `secure?: boolean`, defaulting to `true`, set to `false` only by the
+  integration tier. Trusting GreenMail's certificate is impossible — it has no SAN — and the
+  alternative, a `tls` passthrough, is the option that ends up in production with verification
+  quietly off while still looking encrypted. `secure: false` is plaintext, obvious and greppable, and
+  the file's invariant stays literally true: there is still no way to have TLS and skip verification.
