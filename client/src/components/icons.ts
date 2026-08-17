@@ -27,7 +27,12 @@ export const ICONS = {
 export const PLACE_ICONS = {
     conversations: "🗣",
     documents: "📄",
-    bookkeeping: "💰"
+    bookkeeping: "💰",
+    // Two glyphs for one place, which is not a contradiction: 💰 labels the *door* to the books, and
+    // these two label what the Dashboard reads out of them. A single 💰 on all three would make the
+    // row of Tiles unreadable at a glance, which is the only job an icon has here.
+    transactions: "💳",
+    accounts: "🏦"
 } as const;
 
 /** The icon a Speaker is shown with — Machinery has none, and that is the point of it. */
