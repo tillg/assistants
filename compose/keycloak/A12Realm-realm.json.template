@@ -1,5 +1,8 @@
 {
   "realm": "A12Realm",
+  "displayName": "Assistants",
+  "displayNameHtml": "",
+  "loginTheme": "assistants",
   "notBefore": 0,
   "defaultSignatureAlgorithm": "RS256",
   "revokeRefreshToken": false,

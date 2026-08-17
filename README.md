@@ -184,7 +184,9 @@ history rather than as a work queue.
 Then:
 
 - **<http://localhost:8081>** — the A12 web application. It redirects to Keycloak; log in as
-  `human` / `human`. The navigation has eight entries: Documents, Invoices, Processes, Parties,
+  `human` / `human`, on a login screen wearing the application's own clothes rather than
+  Keycloak's ([the login theme](#the-login-theme)). The navigation has eight entries: Documents,
+  Invoices, Processes, Parties,
   Assistants, Operations, Conversations, Runtime. Start at **Conversations** — the rows marked 🛑 are
   waiting for you. **Assistants** is where you read and edit a prompt, in the markdown editor;
   **Operations** is the catalogue of what any Assistant can be granted.
@@ -493,6 +495,38 @@ validates; without it the proxy, which redeems its authorization code internally
 the ThingStore rejects. Realm import is create-only — editing these files changes nothing until
 `just clean` drops the volume.
 
+### The login theme
+
+`compose/keycloak/themes/assistants/` — the login screen, in the application's own clothes. It is
+the first page anyone sees and, left alone, it is the page every Keycloak in the world shows: a
+photographic dark background, PatternFly blue, the realm's name in capitals. The application behind
+it is A12, so the login now uses A12: Open Sans at 0.75rem on `#f7fafc`, the 4px `#00589f` rule
+across the top that the application's masthead carries, fields drawn as a 1px box-shadow ring that
+widens to 2px on hover and focus, and a primary button that inverts to outlined-on-white rather
+than darkening. The Assistants lockup sits where the realm name was.
+
+None of those values were eyeballed. A12 keeps its design system in a JavaScript theme object
+handed to styled-components — there is no stylesheet to copy — so they were read out of the running
+application through its React tree (`colors`, `typography`, `spacing`, `applicationStyles.input`,
+`components.button`, `components.applicationHeader`), and the geometry comes from
+`components.loginLayout`, which is A12's own token set for exactly this screen: 284px of content
+inside 48px of padding, a 42px logo with 30px under it, 12px between rows. The provenance of every
+number is recorded in the stylesheet's header.
+
+The theme is `parent=base`, and **no FreeMarker template is overridden**. Keycloak's `base` theme
+supplies the markup with no stylesheet and no class names of its own; every class an element wears
+is one this theme names in `theme.properties`. So Keycloak owns the templates, this owns the
+vocabulary, and a Keycloak upgrade is not a redesign. Every page in the flow — password reset, OTP,
+update-password, the error and logout pages — inherits the layout without being touched. Open Sans
+is served from the theme in the same three `.woff2` files the client bundle serves; nothing is
+fetched from a CDN, because this stack is meant to run offline.
+
+The realm selects it with `"loginTheme": "assistants"`, which is in the committed realm template —
+and realm import is create-only, so on a stack whose realm already exists that line does nothing.
+To apply it to a realm that is already there, either `just clean` and start again, or set **Realm
+settings → Themes → Login theme** to `assistants` in the admin console at
+<http://localhost:8089>. A fresh clone gets it with no extra step.
+
 ## The Things
 
 Nine Models. The **Authority** column is the one system that owns that fact
@@ -708,6 +742,7 @@ This is one running vertical slice, not a finished system. What is honestly miss
 ├── llm.json.example          the LLM profiles; just setup turns it into llm.json
 ├── compose/                  docker-compose.yml, the Firefly and postgres bootstrap scripts
 │   └── keycloak/             the A12Realm import, as *.template + the renderer
+│       └── themes/assistants/   the login theme, in the application's own A12 tokens
 ├── scripts/setup-env.mjs     writes .env and generates the machine credentials
 ├── scripts/setup-llm.mjs     writes llm.json from its sample, once
 ├── e2e/                      Playwright

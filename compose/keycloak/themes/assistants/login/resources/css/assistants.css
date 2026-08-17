@@ -1,0 +1,869 @@
+/*
+ * SPDX-License-Identifier: EUPL-1.2
+ *
+ * Copyright (c) 2026 Till Gartner
+ *
+ * Licensed under the European Union Public Licence, version 1.2 - see
+ * https://eupl.eu/ and the LICENSE file at the root of this repository.
+ * Distributed on an "AS IS" basis, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.
+ *
+ * ---------------------------------------------------------------------------------------
+ *
+ * The login screen, in the application's own clothes.
+ *
+ * Every value in the token block below was READ OUT OF THE RUNNING APPLICATION rather than
+ * guessed at or eyeballed from a screenshot. A12 keeps its design system in a JavaScript
+ * theme object handed to styled-components, so nothing is in a stylesheet to copy; the
+ * numbers here came from that object, pulled off the React tree in the browser:
+ *
+ *     window.__A12_THEME__  ->  colors / typography / spacing / border
+ *                               applicationStyles.input, .label
+ *                               components.button, .applicationHeader, .checkbox
+ *                               components.loginLayout      <- the layout below IS this
+ *
+ * A12 ships a `loginLayout` token set for exactly this screen, so the geometry is not an
+ * invention either: 283.5px of content inside 48px of padding, a 42px logo with 30px under
+ * it, a 1.25rem/700 headline with 24px under that, 12px between form rows. What A12 does
+ * not ship is a Keycloak theme, which is the gap this file closes.
+ *
+ * Two things are quoted from the application chrome rather than from loginLayout, because
+ * they are what makes a page recognisably this product: the 4px #00589f rule across the top
+ * of the viewport (components.applicationHeader.borderTop) and the button that inverts to
+ * outlined-on-white on hover (components.button.primary.interaction.hover).
+ *
+ * Open Sans is served from this theme, not from a CDN: the application self-hosts it, the
+ * stack is meant to run offline, and a login form that reflows when a font arrives late is
+ * the sort of detail this is all trying to avoid. The three weights below are the exact
+ * .woff2 files the client bundle serves.
+ */
+
+/* ---------------------------------------------------------------------------- typeface */
+
+@font-face {
+    font-family: "Open Sans";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("../fonts/open-sans-400.woff2") format("woff2");
+}
+
+@font-face {
+    font-family: "Open Sans";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("../fonts/open-sans-600.woff2") format("woff2");
+}
+
+@font-face {
+    font-family: "Open Sans";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("../fonts/open-sans-700.woff2") format("woff2");
+}
+
+/* ------------------------------------------------------------------------------ tokens */
+
+:root {
+    /* typography.font / applicationStyles */
+    --a12-font: "Open Sans", sans-serif;
+    --a12-font-size: 0.75rem; /* typography.fontSize.tinyFontSize */
+    --a12-font-size-sm: 0.875rem; /* typography.fontSize.smallFontSize */
+    --a12-font-size-lg: 1.25rem; /* typography.fontSize.bigFontSize */
+    --a12-line-height: 1.45; /* typography.lineHeight.relaxed */
+    --a12-line-height-base: 1.35; /* typography.lineHeight.base */
+    --a12-weight-regular: 400;
+    --a12-weight-semibold: 600;
+    --a12-weight-bold: 700;
+
+    /* colors.text / colors.background */
+    --a12-text: #333;
+    --a12-text-muted: #616f7c; /* text.secondaryColorDark */
+    --a12-text-placeholder: #4d4d4d; /* text.placeholderColor */
+    --a12-text-inverted: #fff;
+    --a12-bg-page: #f7fafc; /* applicationStyles.background */
+    --a12-bg-card: #fff; /* background.primaryBackground */
+    --a12-bg-secondary: #ebf1f7; /* background.groupBackground */
+
+    /* colors.interaction */
+    --a12-primary: #00589f; /* interaction.primaryInteractionColor */
+    --a12-focus: #d50075; /* interaction.focus.color */
+    --a12-disabled: #a9b3bc; /* interaction.disabled.colorDark */
+    --a12-disabled-bg: #e2e6e9; /* interaction.disabled.color */
+
+    /* colors.divider */
+    --a12-border: #c8c8c8; /* divider.colorBorder */
+    --a12-divider: #e2e6e9; /* divider.color */
+
+    /* colors.variant */
+    --a12-error: #c62828;
+    --a12-error-bg: #fbeaea;
+    --a12-success: #2e7d32;
+    --a12-success-bg: #ecf9eb;
+    --a12-info: #0277bd;
+    --a12-info-bg: #f6fafe;
+    --a12-warning: #ad7d04; /* warningColorDark -- the light one fails on white */
+    --a12-warning-bg: #fef6db;
+
+    /* border.radius / applicationStyles.boxShadow */
+    --a12-radius: 4px; /* border.radius.md */
+    --a12-shadow: 0 1px 2px 0 rgba(22, 25, 29, 0.4);
+
+    /* applicationStyles.input */
+    --a12-input-height: 24px;
+    --a12-input-shadow: 0 0 0 1px var(--a12-border);
+    --a12-input-shadow-active: 0 0 0 2px var(--a12-primary);
+
+    /* spacing.spacing */
+    --a12-space-2xs: 3px;
+    --a12-space-xs: 6px;
+    --a12-space-sm: 9px;
+    --a12-space-base: 12px; /* spacing.baseSpacing.BASE */
+    --a12-space-md: 18px;
+    --a12-space-lg: 24px;
+
+    /* motion.duration.slow / motion.easing.default */
+    --a12-transition: 0.3s ease;
+
+    /* components.loginLayout. The container width A12 states is 283.5px; rounded up here so
+       that content + 2 * 48px padding is an even 380 and the card lands on whole pixels --
+       at 283.5 it centres on a half-pixel and the left edge renders as a grey smear. */
+    --a12-login-width: 284px;
+    --a12-login-padding: 48px;
+    --a12-logo-gap: 30px;
+}
+
+/* -------------------------------------------------------------------------------- page */
+
+.a12-html {
+    box-sizing: border-box;
+    /* The application's own base: A12 sets BASE_FONT_SIZE 1, so 0.75rem is 12px. */
+    font-size: 100%;
+}
+
+.a12-html *,
+.a12-html *::before,
+.a12-html *::after {
+    box-sizing: inherit;
+}
+
+.a12-body {
+    margin: 0;
+    min-height: 100vh;
+    /* components.applicationHeader.borderTop -- the application's masthead rule, and the
+       one piece of chrome that says which product this is before the logo has loaded. */
+    border-top: 4px solid var(--a12-primary);
+    background: var(--a12-bg-page);
+    /* loginLayout.background.padding */
+    padding: 0 var(--a12-space-md);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+
+    font-family: var(--a12-font);
+    font-size: var(--a12-font-size);
+    font-weight: var(--a12-weight-regular);
+    line-height: var(--a12-line-height);
+    color: var(--a12-text);
+    -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * `.a12-login` is the card, not `.a12-card`. Keycloak's template puts the header (and so
+ * the logo) OUTSIDE its form card and `.a12-login` around both, while A12's loginLayout
+ * puts the logo INSIDE the container above the headline. Styling the outer element as the
+ * container is what reconciles the two without overriding a single template.
+ *
+ * loginLayout.container: width 283.5, padding 48/48/0, spacingBottom 48, top 20%.
+ */
+.a12-login {
+    width: calc(var(--a12-login-width) + 2 * var(--a12-login-padding));
+    max-width: 100%;
+    margin: clamp(var(--a12-space-lg), 20vh, 160px) auto var(--a12-login-padding);
+    padding: var(--a12-login-padding);
+    background: var(--a12-bg-card);
+    border-radius: var(--a12-radius);
+    box-shadow: var(--a12-shadow);
+}
+
+/* loginLayout.mobile */
+@media (max-width: 767px) {
+    :root {
+        --a12-login-padding: 30px;
+        --a12-logo-gap: var(--a12-space-lg);
+    }
+
+    .a12-login {
+        margin-top: var(--a12-space-lg);
+    }
+}
+
+/* -------------------------------------------------------------------------------- logo */
+
+/*
+ * `font-size: 0`, not `display: none` on the text: Keycloak renders the realm's display
+ * name in here (blanking `displayNameHtml` does not help -- it falls back to `displayName`),
+ * and that name is "Assistants". Shrinking it to nothing leaves the lockup as the only
+ * thing on screen while the word stays in the accessibility tree, so the logo is named
+ * rather than silent. The `<h1>Sign in to your account</h1>` below still carries the page.
+ *
+ * loginLayout.logo says width 189, maxHeight 42. Sized by width, because this lockup is a
+ * wide one and carries its own margin inside the viewBox -- fitting it to 42px of BOX
+ * leaves about 28px of ink and it reads as an afterthought. aspect-ratio comes from the
+ * asset (257x64), so the two never drift.
+ */
+.a12-logo {
+    width: 189px;
+    max-width: 100%;
+    aspect-ratio: 257 / 64;
+    margin-bottom: var(--a12-logo-gap);
+    background: url("../img/lockup.svg") no-repeat left center;
+    background-size: contain;
+    font-size: 0;
+}
+
+/* ---------------------------------------------------------------------------- headline */
+
+/* loginLayout.headline */
+#kc-page-title {
+    margin: 0 0 var(--a12-space-lg);
+    font-family: var(--a12-font);
+    font-size: var(--a12-font-size-lg);
+    font-weight: var(--a12-weight-bold);
+    line-height: var(--a12-line-height-base);
+    color: var(--a12-text);
+}
+
+.a12-card,
+.a12-card__header,
+.a12-content,
+#kc-content,
+#kc-content-wrapper,
+#kc-form,
+#kc-form-wrapper {
+    display: block;
+}
+
+/* --------------------------------------------------------------------------- form rows */
+
+/* loginLayout.formItem.marginBottom */
+.a12-form-group {
+    margin: 0 0 var(--a12-space-base);
+}
+
+.a12-form-group:last-child {
+    margin-bottom: 0;
+}
+
+/* applicationStyles.label */
+.a12-label,
+.a12-label-wrapper {
+    display: block;
+    margin-bottom: var(--a12-space-2xs);
+    font-family: var(--a12-font);
+    font-size: var(--a12-font-size);
+    font-weight: var(--a12-weight-semibold);
+    line-height: var(--a12-line-height);
+    color: var(--a12-text);
+    text-transform: none;
+}
+
+/* ------------------------------------------------------------------------------ inputs */
+
+/*
+ * applicationStyles.input, verbatim: A12 draws the field's border as a box-shadow ring so
+ * that widening it on hover and focus costs no layout. Keeping that here is why an A12
+ * field and this one settle at the same 24px however they are nested.
+ */
+.a12-input {
+    width: 100%;
+    height: var(--a12-input-height);
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--a12-radius);
+    background: var(--a12-bg-card);
+    box-shadow: var(--a12-input-shadow);
+
+    font-family: var(--a12-font);
+    font-size: var(--a12-font-size);
+    font-weight: var(--a12-weight-regular);
+    line-height: var(--a12-line-height);
+    color: var(--a12-text);
+
+    transition: box-shadow var(--a12-transition);
+    appearance: none;
+}
+
+.a12-input--textarea {
+    height: auto;
+    min-height: calc(4 * var(--a12-input-height));
+    padding: var(--a12-space-2xs) 8px;
+    resize: vertical;
+}
+
+.a12-input::placeholder {
+    color: var(--a12-text-placeholder);
+}
+
+.a12-input:hover,
+.a12-input:focus {
+    box-shadow: var(--a12-input-shadow-active);
+    outline: none;
+}
+
+.a12-input[aria-invalid="true"] {
+    box-shadow: 0 0 0 2px var(--a12-error);
+}
+
+.a12-input:disabled,
+.a12-input[readonly] {
+    background: var(--a12-disabled-bg);
+    box-shadow: 0 0 0 1px var(--a12-disabled);
+    color: var(--a12-disabled);
+}
+
+/* The password field and its reveal button share one ring, the way an A12 input with a
+   suffix does -- so the ring is on the group and the input inside it carries none. */
+.a12-input-group {
+    display: flex;
+    align-items: stretch;
+    border-radius: var(--a12-radius);
+    box-shadow: var(--a12-input-shadow);
+    background: var(--a12-bg-card);
+    transition: box-shadow var(--a12-transition);
+}
+
+.a12-input-group:hover,
+.a12-input-group:focus-within {
+    box-shadow: var(--a12-input-shadow-active);
+}
+
+.a12-input-group .a12-input,
+.a12-input-group .a12-input:hover,
+.a12-input-group .a12-input:focus {
+    box-shadow: none;
+}
+
+.a12-field-error {
+    display: block;
+    margin-top: var(--a12-space-2xs);
+    font-size: var(--a12-font-size);
+    font-weight: var(--a12-weight-semibold);
+    color: var(--a12-error);
+}
+
+.a12-helper-text {
+    display: block;
+    margin-top: var(--a12-space-2xs);
+    font-size: var(--a12-font-size);
+    color: var(--a12-text-muted);
+}
+
+/* -------------------------------------------------------------------------- checkboxes */
+
+/* components.checkbox: 16px, square (borderRadius 0), #333 when checked. */
+.a12-checkbox {
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    margin: 0 var(--a12-space-xs) 0 0;
+    flex: none;
+    border: 0;
+    border-radius: 0;
+    background: var(--a12-bg-card);
+    box-shadow: var(--a12-input-shadow);
+    transition: box-shadow var(--a12-transition);
+    cursor: pointer;
+}
+
+.a12-checkbox:hover,
+.a12-checkbox:focus-visible {
+    box-shadow: var(--a12-input-shadow-active);
+    outline: none;
+}
+
+.a12-checkbox:checked {
+    background: var(--a12-text) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12 5 5 9-10'/%3E%3C/svg%3E")
+        no-repeat center / 12px 12px;
+}
+
+.checkbox label,
+.a12-check__label {
+    display: inline-flex;
+    align-items: center;
+    font-size: var(--a12-font-size);
+    font-weight: var(--a12-weight-regular);
+    line-height: 16px;
+    color: var(--a12-text);
+    cursor: pointer;
+}
+
+/* ------------------------------------------------------------------- options / actions */
+
+.a12-form-options {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--a12-space-base);
+}
+
+.a12-form-options__right {
+    margin-left: auto;
+}
+
+#kc-form-buttons {
+    margin-top: var(--a12-space-md);
+}
+
+/* ----------------------------------------------------------------------------- buttons */
+
+/*
+ * components.button, verbatim -- including the part that surprises people: A12's primary
+ * button does not darken on hover, it turns inside out to outlined-on-white. Reproducing
+ * that is most of why this page feels like the application and not like a login page
+ * wearing its colours. The 2px border exists at rest as `transparent` so nothing shifts.
+ */
+.a12-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: var(--a12-input-height);
+    padding: 0 var(--a12-space-xs);
+    border: 2px solid transparent;
+    border-radius: var(--a12-radius);
+    background: transparent;
+
+    font-family: var(--a12-font);
+    font-size: var(--a12-font-size);
+    font-weight: var(--a12-weight-bold);
+    line-height: var(--a12-line-height);
+    text-transform: uppercase;
+    text-decoration: none;
+    cursor: pointer;
+
+    transition:
+        background-color var(--a12-transition),
+        border-color var(--a12-transition),
+        color var(--a12-transition);
+}
+
+.a12-button--block {
+    display: flex;
+    width: 100%;
+}
+
+.a12-button--primary {
+    background: var(--a12-primary);
+    color: var(--a12-text-inverted);
+}
+
+.a12-button--primary:hover,
+.a12-button--primary:active {
+    background: var(--a12-bg-card);
+    border-color: var(--a12-primary);
+    color: var(--a12-primary);
+}
+
+.a12-button--primary:focus-visible {
+    background: var(--a12-bg-card);
+    border-color: var(--a12-focus);
+    color: var(--a12-focus);
+    outline: 1px dotted var(--a12-primary);
+}
+
+.a12-button--secondary {
+    background: var(--a12-bg-secondary);
+    color: var(--a12-primary);
+}
+
+.a12-button--secondary:hover,
+.a12-button--secondary:active {
+    border-color: var(--a12-primary);
+}
+
+.a12-button--secondary:focus-visible {
+    border-color: var(--a12-focus);
+    color: var(--a12-focus);
+    outline: 1px dotted var(--a12-primary);
+}
+
+.a12-button--link {
+    padding: 0;
+    background: none;
+    color: var(--a12-primary);
+    text-transform: none;
+}
+
+.a12-button--disabled,
+.a12-button:disabled {
+    background: var(--a12-disabled-bg);
+    border-color: transparent;
+    color: var(--a12-disabled);
+    cursor: not-allowed;
+}
+
+/* components.button.iconButton: 24px, 1.125rem glyph, transparent until touched. */
+.a12-icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: var(--a12-input-height);
+    height: var(--a12-input-height);
+    padding: 0;
+    border: 2px solid transparent;
+    border-radius: var(--a12-radius);
+    background: transparent;
+    color: var(--a12-primary);
+    cursor: pointer;
+    transition: border-color var(--a12-transition), color var(--a12-transition);
+}
+
+.a12-icon-button:hover,
+.a12-icon-button:active {
+    border-color: var(--a12-primary);
+}
+
+.a12-icon-button:focus-visible {
+    border-color: var(--a12-focus);
+    color: var(--a12-focus);
+    outline: 1px dotted var(--a12-primary);
+}
+
+/* ------------------------------------------------------------------------------- links */
+
+/* components.link: the application's links are bold, 0.75rem and underline only on hover. */
+a {
+    color: var(--a12-primary);
+    font-weight: var(--a12-weight-bold);
+    text-decoration: none;
+    transition: color var(--a12-transition);
+}
+
+a:hover,
+a:active {
+    text-decoration: underline;
+}
+
+a:focus-visible {
+    color: var(--a12-focus);
+    outline: 1px dotted var(--a12-primary);
+    text-decoration: underline;
+}
+
+/* ------------------------------------------------------------------------------ alerts */
+
+/*
+ * colors.variant. A12 has no login alert of its own, so this borrows the shape of the
+ * application's validation bar: the light tint as ground, the full-strength colour as a
+ * left rule, and the text left at --a12-text so it stays readable rather than shouting.
+ */
+.a12-alert {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--a12-space-xs);
+    margin: 0 0 var(--a12-space-base);
+    padding: var(--a12-space-sm) var(--a12-space-base);
+    border-radius: var(--a12-radius);
+    border-left: 4px solid var(--a12-divider);
+    background: var(--a12-bg-page);
+    font-size: var(--a12-font-size);
+    line-height: var(--a12-line-height);
+    color: var(--a12-text);
+}
+
+.a12-alert__title {
+    display: block;
+}
+
+.alert-error {
+    border-left-color: var(--a12-error);
+    background: var(--a12-error-bg);
+}
+
+.alert-warning,
+.a12-alert--warning {
+    border-left-color: var(--a12-warning);
+    background: var(--a12-warning-bg);
+}
+
+.alert-success {
+    border-left-color: var(--a12-success);
+    background: var(--a12-success-bg);
+}
+
+.alert-info {
+    border-left-color: var(--a12-info);
+    background: var(--a12-info-bg);
+}
+
+.alert-error .a12-icon {
+    color: var(--a12-error);
+}
+
+.alert-warning .a12-icon {
+    color: var(--a12-warning);
+}
+
+.alert-success .a12-icon {
+    color: var(--a12-success);
+}
+
+.alert-info .a12-icon {
+    color: var(--a12-info);
+}
+
+/* ------------------------------------------------------------------------------- icons */
+
+/*
+ * Drawn here rather than pulled from a font. The application's icons are Material Symbols,
+ * but that .woff2 is 439 KB for the one eye this page needs -- 30x the whole rest of the
+ * theme. These are masks, so `color` drives them like any other glyph.
+ */
+.a12-icon {
+    display: inline-block;
+    flex: none;
+    width: 1.125rem; /* components.button.iconButton.fontSize */
+    height: 1.125rem;
+    background-color: currentColor;
+    -webkit-mask: no-repeat center / contain;
+    mask: no-repeat center / contain;
+}
+
+.a12-icon--eye {
+    -webkit-mask-image: var(--a12-eye);
+    mask-image: var(--a12-eye);
+}
+
+.a12-icon--eye-off {
+    -webkit-mask-image: var(--a12-eye-off);
+    mask-image: var(--a12-eye-off);
+}
+
+.a12-icon--error,
+.a12-icon--info {
+    -webkit-mask-image: var(--a12-circle-bang);
+    mask-image: var(--a12-circle-bang);
+}
+
+.a12-icon--warning {
+    -webkit-mask-image: var(--a12-triangle-bang);
+    mask-image: var(--a12-triangle-bang);
+}
+
+.a12-icon--success {
+    -webkit-mask-image: var(--a12-check);
+    mask-image: var(--a12-check);
+}
+
+.a12-icon--restart {
+    -webkit-mask-image: var(--a12-restart);
+    mask-image: var(--a12-restart);
+}
+
+.a12-icon--key {
+    -webkit-mask-image: var(--a12-key);
+    mask-image: var(--a12-key);
+}
+
+.a12-icon--device {
+    -webkit-mask-image: var(--a12-device);
+    mask-image: var(--a12-device);
+}
+
+:root {
+    --a12-eye: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 12C4.5 7.5 8 5.5 12 5.5s7.5 2 10 6.5c-2.5 4.5-6 6.5-10 6.5S4.5 16.5 2 12Z'/%3E%3Ccircle cx='12' cy='12' r='3.2'/%3E%3C/svg%3E");
+    --a12-eye-off: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 12C4.5 7.5 8 5.5 12 5.5s7.5 2 10 6.5c-2.5 4.5-6 6.5-10 6.5S4.5 16.5 2 12Z'/%3E%3Ccircle cx='12' cy='12' r='3.2'/%3E%3Cpath d='M4 4l16 16'/%3E%3C/svg%3E");
+    --a12-circle-bang: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7.5v5.5'/%3E%3Cpath d='M12 16.5v.01'/%3E%3C/svg%3E");
+    --a12-triangle-bang: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3.5 22 20.5H2Z'/%3E%3Cpath d='M12 9.5v4.5'/%3E%3Cpath d='M12 17.5v.01'/%3E%3C/svg%3E");
+    --a12-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='m8 12 3 3 5-6'/%3E%3C/svg%3E");
+    --a12-restart: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 12a8 8 0 1 1-2.3-5.7'/%3E%3Cpath d='M20 4v5h-5'/%3E%3C/svg%3E");
+    --a12-key: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='8' cy='15' r='4'/%3E%3Cpath d='m11 12 10-10'/%3E%3Cpath d='m18 5 2 2'/%3E%3C/svg%3E");
+    --a12-device: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='6.5' y='2.5' width='11' height='19' rx='2'/%3E%3Cpath d='M11 18.5h2'/%3E%3C/svg%3E");
+}
+
+/* -------------------------------------------------------------- attempted-username row */
+
+/* Shown by the flows that already know who you are (password reset, OTP, update password):
+   the username, and a link back to the start. */
+#kc-username {
+    display: flex;
+    align-items: center;
+    gap: var(--a12-space-xs);
+    margin: 0 0 var(--a12-space-base);
+}
+
+#kc-attempted-username {
+    font-weight: var(--a12-weight-semibold);
+    color: var(--a12-text);
+}
+
+.kc-login-tooltip .kc-tooltip-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------- footer / sign-up  */
+
+/* loginLayout.footer.margin */
+.a12-signup,
+#kc-info,
+#kc-registration-container,
+.a12-margin-top {
+    margin: var(--a12-space-md) 0 0;
+    font-size: var(--a12-font-size);
+    color: var(--a12-text-muted);
+}
+
+#kc-select-try-another-way-form {
+    margin: var(--a12-space-md) 0 0;
+}
+
+/* ---------------------------------------------------------------------------- locale   */
+
+/* Off by default (the realm has internationalization disabled), styled so that turning it
+   on does not produce an unstyled dropdown. */
+.a12-locale {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: var(--a12-space-xs);
+}
+
+.a12-locale__dropdown {
+    position: relative;
+}
+
+#kc-current-locale-link {
+    padding: 0 var(--a12-space-xs);
+    min-height: var(--a12-input-height);
+    border: 2px solid transparent;
+    border-radius: var(--a12-radius);
+    background: transparent;
+    font-family: var(--a12-font);
+    font-size: var(--a12-font-size);
+    font-weight: var(--a12-weight-bold);
+    color: var(--a12-primary);
+    text-transform: uppercase;
+    cursor: pointer;
+}
+
+#kc-current-locale-link:hover {
+    border-color: var(--a12-primary);
+}
+
+.a12-locale__list {
+    position: absolute;
+    right: 0;
+    z-index: 1;
+    min-width: 120px;
+    margin: var(--a12-space-2xs) 0 0;
+    padding: var(--a12-space-2xs) 0;
+    list-style: none;
+    background: var(--a12-bg-card);
+    border-radius: var(--a12-radius);
+    box-shadow: var(--a12-shadow);
+}
+
+.a12-locale__list[aria-expanded="false"],
+.a12-locale__dropdown:not(.active) .a12-locale__list {
+    display: none;
+}
+
+.a12-locale__item {
+    display: block;
+    padding: var(--a12-space-2xs) var(--a12-space-base);
+    font-weight: var(--a12-weight-regular);
+}
+
+.a12-locale__item:hover {
+    background: var(--a12-bg-secondary);
+    text-decoration: none;
+}
+
+/* ------------------------------------------------- second factor / recovery / social   */
+
+.a12-auth-list,
+.a12-otp-list,
+.a12-social__list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.a12-auth-list__item,
+.a12-otp-list {
+    display: flex;
+    align-items: center;
+    gap: var(--a12-space-base);
+    margin-bottom: var(--a12-space-xs);
+    padding: var(--a12-space-base);
+    border-radius: var(--a12-radius);
+    box-shadow: var(--a12-input-shadow);
+    background: var(--a12-bg-card);
+    transition: box-shadow var(--a12-transition);
+}
+
+.a12-auth-list__item:hover {
+    box-shadow: var(--a12-input-shadow-active);
+}
+
+.a12-auth-list__heading,
+.a12-otp-list__title {
+    font-weight: var(--a12-weight-semibold);
+    color: var(--a12-text);
+}
+
+.a12-auth-list__description {
+    color: var(--a12-text-muted);
+}
+
+.a12-social {
+    margin-top: var(--a12-space-md);
+}
+
+.a12-social__list--grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--a12-space-xs);
+}
+
+.a12-social__list li {
+    margin-bottom: var(--a12-space-xs);
+}
+
+.a12-recovery-codes {
+    margin: 0 0 var(--a12-space-base);
+    padding-left: var(--a12-space-md);
+    font-variant-numeric: tabular-nums;
+}
+
+.a12-recovery-actions {
+    display: flex;
+    gap: var(--a12-space-xs);
+    margin-bottom: var(--a12-space-base);
+}
+
+/* ------------------------------------------------------------------------------- misc  */
+
+hr {
+    margin: var(--a12-space-md) 0;
+    border: 0;
+    border-top: 1px solid var(--a12-divider);
+}
+
+h2 {
+    margin: 0 0 var(--a12-space-base);
+    font-size: var(--a12-font-size-sm);
+    font-weight: var(--a12-weight-semibold);
+    color: var(--a12-text);
+}
+
+p {
+    margin: 0 0 var(--a12-space-base);
+}
