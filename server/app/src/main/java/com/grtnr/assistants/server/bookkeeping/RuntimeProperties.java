@@ -66,8 +66,15 @@ public class RuntimeProperties {
         this.allowedOperations = allowedOperations;
     }
 
+    /**
+     * Clamped rather than trusted. {@code Duration.ofMillis(0)} makes an {@code HttpRequest} builder
+     * throw {@code IllegalArgumentException}, which is not an {@code IOException} and so escapes the
+     * caller's catch as a 500 -- a misconfigured timeout would look like a server fault rather than a
+     * setting. The ceiling is there for the other direction: a human is waiting on this call, and a
+     * ten-minute timeout is not a timeout.
+     */
     public int getTimeoutMillis() {
-        return timeoutMillis;
+        return Math.min(Math.max(timeoutMillis, 1_000), 30_000);
     }
 
     public void setTimeoutMillis(int timeoutMillis) {

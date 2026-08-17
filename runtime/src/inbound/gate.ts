@@ -23,9 +23,10 @@
  *      only place the inbox can see that an Operation shipped wanting one, since `requiresApproval`
  *      is not on `OperationImplementation` and the inbox does not resolve against the catalogue.
  *
- * The server checks the allowlist and the Thing's `Enabled` before it forwards anything. That is what
- * stops a mistake here from being the only thing standing between a browser and the books — but it is
- * *this* file that carries the guarantee, because it runs in the process that would do the executing.
+ * The server checks its own allowlist before it forwards anything, and that is the whole of the outer
+ * gate: `Enabled` is read here, in the Runtime, by the inbox itself. So the server narrows *which
+ * names* reach this door and nothing more — it is *this* file, and the Runtime's own `Enabled` check
+ * beside it, that carry the guarantee, because they run in the process that would do the executing.
  *
  * Every refusal answers `not-allowed` and says no more. Unknown, disallowed, mutating and
  * approval-guarded are one outward answer, so a browser probing the route learns nothing about which

@@ -76,6 +76,15 @@ public class ExternalCallOperation {
             @JsonRpcParam("operation") String operation,
             @JsonRpcParam("args") Map<String, Object> args) {
 
+        if (properties.getSharedSecret().isEmpty()) {
+            // Refused here rather than sent as an empty header. The Runtime would refuse it anyway --
+            // its comparison rejects an empty expected secret -- but the failure would read as
+            // "unauthenticated" from a component that is supposed to be authenticated, which sends
+            // whoever debugs it looking in the wrong place entirely.
+            LOG.error("no shared secret is configured; the door outward cannot be called");
+            return Map.of("ok", false, "reason", "not-available");
+        }
+
         if (operation == null || !properties.getAllowedOperations().contains(operation)) {
             // Deliberately the same answer for "no such Operation" and "not offered": a browser
             // probing this route learns nothing about the catalogue behind it.
@@ -94,6 +103,17 @@ public class ExternalCallOperation {
                     .build();
 
             HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+
+            // The status is read rather than ignored, and a non-2xx never has its body relayed. The
+            // Runtime's own vocabulary is internal -- `unauthenticated` means the shared secret is
+            // wrong, `internal` means a handler threw -- and neither is a browser's business. Passing
+            // them through would tell a caller which of the two gates refused it, which is exactly the
+            // distinction the Runtime takes care not to reveal.
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                LOG.warn("the door outward refused {} with status {}", operation, response.statusCode());
+                return Map.of("ok", false, "reason", "not-available");
+            }
+
             @SuppressWarnings("unchecked")
             Map<String, Object> answer = mapper.readValue(response.body(), Map.class);
             return answer;

@@ -91,11 +91,15 @@ services:
       # Read-only: roles.yaml and the models are inputs, never outputs.
       - ../import:/var/lib/a12/data/import:ro
       - ../build/wcf-output/data/models:/var/lib/a12/data/models
-      # The same personal access token the Runtime reads, mounted the same way, for the Bookkeeping
-      # Reader (ADR-0023). Read-only, and deliberately NOT accompanied by a `depends_on: firefly`:
-      # this application must serve when the books are down, and two Tiles showing their error line is
-      # the designed behaviour that waiting for Firefly would defeat.
-      - firefly_token:/run/firefly:ro
+      #
+      # NO firefly_token mount here, and that absence is load-bearing (ADR-0023).
+      #
+      # An earlier draft of this change put the Reader on this server, so the token was mounted for
+      # it. The Reader moved to the Runtime and the mount stayed behind for a while — which meant the
+      # credential that reaches the books was sitting inside the one container published to the host,
+      # read by nothing. The server holds the Runtime's address and a shared secret, and there is no
+      # code path from here to Firefly. Adding this mount back would be a regression, not a
+      # convenience.
 
   server-init:
     image: ${SERVER_INIT_IMAGE}

@@ -217,6 +217,91 @@ describe("the Runtime's inbox", () => {
         expect(status).toBe(200);
     });
 
+    it("refuses a catalogue that answers one key twice, rather than picking a winner", async () => {
+        // Two `Operation_DM` Things sharing a key is a broken catalogue, and which of them the store
+        // lists first is not something anybody chose. An ambiguous answer must close the door, not
+        // open it on a coin toss.
+        const harness = buildHarness([]);
+        await harness.things.create(SPECS.Operation_DM, {
+            key: "bookkeeping.listAccounts",
+            name: "List accounts (a duplicate that should never exist)",
+            system: "Bookkeeping",
+            kind: "connector",
+            description: "A second Thing carrying the same key.",
+            enabled: true,
+        });
+
+        inbox = await startInbox({
+            port: 0,
+            secret: SECRET,
+            allowlist: ALLOWED,
+            registry: harness.registry,
+            things: harness.things,
+        });
+
+        const { status, body } = await call(
+            `http://127.0.0.1:${inbox.port}`,
+            "bookkeeping.listAccounts",
+        );
+
+        expect(status).toBe(403);
+        expect(body["reason"]).toBe("not-allowed");
+    });
+
+    it("answers a malformed percent-escape in the path with the same refusal as anything else", async () => {
+        // `%zz` is not a decodable escape. It used to throw a `URIError` into the outer catch, which
+        // answered 500 and wrote an error-level log line — a free one, per request, for any caller
+        // holding the secret, and a refusal distinguishable from every other refusal on this route.
+        const harness = buildHarness([]);
+        const base = await open(harness);
+
+        const response = await fetch(`${base}/operations/%zz`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Runtime-Secret": SECRET },
+            body: JSON.stringify({ args: {} }),
+        });
+
+        expect(response.status).toBe(403);
+        expect(((await response.json()) as Record<string, unknown>)["reason"]).toBe("not-allowed");
+        // Still serving afterwards.
+        expect((await call(base, "bookkeeping.listAccounts")).status).toBe(200);
+    });
+
+    it("answers an over-large body with a status rather than a severed connection", async () => {
+        // Destroying the socket first made a bad request indistinguishable from an unreachable
+        // Runtime, and the server then reported it as exactly that.
+        const harness = buildHarness([]);
+        const base = await open(harness);
+
+        const response = await fetch(`${base}/operations/bookkeeping.listAccounts`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Runtime-Secret": SECRET },
+            body: JSON.stringify({ args: { note: "x".repeat(200_000) } }),
+        });
+
+        expect(response.status).toBe(413);
+        expect(((await response.json()) as Record<string, unknown>)["reason"]).toBe("too-large");
+        expect((await call(base, "bookkeeping.listAccounts")).status).toBe(200);
+    });
+
+    it("measures the body in bytes, not in UTF-16 units", async () => {
+        // A three-byte character counted as one, so a body three times over the cap sailed through.
+        const harness = buildHarness([]);
+        const base = await open(harness);
+
+        const payload = JSON.stringify({ args: { note: "€".repeat(30_000) } });
+        expect(payload.length).toBeLessThan(64 * 1024);
+        expect(Buffer.byteLength(payload, "utf8")).toBeGreaterThan(64 * 1024);
+
+        const response = await fetch(`${base}/operations/bookkeeping.listAccounts`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Runtime-Secret": SECRET },
+            body: payload,
+        });
+
+        expect(response.status).toBe(413);
+    });
+
     it("refuses an unknown path", async () => {
         const harness = buildHarness([]);
         const base = await open(harness);

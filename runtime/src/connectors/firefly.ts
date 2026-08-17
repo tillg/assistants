@@ -518,9 +518,19 @@ export class FireflyConnector {
         limit?: number;
     }): Promise<Array<Record<string, unknown>>> {
         const limit = input.limit ?? 25;
+        // Built with `URLSearchParams` rather than by interpolation, because these values are no
+        // longer ours: `bookkeeping.listTransactions` is `clientReadable` (ADR-0023), so `start` and
+        // `end` arrive from a browser. An unencoded `end` of `2030-01-01&page=2` used to smuggle a
+        // second parameter into the outbound query, and Firefly honoured it — the caller was steering
+        // a request we thought we had composed. Encoding is what makes a value stay a value.
+        const query = new URLSearchParams({
+            start: input.start,
+            end: input.end,
+            limit: String(limit),
+        });
         const path = input.accountName
-            ? `/accounts/${await this.resolveAccountId(input.accountName)}/transactions?start=${input.start}&end=${input.end}&limit=${limit}`
-            : `/transactions?start=${input.start}&end=${input.end}&limit=${limit}`;
+            ? `/accounts/${encodeURIComponent(await this.resolveAccountId(input.accountName))}/transactions?${query}`
+            : `/transactions?${query}`;
         const { data } = await this.call<{ data?: Array<Record<string, unknown>> }>("GET", path);
         return data.data ?? [];
     }

@@ -110,7 +110,20 @@ async function handle(
         return;
     }
 
-    const key = decodeURIComponent(url.pathname.slice(prefix.length));
+    // A malformed escape — `%zz` — makes `decodeURIComponent` throw a `URIError`. Left to the outer
+    // catch it became a 500 and an error-level log line, which is two promises broken at once: every
+    // refusal on this route is meant to be one indistinguishable `not-allowed`, and an authenticated
+    // caller could otherwise mint a free error log per request. An undecodable name is a name no
+    // Operation has, so it is refused exactly like any other.
+    let key: string;
+    try {
+        key = decodeURIComponent(url.pathname.slice(prefix.length));
+    } catch {
+        log.warn("the inbox refused a call", { operation: "<undecodable>", reason: "not-allowed" });
+        send(response, 403, { ok: false, reason: "not-allowed" });
+        return;
+    }
+
     const verdict = decide(key, options.registry, options.allowlist);
     if (!verdict.allowed) {
         log.warn("the inbox refused a call", { operation: key, reason: verdict.reason });
@@ -132,6 +145,15 @@ async function handle(
     try {
         args = parseArgs(await readBody(request));
     } catch (error) {
+        if (error instanceof BodyTooLarge) {
+            // Answer first, hang up second. Destroying the socket the moment the cap was passed left
+            // the caller with a connection reset rather than a status, and the server then reported a
+            // bad request as "runtime-unreachable" — a caller's mistake dressed up as our outage.
+            send(response, 413, { ok: false, reason: "too-large" });
+            response.on("finish", () => request.destroy());
+            log.warn("the inbox was sent a body larger than it accepts", { operation: key });
+            return;
+        }
         send(response, 400, { ok: false, reason: "bad-request" });
         log.warn("the inbox was sent something it could not read", { error: describeError(error) });
         return;
@@ -161,6 +183,11 @@ async function handle(
  * A store failure is treated as **not enabled**. That is the uncomfortable direction and the right
  * one: this is a check that grants access, so "I could not find out" must not mean "go ahead". The
  * cost is that an unreachable store greys two Tiles, which is honest anyway.
+ *
+ * Two Things carrying the same key get the same treatment, and for the same reason. The search asks
+ * for two precisely so it can *notice* the second one; reading `[0]` of it would have made the door
+ * open or stay shut according to whichever row the store happened to list first, which is nobody's
+ * decision. An ambiguous catalogue is a catalogue this cannot read, so it says so and refuses.
  */
 async function isEnabled(things: ThingRepository, key: string): Promise<boolean> {
     try {
@@ -169,6 +196,13 @@ async function isEnabled(things: ThingRepository, key: string): Promise<boolean>
             eq(fieldPath(SPECS.Operation_DM, "key"), key),
             2,
         );
+        if (found.length > 1) {
+            log.warn("more than one Operation carries this key, so the inbox will not act on it", {
+                operation: key,
+                found: found.length,
+            });
+            return false;
+        }
         const operation = found[0];
         return operation !== undefined && operation.data.enabled !== false;
     } catch (error) {
@@ -196,17 +230,32 @@ function parseArgs(body: string): Record<string, unknown> {
     return args as Record<string, unknown>;
 }
 
+/** Distinguishable from a body that was merely unreadable, because the two answer differently. */
+class BodyTooLarge extends Error {}
+
+/**
+ * Read the body, counting **bytes**.
+ *
+ * The cap is named in bytes and used to be enforced against a JavaScript string's `length`, which
+ * counts UTF-16 units — so a body of three-byte characters got roughly three times the allowance it
+ * was promised, and a 120 kB payload sailed through a 64 kB limit. Buffers are kept as Buffers and
+ * decoded once at the end, which also avoids splitting a multi-byte character across two chunks.
+ *
+ * Nothing is destroyed here: the caller answers 413 first and hangs up afterwards.
+ */
 function readBody(request: IncomingMessage): Promise<string> {
     return new Promise((resolve, reject) => {
-        let body = "";
+        const chunks: Buffer[] = [];
+        let bytes = 0;
         request.on("data", (chunk: Buffer) => {
-            body += chunk.toString("utf8");
-            if (body.length > MAX_BODY_BYTES) {
-                reject(new Error("body too large"));
-                request.destroy();
+            bytes += chunk.length;
+            if (bytes > MAX_BODY_BYTES) {
+                reject(new BodyTooLarge(`body larger than ${MAX_BODY_BYTES} bytes`));
+                return;
             }
+            chunks.push(chunk);
         });
-        request.on("end", () => resolve(body));
+        request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
         request.on("error", reject);
     });
 }
