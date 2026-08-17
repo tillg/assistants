@@ -106,6 +106,87 @@ The Runtime is a client of the ThingStore with no privileged access, exactly lik
 UserInterface. It polls; it exposes no API and receives no webhooks. That is the whole
 integration surface ([D-005](DECISIONS.md)).
 
+### Internal, external, and the seam between them
+
+The diagram above is a deployment: it puts Firefly III inside our own compose file, sharing our
+Postgres server, behind our own proxy, with its token minted by our own init container. The domain
+calls it an **External System** anyway. Both are true, because the two diagrams answer different
+questions — and the second one is the one that decides what the code looks like.
+
+What makes a System internal is **not** that we ship it. It is that it speaks Things natively and
+therefore needs no translation. A System with a representation of its own is external, however
+close to home it runs.
+
+```mermaid
+flowchart LR
+    A["Assistant<br/>sees tool schemas, and nothing else"]
+
+    subgraph cat["The Operation catalogue — Things, one per capability"]
+        direction LR
+        KI["kind: internal"]
+        KC["kind: connector"]
+        KM["kind: manual-connector"]
+    end
+
+    subgraph int["Internal Systems — speak Things natively, so no Connector exists"]
+        TS["ThingStore<br/>Authority for every Thing"]
+        UI["UserInterface"]
+    end
+
+    subgraph ext["External Systems — own representation, own Authority"]
+        BK["Bookkeeping<br/>a role, not a product<br/>— Firefly III today"]
+        BANK["Bank"]
+        EM["Email"]
+    end
+
+    RT["Runtime — neither.<br/>It offers assistant.call,<br/>and it calls Assistants"]
+    HU(["the User, by hand"])
+
+    subgraph conn["Connectors — translation lives here, and only here"]
+        direction LR
+        CF["Firefly Connector<br/>connectors/firefly.ts<br/>REST ↔ Things"]
+        CM["Manual Connector<br/>returns pending, raises an<br/>Open Question of kind perform"]
+        CB["Bank Connector<br/>not written yet<br/>— FinTS one day"]
+    end
+
+    A --> KI
+    A --> KC
+    A --> KM
+    KI -->|"no translation needed"| TS
+    KI --> UI
+    KI --> RT
+    KC --> CF --> BK
+    KM --> CM --> HU
+    HU -.->|"works in it directly"| BANK
+    HU -.->|"works in it directly"| EM
+    KC -.->|"the same key, one day"| CB
+    CB -.-> BANK
+
+    classDef connector fill:#fdf0d5,stroke:#b8860b,stroke-width:2px,color:#1a1a1a
+    classDef unwritten fill:#fdf0d5,stroke:#b8860b,stroke-width:2px,stroke-dasharray:5 4,color:#1a1a1a
+    class CF,CM connector
+    class CB unwritten
+```
+
+Three things this buys, all of them things you would otherwise have to remember:
+
+- **The Operation is the seam, not the System.** An Assistant reaches a capability, never a host.
+  `System` records `Bookkeeping` — the role — and Firefly III is only its current occupant, so
+  replacing the ledger is a Connector rewrite behind an unchanged catalogue: no Assistant, prompt or
+  grant changes ([ADR-0019](docs/adr/0019-an-operation-is-a-thing.md)).
+- **A human is just an external System with a slow Connector.** `bank.sendMoney` is you in an
+  online-banking tab today and a FinTS call tomorrow; the dashed box is the whole of the change.
+  Which is also why Manual Connectors are *not* a safety mechanism — that protection disappears the
+  day the Connector becomes real, and `RequiresApproval` has to be carrying the weight by then
+  ([ADR-0010](docs/adr/0010-assistants-declare-their-tools.md)).
+- **`system` and `kind` are independent axes.** `document.requestText` sits on the UserInterface, an
+  Internal System, and is still a `manual-connector`: transcribing a scan is not something a web
+  application can do by itself. Internal describes the representation; kind describes who does the
+  work.
+
+The Runtime is outside both boxes on purpose. External Systems are what Assistants call; the
+Runtime calls Assistants, and it holds no domain opinions of its own.
+
 The doctor's-invoice slice, as it actually executes:
 
 ```mermaid
