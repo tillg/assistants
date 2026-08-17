@@ -429,3 +429,29 @@ integration tests now run against a real GreenMail instance in a throwaway conta
   alternative, a `tls` passthrough, is the option that ends up in production with verification
   quietly off while still looking encrypted. `secure: false` is plaintext, obvious and greppable, and
   the file's invariant stays literally true: there is still no way to have TLS and skip verification.
+
+### B-24 — my own fix for B-11 was half wrong, and running it is what showed that
+
+Recorded because it is the most useful finding of the night about how the other twenty-three were
+found.
+
+B-11 moved all four e2e URLs from `localhost` to `127.0.0.1`. The reasoning was right and the
+diagnosis was right. Two of the four changes broke authentication outright, and I did not know
+because I reasoned about it instead of running it. The parallel session ran it and measured:
+
+- **`BASE_URL`** — `a12-spa-client` in the realm allows `http://localhost:*` as a redirect URI and
+  nothing else, so a browser sent to `127.0.0.1:8081` is bounced by Keycloak with *"Invalid
+  parameter: redirect_uri"* before it ever reaches the application.
+- **`KEYCLOAK_URL`** — `KC_HOSTNAME` pins the issuer to `KEYCLOAK_PUBLIC_URL`, so the browser lands
+  on `localhost:8089` whatever is asked for, and the auth setup waits thirty seconds for a
+  navigation that never comes.
+
+`THINGSTORE_URL` and `FIREFLY_URL` keep `127.0.0.1`: bearer-token APIs, no redirect, no issuer to
+match. The realm template now also allows `http://127.0.0.1:*` — but a realm is imported once, so it
+only takes effect after `just clean`.
+
+**The pattern worth keeping:** every defect in this log was found by building, reading or attacking.
+This one was found by *running*, and it is the only one that was a mistake in a fix rather than in
+the original. A change that is right in principle can still be wrong in a way only the stack can
+tell you — and the two URLs that had to stay `localhost` are exactly the two whose value is baked
+into something outside the file being edited.
