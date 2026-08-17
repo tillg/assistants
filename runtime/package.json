@@ -20,6 +20,9 @@
   },
   "dependencies": {
     "cron-parser": "5.8.1",
+    "imapflow": "^1.7.1",
+    "mailparser": "^3.9.15",
+    "pdfjs-dist": "^4.10.38",
     "undici": "^7.10.0"
   },
   "devDependencies": {
