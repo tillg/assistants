@@ -283,6 +283,42 @@ What the User actually does in this journey is three things: put a Document in, 
 questions — the Assistant's, and the Runtime's. Everything between is unattended. The second answer
 is the one that books: the first is the Assistant being polite, and being polite authorises nothing.
 
+### An invoice is forwarded from a phone
+
+The same slice, entered through the letterbox instead of the create form.
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant MB as Mailbox<br/>(Gmail, over IMAP)
+    participant RT as Runtime
+    participant TS as ThingStore
+    participant R as Receptionist
+
+    U->>MB: forwards the dentist's mail to the assistant label
+    RT->>MB: scan 0 — SELECT assistant (once a minute)
+    RT->>RT: sender on the allowlist?
+    RT->>TS: already a Document with this ExternalRef?
+    RT->>RT: read the PDF's text layer — free, on arrival
+    RT->>TS: upload the attachment, create the Document (Source: email)
+    RT->>MB: only now, move the message to assistant/processed
+    RT->>R: scan 1 — a Document materialised, birth a Conversation
+    R->>R: classify from the covering note and the extracted text
+    Note over R: from here, the doctor's-invoice slice, unchanged
+```
+
+What the User did was forward a mail. No Assistant ran before the Document existed, and the
+Receptionist cannot tell that this one was not typed — which is the property the whole design was
+tested against (ADR-0024).
+
+Three things can happen instead, and each is visible in Gmail rather than in a log. A sender who is
+not on the allowlist lands in `assistant/rejected` with nothing read and nothing created. A message
+whose Documents could not all be created lands in `assistant/failed`, having created the ones that
+did land, so moving it back re-runs only what is missing. And a scanned attachment with no text layer
+arrives with an empty `extractedText`, at which point the Receptionist decides whether it is worth
+`document.readScan` — a bill, yes; an advertising leaflet, no — and falls through to asking the User
+with `document.requestText` when reading is unavailable, which it is by default.
+
 ### Surviving a restart mid-question
 
 The claim ADR-0004 makes, and a test in the end-to-end tier:
@@ -321,8 +357,9 @@ is stale, and `just ps` shows it.
 
 | Input | How | Notes |
 |---|---|---|
-| A **Document** | Created in the web application, or by the demo loader | `extractedText` must be supplied — nothing extracts it |
-| An attachment | Uploaded on the Document form | Stored in the A12 Content Store |
+| A **Document** | Created in the web application, or by the demo loader | `extractedText` may be typed or pasted; a PDF's text layer is read by `document.extractText` |
+| **Post**, forwarded | Emailed to the Receptionist's own Gmail account, from an allowlisted sender | The Runtime polls it over IMAP once a minute and creates one Document per attachment, `Source: email`, the covering note as `extractedText` (ADR-0024) |
+| An attachment | Uploaded on the Document form, or arriving on a forwarded mail | Stored in the A12 Content Store |
 | An **answer** | Saving an Open Question form | The only interaction the whole slice requires |
 | An **Assistant definition** | Editing the Assistant form, or the seed file | Markdown prompts and Skills |
 | An **Operation's** prose, approval requirement or kill switch | Editing the Operation form | The rest of the Operation is the code's, and shown read-only. `just bootstrap` does not undo these |
@@ -341,7 +378,10 @@ is stale, and `just ps` shows it.
 | **Health** | The Runtime's compose healthcheck, driven by `heartbeatAt` |
 
 Nothing is emailed, nothing is paid, and nothing leaves the machine except calls to the configured
-LLM API.
+LLM API and the poll of the Receptionist's Mailbox. *Emailed* is worth being precise about now that
+mail arrives on its own: the letterbox is inward only, `email.send` is still a Manual Connector, and
+the one thing the system ever says to a mail server is *what is in the `assistant` folder?* Mail the
+system receives can be ignored; mail the system sends cannot be recalled.
 
 ## States and transitions
 
@@ -449,11 +489,19 @@ This is one running vertical slice, not a finished system.
 
 **Deliberate omissions**
 
-- **Email and Bank are Manual Connectors.** `email.send`, `email.fetch` and `bank.sendMoney` talk
-  to nothing. This is the point — ADR-0004 requires the system to run end to end with every
-  External System manual — but it means no mail is fetched and no money moves.
-- **Text extraction is not implemented.** `extractedText` is supplied by whoever creates the
-  Document. `document.requestText` is a Manual Connector. OCR and PDF parsing are a later change.
+- **Outbound email and the Bank are Manual Connectors.** `email.send`, `email.fetch` and
+  `bank.sendMoney` talk to nothing. This is the point — ADR-0004 requires the system to run end to
+  end with every External System manual — so no money moves and nothing is sent. The letterbox
+  (`email.receive`) is the one automatic Connector and it only receives; `email.fetch` still asks the
+  User to look in *their own* mailbox, which is a different question and stays a human's to answer.
+- **Text extraction is implemented for text layers, and for scans only where a vision profile is
+  configured.** `document.extractText` pulls a PDF's existing text layer — free, deterministic, and
+  called on arrival by the mail ingest, so most forwarded post is classifiable before an Assistant
+  wakes. `document.readScan` has a vision model read a scan, costs money per page and is
+  **unavailable in the shipped configuration**, because `llm.json.example` names no `vision` profile.
+  Neither overwrites a non-empty `extractedText` without an explicit `replace`. `document.requestText`
+  remains the floor: where reading is unavailable, refused or unusable, a human is asked to transcribe
+  as they always were. Local OCR is not implemented.
 - **`bookkeeping.createAccount` is granted to no Assistant.** The chart of accounts is a
   structural decision the User makes.
 - **No compaction, forking or steering** of Conversations. `maxTurns` (default 20) is the only

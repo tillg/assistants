@@ -1981,3 +1981,225 @@ protecting — that no Tile hard-codes a colour — is met by construction inste
 from a theme token, `theme.colors.text`, `theme.colors.divider`,
 `theme.colors.variant.text.warning`, as `TranscriptHeader`'s do. A second theme cannot be checked
 until one exists, and when one does the Tiles are the wrong place to look for trouble.
+
+## D-063 — Gmail over IMAP, not the Gmail API and not `gog`
+
+*2026-08-17, during the autonomous run of `receive-emails` and `read-the-attachment`.*
+
+**Decided**: the letterbox reaches Gmail over **IMAP**, authenticated with a Google App Password,
+and `runtime/src/connectors/email.ts` is the only file in the stack that knows what IMAP is.
+
+**Why**: the User confirmed mid-run that Gmail is what the household uses, and pointed at the
+sibling project `../wikai`, which already solves this exact problem against this exact account with
+the `gog` CLI. Not adopting a working solution from next door needs an argument, and the argument is
+that `gog` is **the right tool in the wrong process**. `wikai` is a Claude Code session on a laptop
+shelling out to a Go binary that owns an OAuth keyring; this is a long-running Node service in a
+container. Adopting it means a Go binary in the image, its credential files beside it, and a keyring
+password to unlock them — and `wikai`'s own CI already needs a `GOG_KEYRING_PASSWORD` for precisely
+that reason, because a runner has no system keychain to ask. A container has the same problem a CI
+runner does, and the fix would be a second secret in a stack whose whole secrets story is
+[D-023](#d-023--every-secret-lives-in-one-gitignored-env): one gitignored `.env` and nothing else.
+
+The Gmail API in Node is the serious alternative and it is genuinely better on credentials — OAuth
+rather than a password that cannot be scoped — but it costs a Google Cloud OAuth app, a consent flow
+performed by a human, refresh-token storage inside the container, and, worst of the four, it binds
+the Connector to Gmail. That is a large bill for a mailbox poll.
+
+**The finding that decided it: Gmail exposes every label as an IMAP folder.** So the one thing worth
+taking from `wikai` — the label state machine, a message visibly sitting in a named place rather
+than a hidden read flag — is reachable over a protocol that is not Gmail's, and nested labels arrive
+as `parent/child` paths that a plain IMAP client can create and move between. The design gets
+`wikai`'s idea without `wikai`'s process model, and the household could point the same Connector at
+any other IMAP server without the rest of the stack noticing.
+
+**Reversal cost**: low, and that is the point of the Connector boundary rather than a happy accident.
+One file speaks IMAP; swapping it for the Gmail API later changes that file and the `MAIL_*` block
+in `.env`, and nothing above it.
+
+## D-064 — Four folders, and the fourth one is a bug fix
+
+*2026-08-17.*
+
+**Decided**: four IMAP folders — `assistant`, `assistant/processed`, `assistant/failed`,
+`assistant/rejected` — all four configurable through `MAIL_FOLDER_*`, all four created on first poll
+with "already exists" ignored, and nothing ever deleted or marked read. The label name `assistant`
+was given by the User mid-run; the nesting follows from IMAP rendering nested Gmail labels with `/`.
+
+**Why**: `wikai` runs three — `incoming`, `processed`, `failed` — and my first draft ran fewer than
+that. It used the IMAP `\Seen` flag and had two states, which is simply **wrong**, and wrong in a
+way that only shows up on the day something breaks. A message that is fetched, allowed and then
+fails must not stay unread, because unread is the queue and unread therefore means *retry every
+minute for ever*; and it must not be marked done either, because nothing was created and the User's
+invoice would have vanished into a flag. Two states cannot hold three outcomes.
+
+**The fourth folder is mine, not `wikai`'s, and it exists because adopting only three introduced a
+bug.** Mail from a sender outside `MAIL_ALLOWED_SENDERS` originally stayed in `incoming`. A poll
+takes at most `MAIL_MAX_PER_POLL` messages, so on a public address the accumulated junk would
+eventually fill every poll from the top and starve a real invoice sitting behind it — a denial of
+service that costs an attacker nothing and reads in the log as *"the letterbox is working fine"*.
+Beyond the mechanics, *"not for us"* and *"we broke"* are different facts about a message and must
+not share a box: one is a mailbox that needs no attention and the other is a queue a human has to
+work through. Creating all four up front rather than on demand is the same instinct — the moment
+something fails is the worst possible time to discover that the `failed` label does not exist.
+
+**The move happens only after every Document has landed**, never before. A crash between the two
+re-reads the message on the next poll, finds each `ExternalRef` already present, creates nothing and
+moves; a crash the other way round loses the User's post silently and leaves no trace that it ever
+arrived. Worth recording as a *finding* rather than a design choice: `wikai`, solving the same
+problem against the same account with entirely different machinery, arrived at the same rule
+independently — *"Do NOT move the email label yet"* — and two designs reaching one invariant by
+different routes is stronger evidence than either one's reasoning. The state machine and its
+reasoning belong to ADR-0024; what is recorded here is that the count went two, three, four, and
+that each step was paid for by a defect.
+
+## D-065 — Four things that would each have stopped the first real invoice
+
+*2026-08-17. Bug log entries B-03 through B-06 of the run, all fixed.*
+
+Four defects, found while building. Any one of them alone would have taken the first forwarded
+invoice and produced nothing; together they cover four different layers, and the through-line is
+worth stating before the list: **none of the four would have been caught by a green test suite.**
+The tests written for this change pass against a Runtime with no upload right, against a server that
+refuses PDFs, against a process that ignores SIGTERM, and against a spec naming a route that does
+not accept uploads — because the first three are configuration the tests do not exercise and the
+fourth is prose. They were found by building the thing, which is an argument for doing that early
+rather than an argument against tests.
+
+**The `runtime` role could not upload an attachment at all.** `import/auth/roles.yaml` gave it
+`DOCUMENT_CREATE`, `DOCUMENT_UPDATE`, `DOCUMENT_PARTIAL_UPDATE`, `MODEL_READ` and `QUERY` — and no
+`ATTACHMENT_UPLOAD`, which both `admin` and `user` hold. Every forwarded invoice would have taken a
+403 at the moment it tried to store the PDF. Added, and it is worth being precise that this does not
+loosen [D-007](#d-007--the-runtime-gets-its-own-identity-deliberately-weaker-than-admin) or
+[D-007a](#d-007a--assistant_dm-is-withheld-from-the-runtime-role-in-the-store): an attachment is
+content hung off a Document the Runtime may already create, so the new right is *narrower* than the
+ones sitting beside it, and the identity stays deliberately weaker than `admin`.
+
+**The server rejected every PDF.** `application-shared.properties` carried
+`attachment.allowedMimeTypes=image/png,image/jpeg`. A forwarded invoice is a PDF, so the entire
+feature would have died at the first real message with a refusal from the store rather than anything
+resembling a clue. Lying in the request would not have helped either — the server sniffs the true
+type from the bytes. `application/pdf` added, and kept as an allow-list rather than widened into a
+block-list, because the list is the statement of what this household's post may contain.
+
+**SIGTERM was ignored for the whole of startup.** `runtime/src/index.ts` declared `stopping` and
+registered its `SIGTERM`/`SIGINT` handlers *after* the wait-for-the-ThingStore loop, so a Runtime
+asked to stop while still waiting had no handler installed and no flag to consult once one arrived.
+On a cold stack the parallel session **measured it sitting there for 2.5 minutes**, ignoring the
+signal, until compose lost patience and killed it — which reads in the log exactly like a shutdown
+bug in the scan loop of [D-005](#d-005--the-thingstore-is-the-only-integration-surface-the-runtime-polls-it),
+and would have been chased there. Pre-existing, and not strictly this change's business; taken
+anyway, because the letterbox makes startup slower and this would have been blamed on it. Handlers
+now register before the wait, the wait consults `stopping`, and stopping there logs *"stopped while
+waiting for the ThingStore"* rather than a bare *"runtime stopped"* with no *"connected"* line above
+it.
+
+**The spec named the wrong upload route.** `specs/changes/receive-emails/architecture.md` asserted
+the Runtime would write to `/cs`. `/cs` is download-only — `/cs/download/<uuid>` — and is not even
+proxied for upload; uploads go to `/api/v2/attachment`. Three further details were unguessable from
+the outside and came from reading the web application's own uploader: **metadata rides in the query
+string and is encoded exactly once** (encode it twice, as the obvious defensive instinct suggests,
+and the server reads escaped percent signs), **the body is the raw bytes**, and the `Content-Type`
+is **`application/json;charset=utf8` on a binary body** — not a mistake, but a consequence of A12's
+`HeadersFilter` replacing the header set wholesale, so the honest-looking `application/pdf` is the
+value that breaks it. Corrected in the spec rather than quietly fixed in code, because the staged
+Stage-A fallback the spec described exists only to work around a limitation that turned out not to
+be there, and a future reader should be able to see why it went away.
+
+## D-066 — git was quietly rewriting the mail fixtures
+
+*2026-08-17. Bug log entry B-02, fixed.*
+
+**Decided**: `.gitattributes` gains `*.eml -text` and `*.pdf -text`, and the eight mail fixtures
+were re-committed with `git add --renormalize`.
+
+**Why**: the file's first line was `* text=auto`, so every `.eml` fixture went into the object
+database with **LF** line endings while the working copy that the parser and its tests had been
+developed against kept **CRLF**. RFC 5322 specifies CRLF, and this is not pedantry about a
+line-ending war: MIME boundary detection matches on the exact bytes around a boundary marker, and
+base64 decoding reads the exact bytes it is given. A fresh clone would have handed the parser files
+that were not the files the tests were written against, and the same is true of any binary fixture
+that `text=auto` guesses wrongly, which is why `*.pdf` went in beside it.
+
+**Every test passed either way on this machine**, which is exactly what makes it dangerous. There
+was no failing assertion to chase, no red suite, and no reason for anyone to look — the working copy
+was correct and the repository was not, and the divergence would have surfaced on someone else's
+clone or in CI as a parser bug in code that had never changed. It was caught only because git
+printed a warning during `git add` and the warning was read rather than scrolled past. Recorded
+because the general lesson is uncomfortable: a test suite proves things about the bytes on *this*
+disk, and the bytes in git are a separate claim that nothing here was checking.
+
+## D-067 — A dependency's advisory, fixed forward rather than downgraded
+
+*2026-08-17. Bug log entry B-01, fixed.*
+
+**Decided**: an `overrides` entry pins `deepmerge-ts` to `^8.0.0`, which resolves to 8.0.1 under an
+**unchanged** `mailparser@3.9.15`. `npm audit` reports 0 vulnerabilities again.
+
+**Why**: installing the three new dependencies reported three high-severity vulnerabilities, all of
+them one chain — `mailparser` → `html-to-text` → `deepmerge-ts <8.0.0`, advisory
+GHSA-ggr8-5vv4-36mx, stack exhaustion when merging recursive object graphs. The default remedy,
+`npm audit fix --force`, would have **downgraded mailparser to 3.9.8**: trading a probably
+unreachable advisory in a transitive dependency for six minor versions of regressions in the library
+that actually parses the household's post. Pinning the transitive dependency forward costs one entry
+in `package.json` and leaves the parser exactly where it was.
+
+Being honest about the risk that was actually being managed: **reachability was probably nil.** The
+merge in question is over *formatter options* — `html-to-text`'s own configuration, constructed by
+mailparser — not over anything that arrives from an email, so no sender controls the object graph
+being merged. The entry is here anyway because shipping a new dependency with an unexamined
+high-severity advisory is not a thing to do quietly, and "probably nil" is a conclusion that has to
+be reached by reading rather than assumed from the shape of the chain.
+
+**What actually proves the override safe is that the HTML-body tests still pass**, not that the
+audit went quiet. `html-to-text` is what mailparser reaches for when a message is `text/html`, so
+those tests exercise the path the pinned package sits on; a green `npm audit` over a bumped
+transitive dependency proves only that the advisory database has stopped complaining.
+
+## D-068 — The threshold that decides whether reading costs money
+
+*2026-08-17, calibrated against generated fixtures during `read-the-attachment`.*
+
+**Decided**: `document.extractText` and `document.readScan` are **two Operations and never one**, and
+the boundary between them is a character count: fewer than `MIN_TEXT_CHARS`, default **100**,
+extracted across the whole PDF counts as *no text layer* and returns
+`{ reason: "no-text-layer" }` — a value, not an error — which is what tells the Receptionist to
+climb to the next rung.
+
+**Why**: *"read PDFs"* sounds like one capability and is two with opposite economics. Extraction is
+free, exact, deterministic over unchanged bytes, and **cannot invent an amount** — it either finds
+the characters the document carries or it does not. Recognition costs money per page, is
+approximate, and can. Fusing them into one Operation with a silent fallback would produce a
+transcript in which a number's provenance is unrecoverable, and the User's first question about a
+wrong figure is always going to be *where did that come from?* Two Operations means the transcript
+always says which one produced it, and it means the `Enabled` switch and the caps apply to the
+expensive one alone. The seam itself — arrival may translate, arrival may not spend — is ADR-0024's
+argument and is not repeated here; what is recorded here is the number that implements it, and what
+the number was measured against.
+
+**The heuristic, and why it is not `length > 0`.** A scan is not a PDF with zero characters. It is a
+PDF with about twenty: scanners stamp watermarks, fax gateways stamp headers and page numbers, and
+every one of those lands in the text layer of a document that carries no readable text whatsoever.
+So the test is a threshold rather than a presence check.
+
+**Measured** against the generated fixtures:
+
+| Fixture | Characters extracted |
+|---|---|
+| scan with a watermark | **21** |
+| born-digital German invoice | **576** |
+| multi-page statement | **535** |
+
+Five times below the threshold and roughly six times above it, with nothing anywhere near 100 — which
+is the shape a threshold wants, and is the reason 100 survived contact with the fixtures rather than
+being tuned by them.
+
+**The honest caveat, which is the reason this is an assumption and not a fact**: it is calibrated
+against fixtures this run generated, not against the household's real post, and the two error
+directions are not symmetric. Too strict merely wastes money — a thin real invoice goes to the paid
+reader that did not need it. Too lenient is the harmful one: twelve characters of scanner noise are
+handed to the Receptionist as if they were the invoice, and it classifies from that. Recalibrate
+against real post once there is some. Which model does the recognising is deliberately not a number
+in `config.ts` at all — it is `llm.json`'s `vision` profile, for the reason
+[D-057](#d-057--named-llm-profiles-in-one-file-with-the-keys-named-after-them) gives, and no such
+profile ships, so vision reading is unavailable by default and the ladder falls through to asking a
+human. Only the two caps, `VISION_MAX_PAGES` and `VISION_MAX_BYTES`, are environment variables.

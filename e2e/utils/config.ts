@@ -16,11 +16,23 @@
 
 import path from "node:path";
 
-/** The UserInterface — the A12 web application. */
-export const BASE_URL = process.env.BASE_URL || "http://localhost:8081";
+/**
+ * `127.0.0.1`, never `localhost`, and this is not a style preference.
+ *
+ * Compose binds every published port to `127.0.0.1` — IPv4 only. `localhost` on macOS resolves to
+ * `::1` first, so **any process holding the IPv6 wildcard on one of these ports shadows the
+ * container**, and the suite then tests that process instead. It is not hypothetical: a webpack dev
+ * server left listening on `*:8081` meant `localhost:8081` answered from a live-compiled bundle
+ * while `127.0.0.1:8081` answered from the image `just build` had produced. Same URL, two
+ * applications, and a green run against the wrong one.
+ *
+ * That failure is silent and it flatters: the suite passes, and what it passed against is not what
+ * ships. `BASE_URL` still overrides, so pointing the suite somewhere else is one variable.
+ */
+export const BASE_URL = process.env.BASE_URL || "http://127.0.0.1:8081";
 
 /** The ThingStore — the A12 Data Service. JSON-RPC lives under `/api/v2/rpc`. */
-export const THINGSTORE_URL = process.env.THINGSTORE_URL || "http://localhost:8082";
+export const THINGSTORE_URL = process.env.THINGSTORE_URL || "http://127.0.0.1:8082";
 
 /**
  * Bookkeeping — Firefly III. REST lives under `/api/v1`.
@@ -29,14 +41,14 @@ export const THINGSTORE_URL = process.env.THINGSTORE_URL || "http://localhost:80
  * `/healthcheck` are the routes the proxy passes straight through, because Firefly checks its
  * personal access token on a guard of its own. Anything else here would land on Keycloak.
  */
-export const FIREFLY_URL = process.env.FIREFLY_URL || "http://localhost:8084";
+export const FIREFLY_URL = process.env.FIREFLY_URL || "http://127.0.0.1:8084";
 
 /**
  * Keycloak — the identity provider. Every login in this tier goes through it: the browser ones
  * as a redirect to its login form, the API ones as a direct access grant against
  * {@link KEYCLOAK_CLIENT_ID}, which is the only realm client permitting that grant.
  */
-export const KEYCLOAK_URL = process.env.KEYCLOAK_URL || "http://localhost:8089";
+export const KEYCLOAK_URL = process.env.KEYCLOAK_URL || "http://127.0.0.1:8089";
 export const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM || "A12Realm";
 export const KEYCLOAK_CLIENT_ID = process.env.KEYCLOAK_CLIENT_ID || "assistants-runtime-client";
 

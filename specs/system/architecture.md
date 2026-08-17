@@ -2,7 +2,7 @@
 
 The domain this realises is in [domain.md](domain.md); the vocabulary is in
 [CONTEXT.md](../../CONTEXT.md). [README.md](../../README.md) is the operator's view — how to run
-it, and what every `just` recipe does — and is not repeated here. The twenty decisions with
+it, and what every `just` recipe does — and is not repeated here. The architecture decisions with
 their alternatives and reversal costs are in [docs/adr/](../../docs/adr/), and the running record
 of decisions taken while building is [DECISIONS.md](../../DECISIONS.md).
 
@@ -26,6 +26,7 @@ flowchart LR
         FB["firefly-bootstrap<br/>one-shot: token"]
     end
     LLM["LLM API<br/>scripted by default"]
+    MB[("Mailbox<br/>Gmail, over IMAP")]
 
     INIT --> PG
     SRV --> PG
@@ -35,6 +36,7 @@ flowchart LR
     RT -->|JSON-RPC| SRV
     RT -->|REST| FF
     RT --> LLM
+    RT -->|"IMAPS :993"| MB
     FB --> FF
     FP -->|"X-Forwarded-Email"| FF
     SRV -.->|"verify the token"| KC
@@ -115,6 +117,24 @@ computation.
 A12 artefacts resolve from the **public** community registries pinned in `.npmrc` and
 `settings.gradle`, so the build needs no VPN and no credentials (D-006).
 
+#### The Runtime's dependencies, and the fact that there are any
+
+The Runtime has been proud of the standard library — its inbound route is `node:http` on purpose —
+and the letterbox is where that stopped being reasonable.
+
+| Package | For | Why not by hand |
+|---|---|---|
+| `imapflow` | the IMAP client | a stateful, tagged protocol with per-server quirks, literals, and four ways to spell a date |
+| `mailparser` | MIME | RFC 2045–2049, encoded words, and every non-conformant sender in the world |
+| `pdfjs-dist` | the PDF text layer | pure JavaScript, so no `poppler` binary, no canvas and no native build in the image |
+
+The first two are used **only** inside `connectors/email.ts` and the third only inside
+`readers/textLayer.ts`, so replacing any of them is one file. That containment is the mitigation; the
+supply-chain surface is real and is named rather than pretended away. One transitive consequence is
+pinned rather than inherited: `package.json` carries an `overrides` entry forcing `deepmerge-ts` to a
+version without a published security advisory, which is the honest cost of a dependency tree that is
+no longer empty.
+
 ## Repository layout
 
 The A12 project template's shape is kept at the repository root — deviating from it would fight
@@ -130,9 +150,11 @@ every Gradle task the template provides.
 │   ├── src/a12/              JSON-RPC client + typed Thing repository
 │   ├── src/llm/              provider interface + openai / anthropic / scripted
 │   ├── src/loop/             advance() — one Conversation, one Turn
-│   ├── src/watcher/          the seven scans
-│   ├── src/operations/       the registry and the seventeen Implementations
-│   ├── src/connectors/       firefly
+│   ├── src/watcher/          the seven scans, and the letterbox (scan 0)
+│   ├── src/readers/          the PDF text layer
+│   ├── src/inbound/          the one read route the Runtime answers
+│   ├── src/operations/       the registry and the twenty Implementations
+│   ├── src/connectors/       firefly, email
 │   ├── src/bootstrap/        seeds the two Assistants, the catalogue and the RuntimeState singleton
 │   ├── src/demo/             the demo household loader
 │   └── fixtures/             the scripted LLM transcript
@@ -253,18 +275,28 @@ Two halves, roughly 6,900 lines of TypeScript.
 flowchart TB
     subgraph RT["Runtime"]
         W["Trigger Watcher<br/>watcher.ts<br/>seven scans, every 2s"]
+        MI["mail ingest<br/>watcher/mail.ts<br/>scan 0, every 60s"]
         L["Loop Driver<br/>advance.ts<br/>one Conversation, one Turn"]
-        TR["Operation registry<br/>registry.ts + implementations.ts<br/>17 Implementations, joined to<br/>the catalogue per Turn"]
-        C["A12 client + Thing repository<br/>a12/client.ts, a12/things.ts"]
+        TR["Operation registry<br/>registry.ts + implementations.ts<br/>20 Implementations, joined to<br/>the catalogue per Turn"]
+        C["A12 client + Thing repository<br/>a12/client.ts, a12/things.ts,<br/>a12/content.ts"]
         P["LlmProvider<br/>openai | anthropic | scripted"]
+        V["VisionReader<br/>llm/vision.ts — or none"]
+        RD["text-layer reader<br/>readers/textLayer.ts"]
         FFC["Firefly connector<br/>connectors/firefly.ts"]
+        EMC["Email connector<br/>connectors/email.ts — IMAP"]
         H["health.ts<br/>heartbeat freshness"]
     end
     W --> L
+    W --> MI
+    MI --> EMC
+    MI --> RD
+    MI --> C
     L --> TR
     L --> P
     TR --> C
     TR --> FFC
+    TR --> RD
+    TR --> V
     W --> C
 ```
 
@@ -409,6 +441,7 @@ is missing, heals when it arrives, and logs the transition rather than quietly s
 
 | # | Scan | Action |
 |---|---|---|
+| **0** | **The Mailbox**, over IMAP — the one scan that does not look in the store, and the one with a clock of its own (`MAIL_POLL_INTERVAL_MS`, default 60 s) | create Documents from what has arrived |
 | 1 | Trigger-eligible Things created after the watermark with no Conversation on `(assistantKey, subjectThingId)` | birth |
 | 2 | Conversations `waiting` on `user` whose `currentQuestionId` resolves to an answered `OpenQuestion` | append the answer, continue |
 | 3 | Conversations `waiting` with `wakeAt` in the past | append a timeout entry, continue |
@@ -454,6 +487,123 @@ User owns: it is logged once per Assistant per process and the Trigger is skippe
 reach a prompt, and the rule that was true by accident is now written down: the standing half of a
 prompt comes first, anything that changes per Conversation comes last. Free, and only free before
 something breaks it.
+
+#### The letterbox (scan 0, ADR-0024)
+
+`watcher/mail.ts` polls the Receptionist's own Gmail account over IMAP through
+`connectors/email.ts`, which is the only file that knows what IMAP is — the same split the Firefly
+connector uses, and for the same reason: the half that talks to a foreign system is testable against
+a fixture, and the half that decides what to store is testable without a network. It rides in the
+watcher's own loop rather than in a timer of its own, because the loop is single-threaded and
+already carries ADR-0014's guarantee that exactly one replica is doing anything, and it already has
+an answer to *"what happens when the process is asked to stop?"* It checks the clock and returns
+immediately when it is not due: `SCAN_INTERVAL_MS` is seconds, and an IMAP login per second is
+abusive to a mail provider. Everything it does is wrapped in a catch, because a mailbox that is
+unreachable or refusing the password must not take scans 1–7 with it — those are the ones that keep
+running Conversations moving. There is no backoff state and no circuit breaker; the next poll is a
+minute away, which *is* the backoff.
+
+Four Gmail labels, which IMAP sees as folders, hold the whole state machine: `assistant` — the only
+folder ever read — and `assistant/processed`, `assistant/failed` and `assistant/rejected`. Nothing is
+deleted and nothing is marked read. A read flag would have only two states, and a message that was
+fetched, allowed and then failed needs a third: it must not stay unread, because unread means *retry
+every minute for ever*, and it must not be marked done, because nothing was created. Rejected mail
+leaves the incoming folder too — a poll takes at most `MAIL_MAX_PER_POLL` messages, so junk on a
+public address would otherwise fill every poll and starve a real invoice behind it — and it goes to
+its own folder, because *"not for us"* and *"we broke"* are different facts.
+
+Two invariants carry the correctness:
+
+- **Create every Document, then move the message.** A crash between the two re-reads the message on
+  the next poll, finds each `ExternalRef` already present, creates nothing and moves. A crash the
+  other way round loses the User's invoice silently.
+- **The duplicate check is a query against the ThingStore** on `Document.ExternalRef`
+  (`<message-id>#<part>`), never a local record of what has been read. The store is the Authority for
+  Documents (ADR-0006), and a second store of "mail I have seen" is a second thing that can disagree
+  with it.
+
+A sender allowlist gates the ingest and **empty means nobody** — a list that grants access must never
+fail open — and the startup log prints the count rather than the senders, so a misconfigured `0` is
+visible rather than inferred. One Document is created per attachment, because the attachment group is
+`repeatability: 1` and two invoices in one mail are two invoices; each carries the same message body
+as `extractedText`, and a mail with no attachments becomes one body-only Document. `Source` is set to
+`email`, which is the first non-`manual` value the system produces.
+
+`email.receive` is registered as a Connector Implementation on the `Email` System so the User can
+read it, describe it and switch it off like any other Operation (ADR-0019) — the ingest reads
+`Enabled` off the Thing each poll, so switching it off stops the letterbox without a restart. It is
+`mutating`, therefore never `clientReadable` and never reachable through the inbound route, and it is
+granted to **no Assistant**: the ingest calls the Implementation directly, the way the scan loop calls
+everything else it needs, and an Assistant granted it could pull the household's post into a
+Conversation on a whim.
+
+#### Reading an attachment
+
+Two Implementations and one narrow port. `document.extractText` (`readers/textLayer.ts`, over
+`pdfjs-dist`) pulls a PDF's existing text layer; the mail ingest calls that function **directly** on
+arrival, between uploading the binary and creating the Document, so the Document materialises already
+classifiable and no Turn is spent discovering that it was not. Calling it through the registry instead
+would mean constructing an `OperationContext` with a fabricated conversation id inside an idempotency
+key — the same refusal `inbound/server.ts` already makes. "Has a text layer" is a threshold
+(`MIN_TEXT_CHARS`, 100) rather than a test for zero, because a scanner watermark or a fax gateway's
+page number yields a handful of stray characters, and being lenient here hands the Receptionist twelve
+characters of noise to classify from. `no-text-layer` comes back as a *value*, not an error: it is the
+expected outcome on a scan and it is what tells the Receptionist to try the next rung.
+
+`document.readScan` sends the PDF to the model named by `llm.json`'s `vision` key, through a second,
+deliberately tiny port — `llm/vision.ts`, `available` plus `read()` — rather than by widening
+`LlmProvider`, whose `content` is a string and whose four implementations would all have to answer a
+question the loop never asks. With no `vision` profile the null implementation reports `unavailable`
+and the ladder falls through, which is the shipped default. `VISION_MAX_PAGES` and `VISION_MAX_BYTES`
+bound what is sent, and going over a cap returns a reason rather than a truncated read: a partial
+invoice is worse than none, because it looks complete. The prompt is fixed in code and takes nothing
+from the Document — the attachment is untrusted content from outside, and a prompt assembled from it
+would be an injection surface pointed at a model about to write a field the Receptionist trusts.
+`readScan` returns its `usage` and the Loop Driver folds it into the Turn's, so a Turn's recorded cost
+stays the cost of everything that Turn spent.
+
+Neither Operation overwrites a non-empty `extractedText` without an explicit `replace`, because one of
+that field's writers is a human who transcribed it by hand. And the ingest never calls `readScan`:
+**arrival may translate; arrival may not spend.**
+
+#### What both are configured with
+
+`.env`, as everything else in this stack is (D-023):
+
+```
+MAIL_HOST='imap.gmail.com'         # empty ⇒ scan 0 never runs; said once at startup
+MAIL_PORT='993'                    # implicit TLS; there is no flag that disables verification
+MAIL_USER='…@gmail.com'            # the Receptionist's own account, never the User's
+MAIL_PASSWORD='…'                  # a Google App Password, which requires 2FA on that account
+MAIL_FOLDER_INCOMING='assistant'
+MAIL_FOLDER_PROCESSED='assistant/processed'
+MAIL_FOLDER_FAILED='assistant/failed'
+MAIL_FOLDER_REJECTED='assistant/rejected'
+MAIL_ALLOWED_SENDERS=''            # comma-separated. EMPTY MEANS NOBODY
+MAIL_POLL_INTERVAL_MS='60000'
+MAIL_MAX_PER_POLL='20'
+MAIL_MAX_ATTACHMENT_BYTES='26214400'
+VISION_MAX_PAGES='10'
+VISION_MAX_BYTES='16777216'
+```
+
+The four folder names are Gmail *labels*, which appear over IMAP with `/` as the separator exactly as
+written; the ingest creates any that do not exist on first poll, because a missing `failed` label at
+the moment something fails is the worst possible time to find out. The account is the Receptionist's
+own and not the User's precisely because an App Password grants the whole account and cannot be
+scoped — that no folder but the incoming one is ever read is a property of the code, not of the
+credential.
+
+The vision model is named in `llm.json` rather than in `.env`, beside `active`, because it is a
+profile like any other and the file is already the one place a model is chosen (D-057):
+
+```json
+{ "active": "local_qwen", "vision": "anthropic_vision", "profiles": { "anthropic_vision": { … } } }
+```
+
+Its key follows the same convention as every other profile — `ANTHROPIC_VISION_KEY` in `.env` — so
+nothing in compose, the justfile or the code has to learn the name. **`vision` absent means no vision
+reader**, which is the shipped default and is not an error.
 
 #### Idempotency and recovery
 
@@ -502,7 +652,7 @@ consumes.
 **There is no table of Operations here any more, on purpose.** The one that used to open with
 *"Seventeen Operations"* was a hand-maintained copy of a list that lives somewhere else, and it was
 true on the day it was written. The catalogue is the answer now: open **Operations** in the web
-application, or read `runtime/src/operations/implementations.ts` for the seventeen Implementations
+application, or read `runtime/src/operations/implementations.ts` for the twenty Implementations
 that seed it. What a User wants from it — what does this Operation do, which System does it touch,
 does it need my approval, is it on — is now an overview and a form rather than four questions for
 whoever last read the source.
@@ -531,6 +681,7 @@ catalogue, so it is worth having here:
 | ThingStore | `get`, `search`, `create`, `update` | `get`, `search`, `update` |
 | `ui.askUser` | ✓ | ✓ |
 | Bookkeeping | — | all five reads and `postTransaction`; **not** `createAccount` |
+| Readers | `document.extractText`, `document.readScan` | — |
 | Manual | `document.requestText` | — |
 | Calls | `assistant.call:accountant` | — |
 
@@ -613,10 +764,30 @@ Every Model ends its root group with the same four machine fields, in order: `id
 
 ### Attachments
 
-A `Document` may carry a binary attachment, held in the A12 Content Store (`assistants-cs`). Text
-extraction is **not implemented**: `extractedText` is supplied by whoever creates the Document —
-the demo loader, or the User pasting into the create form — and `document.requestText` is a
-Manual Connector.
+A `Document` may carry a binary attachment, held in the A12 Content Store (`assistants-cs`). The
+Runtime writes one now, which it never did before the letterbox: `a12/content.ts` uploads with the
+same Keycloak bearer token the JSON-RPC client already holds, and hands `ADD_DOCUMENT` the identifier
+to put on the Document's attachment group. `Document_DM`'s `NotExactlyOneFieldFilled(attachment_id,
+content)` rule means setting both is a validation error rather than belt and braces, so the ingest
+sets `attachment_id` and leaves `content` absent.
+
+**The upload route is `/api/v2/attachment`, not `/cs`.** `/cs` is download-only
+(`/cs/download/<uuid>`) and the frontend does not even proxy it for upload. Three details of the POST
+came from reading the web application's own uploader rather than from documentation, and are worth
+recording because none could be guessed: the metadata (`filename`, `documentModelName`,
+`pathToField`) travels in the query string and is encoded exactly once; the body is the raw bytes;
+and the `Content-Type` is `application/json;charset=utf8` even though the body is binary, because
+A12's `HeadersFilter` replaces the header set wholesale for every REST call. We mirror the browser's
+request because the browser's request is the one demonstrably accepted.
+
+Two configuration facts had to change for any of it to work, and both were found by trying it: the
+`runtime` role in `import/auth/roles.yaml` had no `ATTACHMENT_UPLOAD` right, which is a 403 on every
+forwarded invoice, and the server's `attachment.allowedMimeTypes` listed only `image/png` and
+`image/jpeg`, which is a rejection of every PDF — the whole point of the exercise.
+
+Extraction is described under [the Runtime](#reading-an-attachment): `document.extractText` on
+arrival and on demand, `document.readScan` where a `vision` profile is configured, and
+`document.requestText` — still a Manual Connector — as the floor.
 
 ## Identity and authorisation
 
@@ -663,7 +834,7 @@ authorization that is ours rather than the platform's.
 | `admin` | `ASSISTANT_WRITE`, `DOCUMENT_CREATE`, `DOCUMENT_UPDATE`, `DOCUMENT_PARTIAL_UPDATE`, `DOCUMENT_DELETE`, `ATTACHMENT_UPLOAD`, `MODEL_MANAGE`, `QUERY` |
 | `user` | `ASSISTANT_WRITE`, `DOCUMENT_CREATE`, `DOCUMENT_UPDATE`, `DOCUMENT_PARTIAL_UPDATE`, `DOCUMENT_DELETE`, `MODEL_READ`, `ATTACHMENT_UPLOAD`, `QUERY` |
 | `systemAdmin` | `ACCESS_ACTUATOR`, `MANAGE_CACHES`, `RELOAD_AUTH_RULES` |
-| `runtime` | `DOCUMENT_CREATE`, `DOCUMENT_UPDATE`, `DOCUMENT_PARTIAL_UPDATE`, `MODEL_READ`, `QUERY` |
+| `runtime` | `DOCUMENT_CREATE`, `DOCUMENT_UPDATE`, `DOCUMENT_PARTIAL_UPDATE`, `MODEL_READ`, `QUERY`, `ATTACHMENT_UPLOAD` |
 
 `ASSISTANT_WRITE` covers **`Assistant_DM` and `Operation_DM`** — the system's own definition, as
 opposed to what the household owns. The right's name is narrower than its job, which is the accepted
@@ -721,11 +892,16 @@ localhost for debugging.
 |---|---|---|
 | Firefly III | REST + personal access token | Runtime, via the Firefly Connector |
 | An LLM API | HTTPS (OpenAI-compatible or Anthropic Messages) | Runtime, via `LlmProvider` |
+| A vision-capable LLM API | HTTPS (Anthropic Messages, the PDF as a `document` block) | Runtime, via `VisionReader` — only where `llm.json` names a `vision` profile |
+| A Gmail mailbox | IMAPS on 993, with a Google App Password | Runtime, via the Email Connector, outbound only |
 | Keycloak | OIDC / direct access grant | Frontend, ThingStore, Runtime, oauth2-proxy |
 
-**Manual**: Email and Bank have no integration at all. They are Manual Connectors — they raise an
-Open Question and the User does the work by hand. This is deliberate: ADR-0004 requires the system
-to run end to end with every External System manual, and this is where that is proved.
+**Manual**: outbound email and the Bank have no integration at all. `email.send`, `email.fetch` and
+`bank.sendMoney` are Manual Connectors — they raise an Open Question and the User does the work by
+hand. This is deliberate: ADR-0004 requires the system to run end to end with every External System
+manual, and this is where that is proved. The mailbox is the one exception and it is an asymmetric
+one: the system receives automatically and still sends by hand, because mail it receives can be
+ignored and mail it sends cannot be recalled (ADR-0024).
 
 ## Infrastructure and operation
 

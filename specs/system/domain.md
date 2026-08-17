@@ -47,6 +47,9 @@ The terms below are the ones the models, the code and the documents all share. D
 | **Implementation** | The code that performs one Operation. Not a Thing, because it is behaviour rather than data |
 | **grant** | One row of an Assistant's `grants[]`, naming an Operation by its key. A field, not a Model of its own |
 | **Granted Operation** | What an Assistant may actually reach: an Operation, the grant naming it and the Implementation performing it, resolved together for the length of a Turn |
+| **Mailbox** | The Gmail account the Receptionist receives at. Not a Thing — its Authority is the mail provider |
+| **Message** | One email as it exists at the provider. Not a Thing either; a foreign representation, translated and discarded |
+| **Text Layer** | The text a PDF already carries. A property of the bytes, and the fact that decides whether reading it is free |
 | **Connector** | The translator between one External System's representation and Things |
 | **Manual Connector** | A Connector that fulfils its Operation by asking the User to do it by hand |
 | **Runtime** | Watches Triggers, births Conversations, drives the loop. Not an External System |
@@ -176,6 +179,12 @@ Each fulfils its Operation by raising an Open Question of kind `perform` and wai
 to do the work and report back. The Assistant cannot tell the difference, which is what makes
 automating one later a Connector-only change.
 
+**The Email Connector** — the one automatic Connector, and the only actor in this list that no
+Assistant reaches. `email.receive` translates what arrives in the Mailbox into `Document`s from inside
+the scan loop, with no Conversation, no Turn and no LLM, and is granted to nobody. `email.fetch` is
+not superseded by it: that one asks the User to look in *their own* mailbox for a reply an Assistant
+is chasing, which is a different question and one the system has no access to.
+
 ## Processes
 
 ### The doctor's-invoice slice
@@ -239,6 +248,35 @@ Everything incoming becomes a `Document` first — the raw item plus whatever te
 from it. Classifying it **creates the `Invoice` and links the two**; it never rewrites the
 Document into an Invoice, because that would require a Thing to change its Model, which ADR-0002
 exists to prevent. The Document keeps its ThingID for ever.
+
+### Arrival is not classification (ADR-0024)
+
+Everything incoming became a `Document` first even when the only way in was a human typing one. The
+letterbox tests that sentence by removing the human: turning a `From:`, a `Subject:` and a MIME part
+into a Document is **translation** — deterministic, free, carrying no decision the User would want to
+review — so it belongs to a Connector, and deciding what the thing *is* remains **judgement** and
+stays with the Receptionist, which cannot tell that this Document was not typed. The seam now has
+money on one side of it, which is what makes it sharp rather than tidy: reading a PDF's **Text Layer**
+is extraction and happens on arrival; having a vision model read a scan is recognition, spends per
+page, and happens only where something has looked at the covering note and decided it is worth it.
+**Arrival may translate; arrival may not spend.**
+
+Two fields that were modelled from the beginning and written by nothing finally have a writer, and
+both are load-bearing rather than decorative:
+
+| Field | Writer | What it is for |
+|---|---|---|
+| `Document.Source` | the Email Connector, as `email` | the first non-`manual` value the system produces. It says how a Document got here, which nothing could previously ask |
+| `Document.ExternalRef` | the Email Connector, as `<message-id>#<part>` | the foreign key back to a thing the system does not own. It is what makes *"have I already made a Document out of this?"* a query against the Authority for Documents rather than a second store of mail state |
+
+**The one genuinely new fact in the domain is that Things can now come into being with no human
+present.** No new Trigger type, no new Conversation state, no new Process kind: a `Document`
+materialising was already one of the three Triggers, and the Runtime has no reason to care who put it
+there. What changes is that the bounds on an LLM loop with a credit card — listed below and every one
+of them older than this change — stopped being theoretical. `maxBirthsPerHour` caps the Conversations
+an hour of forwarded post can produce, the catalogue's `Enabled` switches `email.receive` off without
+a restart, and `just pause` stops the Runtime outright. That nothing new was needed is the argument
+that the seam was already in the right place.
 
 ## Rules and constraints
 
@@ -371,6 +409,9 @@ this forces.
 - **`maxTurns`** (default 20) → `finishReason = limit` and an Open Question, never a silent stop.
 - **`createdByConversationId`** on everything an Assistant creates, and no birth from a Thing
   whose creating Conversation is still running.
+- **A sender allowlist on the Mailbox**, because a public address is the first untrusted input this
+  system has and an LLM Turn costs money. **Empty means nobody**: a list that grants access must never
+  fail open.
 - **`RuntimeState.paused`** as a global kill switch, and a births-per-hour cap.
 - **`Assistant.enabled = false`** stops continuations as well as births.
 

@@ -54,6 +54,10 @@ _Avoid_: source of truth, master, owner
 A Thing that has arrived but has not yet been understood — the item itself together with whatever text was extracted from it. Everything incoming becomes a Document first; classifying it creates the Invoice and links the two, and never changes the Document's ThingID.
 _Avoid_: inbox item, upload, raw thing, attachment
 
+**Text Layer**:
+The text a PDF already carries, put there by whatever produced the file. A property of the bytes and not of the Thing — nothing stores it, because asking the bytes is cheaper and always current. It is the single fact that decides whether reading an attachment is free or costs money.
+_Avoid_: OCR layer, embedded text, searchable text
+
 **Party**:
 Anyone the household deals with, person or organisation. A Party says which of the two it is, and what role it plays for us — doctor, insurer, craftsman, authority. A practice, an insurer and a building firm are not people, and nothing in the system branches on the difference, so there is one term rather than two.
 _Avoid_: Person, contact, counterparty, entity
@@ -155,6 +159,14 @@ _Avoid_: adapter, mapper, gateway
 **Manual Connector**:
 A Connector that fulfils an operation by asking the User to perform it by hand and report back, rather than by calling a foreign system. Nothing about this is special: the Assistant asks the External System and waits for an answer, and whether a machine or a human answers is invisible to it. Automating the operation later touches only the Connector.
 _Avoid_: simulation, stub, mock
+
+**Mailbox**:
+The email account the Receptionist receives at, and the only one the system reads — the User has their own, and forwards to this one. It is **not a Thing**: it has no Model and no ThingID, its Authority is the mail provider, and the system holds nothing about it but the credentials to log in. What arrives in it becomes a Thing; the Mailbox does not.
+_Avoid_: inbox (which is where the User answers Open Questions, and the collision is exactly why), account, address
+
+**Message**:
+One email as it exists at the provider — headers, body parts, attachments. Also not a Thing: a foreign representation, living on the far side of the Connector for precisely as long as it takes to translate it. What is stored is the Documents a Message became, never the Message.
+_Avoid_: mail, email (the word for the System), item
 
 **Internal System**:
 An External System that speaks Things natively and therefore needs no Connector. `ThingStore` and `UserInterface` are the internal ones; everything else is external and requires a Connector.

@@ -64,6 +64,7 @@ flowchart LR
         FB["firefly-bootstrap<br/>one-shot: token"]
     end
     LLM["LLM API<br/>(scripted by default)"]
+    MB[("Mailbox<br/>Gmail, over IMAP")]
 
     INIT --> PG
     SRV --> PG
@@ -73,6 +74,7 @@ flowchart LR
     RT -->|JSON-RPC| SRV
     RT -->|REST| FF
     RT --> LLM
+    RT -->|"IMAPS :993"| MB
     FB --> FF
     FP -->|"X-Forwarded-Email"| FF
     SRV -.->|"verify the token"| KC
@@ -224,6 +226,55 @@ sequenceDiagram
     A->>TS: append a step to the Process
 ```
 
+### The letterbox
+
+Until now a Document existed because a human typed one. The Receptionist has its own **Gmail**
+account now, reached over **IMAP** with a Google App Password, and the household forwards post to
+it. The Runtime polls it as **scan 0** of the existing watcher loop, on its own clock —
+`MAIL_POLL_INTERVAL_MS`, default 60 seconds, because an IMAP login per two-second scan is abusive to
+a mail provider and household post is not latency-sensitive. Four Gmail labels, which IMAP sees as
+folders, are the whole of the state machine: `assistant` is the only one read, and a message ends in
+`assistant/processed`, `assistant/failed` or `assistant/rejected` according to what happened to it.
+Nothing is ever deleted and nothing is ever marked read, so every outcome is visible to a human in
+Gmail without reading a log — and *"not for us"* and *"we broke"* never share a box.
+
+Two rules carry the correctness. **A message moves only after every Document it becomes has
+landed**: a crash between the two re-reads the message next poll, finds each Document already there
+and creates nothing, where moving first would lose the User's invoice silently. And **the duplicate
+check is a query against the ThingStore** on `Document.ExternalRef` — `<message-id>#<part>` — rather
+than a local record of what has been read, because a second store of "mail I have seen" is a second
+thing that can disagree with the Authority for Documents. A mailbox is also the first untrusted
+input this system has, so a sender allowlist (`MAIL_ALLOWED_SENDERS`) gates the ingest and **empty
+means nobody**: a list that grants access must never fail open. One Document per attachment, each
+carrying the same covering note as its `extractedText`; a mail with none becomes one body-only
+Document, with `Source` set to `email`. `email.receive` is in the catalogue so the User can read it
+and switch it off, and is granted to **no** Assistant.
+
+No Assistant runs before a Document exists, and none of this touched the Receptionist: turning
+`From:`, `Subject:` and a MIME part into a Document is translation, which belongs to a Connector,
+and deciding what the thing *is* remains judgement, which belongs to the Assistant that was already
+doing it ([ADR-0024](docs/adr/0024-ingestion-is-translation-not-judgement.md)).
+
+Reading the attachment is a ladder of three rungs, and the money is on the second.
+`document.extractText` pulls a PDF's existing **text layer** — free, deterministic, exact — and the
+mail ingest calls it on arrival, so most forwarded post is classifiable before the Receptionist is
+woken. ("Has a text layer" is a 100-character threshold rather than a test for zero, because
+scanners stamp watermarks and a fax gateway stamps page numbers.) `document.readScan` has a vision
+model read a scan, costs money per page, is capped by `VISION_MAX_PAGES` and `VISION_MAX_BYTES`, and
+is **unavailable unless `llm.json` names a `vision` profile — which it does not by default**. Below
+both sits `document.requestText`, the Manual Connector that asks a human, as it always did. Neither
+new Operation overwrites a non-empty `extractedText` without an explicit `replace`, because the
+third rung means a human sat and typed that. The ingest never calls `readScan`: **arrival may
+translate; arrival may not spend**, since nothing on the arrival path has the context to decide
+whether a twelve-page attachment is an invoice or a pension provider's annual brochure. The
+Receptionist gained four lines in the numbered list it already follows and two grants, and no new
+Skill — a capability is not a lesson.
+
+Nothing is *sent* by email, and that has not changed. `email.send` is still a Manual Connector: the
+Assistant asks, the User sends the mail by hand and reports back. The asymmetry is deliberate rather
+than unfinished — mail the system receives can be ignored, and mail the system sends cannot be
+recalled.
+
 ## Quick start
 
 ### Prerequisites
@@ -318,6 +369,10 @@ uses is your business and not a change to the repository. Here is the sample it 
   }
 }
 ```
+
+A second key beside `active` may name a **`vision`** profile, which is the model `document.readScan`
+sends a scanned PDF to. The sample names none, so reading scans is unavailable until you add one —
+an absent `vision` is the default and is not an error.
 
 Switching model is editing `active` and `just restart runtime`. Nothing else moves — no exports,
 no second copy of an endpoint, no variable that means one thing this week and another the next.
@@ -466,7 +521,7 @@ makes both of those cases unreachable.
 
 | Recipe | What it does | When you want it |
 |---|---|---|
-| `just bootstrap` | Loads what the system **is**: the Receptionist, the Accountant, the catalogue of seventeen Operations and the `RuntimeState` singleton. Runs as the **User** (`BOOTSTRAP_USER`, default `human`), not as the Runtime, because an Assistant is the User's to write and so is an Operation ([D-007a](DECISIONS.md)). Idempotent, and it *reconciles* three different ways: the Assistant seeds are re-applied on every run, so a prompt edited in the web application is overwritten; `RuntimeState` is left alone, because it is live state; and an Operation gets only its code-owned fields back, so a description, an approval requirement or a kill switch you set stays set | Called by `dev`. Re-run after editing the seeded Assistant definitions, or after adding an Operation |
+| `just bootstrap` | Loads what the system **is**: the Receptionist, the Accountant, the catalogue of twenty Operations and the `RuntimeState` singleton. Runs as the **User** (`BOOTSTRAP_USER`, default `human`), not as the Runtime, because an Assistant is the User's to write and so is an Operation ([D-007a](DECISIONS.md)). Idempotent, and it *reconciles* three different ways: the Assistant seeds are re-applied on every run, so a prompt edited in the web application is overwritten; `RuntimeState` is left alone, because it is live state; and an Operation gets only its code-owned fields back, so a description, an approval requirement or a kill switch you set stays set | Called by `dev`. Re-run after editing the seeded Assistant definitions, or after adding an Operation |
 | `just demo-data` | Loads what the household **has**: parties, processes, documents, invoices, and the Firefly books. Pauses the Runtime while loading | A realistic system to look at, without spending anything |
 | `just demo-reset` | `clean` → `build` → `up` → `wait` → `bootstrap` → `demo-data`. Takes the books with it | When the demo state has drifted. Firefly has no bulk delete and its data lives in a named volume, so a full teardown is the only reset symmetric across both Authorities |
 | `just firefly-token` | Prints the Firefly personal access token from the shared volume | Talking to the Firefly API by hand |
@@ -566,11 +621,14 @@ its own view and so has its own error boundary: one Tile that cannot read leaves
 **Runtime** (`runtime/`) — TypeScript on Node 24, in two halves. The **Trigger Watcher** scans the
 ThingStore every two seconds, in seven passes: things that materialised, questions that were
 answered, `wakeAt` deadlines that passed, leases that expired, child results not yet delivered,
-Conversations with a Turn owing, and schedules whose due instant has come round. The **Loop Driver**
+Conversations with a Turn owing, and schedules whose due instant has come round — preceded by
+**scan 0**, the letterbox, which is the one pass that does not look in the store at all and runs on
+its own slower clock. The **Loop Driver**
 is one function, `advance(conversationId)`,
-that takes one Conversation exactly one Turn forward and returns holding nothing. Seventeen
+that takes one Conversation exactly one Turn forward and returns holding nothing. Twenty
 **Implementations** are registered — ThingStore reads and writes, `ui.askUser`, `assistant.call`,
-seven `bookkeeping.*` operations against Firefly, and four Manual Connectors — and each Turn joins
+seven `bookkeeping.*` operations against Firefly, the two document readers, `email.receive` and four
+Manual Connectors — and each Turn joins
 them by key to the catalogue of Operation Things it reads from the store, so what an Assistant is
 offered is the Implementation's code and the Operation's prose, flags and kill switch together
 ([ADR-0019](docs/adr/0019-an-operation-is-a-thing.md)). It authenticates as a dedicated
@@ -779,11 +837,12 @@ This is one running vertical slice, not a finished system. What is honestly miss
   is a separate change with its own blast radius. Writes are guarded independently: `WRITABLE_MODELS`
   in `thingstore.create` and `.update`, and the store refusing the `runtime` identity any write to
   `Assistant_DM` or `Operation_DM` ([D-007a](DECISIONS.md)).
-- **Email and Bank are Manual Connectors.** `email.send`, `email.fetch` and `bank.sendMoney` do not
-  talk to anything; they raise an Open Question and the User does the work by hand and reports
-  back. This is deliberate — ADR-0004 says the system must run end to end with every External
-  System manual, and this is where that is proved — but it means no mail is fetched and no money
-  moves.
+- **Outbound email and the Bank are Manual Connectors.** `email.send`, `email.fetch` and
+  `bank.sendMoney` do not talk to anything; they raise an Open Question and the User does the work by
+  hand and reports back. This is deliberate — ADR-0004 says the system must run end to end with every
+  External System manual, and this is where that is proved — so no money moves, and nothing is sent.
+  Only the letterbox is automatic, and only inward: `email.fetch` still asks the User to look in
+  *their own* mailbox, which this system has no access to and should not.
 - **The catalogue does not say where an Operation's code lives.** An Operation Thing describes what
   an Operation does; the function that performs it is registered under the same key in
   `runtime/src/operations/implementations.ts`, and nothing in the form points at it. There is
@@ -804,9 +863,14 @@ This is one running vertical slice, not a finished system. What is honestly miss
   side of that line. So a reworded description in `implementations.ts` reaches fresh installs only;
   bootstrap names the Operations whose stored description has diverged from their seed and changes
   nothing.
-- **Text extraction is not implemented.** A Document's `extractedText` is supplied by whoever
-  creates the Document: the demo loader, or the User pasting text into the create form.
-  `document.requestText` is a Manual Connector. OCR and PDF parsing are a later change.
+- **Text extraction reads text layers, and reads scans only if you pay for it.**
+  `document.extractText` pulls a PDF's existing text layer and is called on arrival by the mail
+  ingest and by the Receptionist on demand. `document.readScan` reads a scan with a vision model and
+  is **unavailable in the shipped configuration**, because `llm.json.example` names no `vision`
+  profile; configure one and it costs money per page. Below both, `document.requestText` remains the
+  Manual Connector that asks a human, and it is still the floor. Local OCR is not implemented and is
+  not planned — a vision model reads a German invoice layout better than Tesseract does, without a
+  native binary in the image.
 - **No compaction, forking or steering** of Conversations. `maxTurns` (default 20) is the only
   bound on a long one, and reaching it raises an Open Question.
 - **The transcript does not update while a Conversation runs.** It renders the document the form
@@ -850,9 +914,11 @@ This is one running vertical slice, not a finished system. What is honestly miss
 │   ├── src/a12/              JSON-RPC client for the ThingStore
 │   ├── src/llm/              provider interface + openai / anthropic / scripted
 │   ├── src/loop/             advance() — one Conversation, one Turn
-│   ├── src/watcher/          the seven scans
-│   ├── src/operations/       the registry and the seventeen Implementations
-│   ├── src/connectors/       firefly
+│   ├── src/watcher/          the letterbox (scan 0) and the seven scans
+│   ├── src/readers/          the PDF text layer
+│   ├── src/operations/       the registry and the twenty Implementations
+│   ├── src/inbound/          the one read route the Runtime answers
+│   ├── src/connectors/       firefly, email
 │   ├── src/bootstrap/        seeds the two Assistants, the catalogue and the RuntimeState singleton
 │   ├── src/demo/             the demo household loader
 │   └── fixtures/             the scripted LLM transcript

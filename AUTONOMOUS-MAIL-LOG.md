@@ -173,3 +173,62 @@ bytes, and the `Content-Type` is `application/json;charset=utf8` on a binary bod
 
 Corrected in the spec rather than quietly fixed in code, because the staged Stage-A fallback the
 spec described is now unnecessary and a future reader should know why.
+
+### B-07 — the allowlist was checked after the message was fully parsed · FIXED
+
+`handleMessage` called `parseMessage` and *then* `isAllowedSender`. So a message from a total
+stranger was fully MIME-parsed and its attachments base64-decoded into memory before the gate said
+no. At `MAIL_MAX_PER_POLL = 20` and `MAIL_MAX_ATTACHMENT_BYTES = 25 MB` that is up to half a
+gigabyte of decoding per poll done on behalf of senders nobody vouched for — in the process that
+runs the scan loop.
+
+**Authorise first, parse second.** `FetchedMessage` gained an `envelopeFrom` taken from IMAP's
+`ENVELOPE`, which needs no body parse, and the gate now runs on that before `parseMessage` is
+called. The post-parse check on the `From:` header stayed as a second, cheap assertion: the envelope
+sender and the header sender can differ, and the stricter reading — both must be allowed — is the
+right one for a gate.
+
+### B-08 — the ingest never read the text layer on arrival · FIXED
+
+`specs/changes/receive-emails/architecture.md` requires the ingest to call `extractText` between
+uploading the attachment and creating the Document, so the Receptionist is triggered by a Document
+that is already classifiable. It did not, so every forwarded PDF — including the born-digital ones,
+which are most of them — would have cost a wasted Turn to discover it had no text, and then a
+question to a human who need never have been asked.
+
+A missing feature rather than a defect in what was written, and it would not have failed a single
+test: everything downstream handles an empty `extractedText` correctly, because that is the state
+the ladder is built around. It would have shown up only as a system that was quietly more expensive
+and more annoying than it needed to be.
+
+### B-09 — the `email.receive` kill switch did nothing · FIXED
+
+The catalogue's `Enabled` flag is how the User switches an Operation off from the web application,
+without a restart ([ADR-0019](docs/adr/0019-an-operation-is-a-thing.md)). The ingest never read it,
+so switching `email.receive` off changed nothing at all and the letterbox went on collecting post.
+
+Worse than a missing feature: a control that appears to exist, is documented to exist, and silently
+does not. The one thing a kill switch may never be is decorative.
+
+### B-10 — the registry documents a safety check it does not implement · OPEN
+
+`runtime/src/operations/registry.ts` states, in its file-level comment:
+
+> **The idempotency contract**: every Operation is either read-only or idempotent under a
+> caller-supplied key. No Operation may be both mutating and unkeyed. `mutating: true` without a key
+> argument is a programming error and **throws at registration**.
+
+`register()` implements no such check. It throws on a duplicate name and nothing else. So the
+sentence is false, and has been since it was written.
+
+Found by an agent that complied with the contract, expected registration to fail when it
+deliberately did not, and looked to see why. Nothing currently violates the contract — every
+mutating Operation does take a key — so there is no live defect, which is exactly why it survived:
+a rule nobody breaks is a rule nobody notices is unenforced.
+
+**Left open deliberately.** Implementing it means deciding what counts as "a key argument" for
+every existing Operation, and doing that at the end of a long autonomous run — in a file that
+currently carries uncommitted work from two sessions — is how a safety check becomes an outage. It
+is a small, well-understood change and it should be made deliberately, with the suite watched. The
+alternative fix, weakening the comment to match the code, would be the wrong way round: the comment
+describes the property that is actually wanted.
