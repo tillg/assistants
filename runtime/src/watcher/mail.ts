@@ -237,8 +237,13 @@ export interface MailIngestSummary {
  *
  * `imap` needs somewhere to connect to; `gmail` needs a refresh token to exchange. Neither configured
  * means no letterbox, which is the shipped default and not an error.
+ *
+ * **Exported so there is exactly one of it.** `services.ts` has to answer the same question before it
+ * builds a connector at all, and when this test lived in two places only one of them was corrected —
+ * which switched the letterbox off silently on the first deployment that used the other transport.
+ * One definition, two callers.
  */
-function isConfigured(config: MailConfig): boolean {
+export function isConfigured(config: MailConfig): boolean {
     return config.transport === "gmail"
         ? (config.gmail?.refreshToken ?? "") !== ""
         : config.host.trim() !== "";

@@ -19,7 +19,7 @@ import { OperationRegistry } from "./operations/registry.js";
 import { buildOperations } from "./operations/implementations.js";
 import { FireflyConnector } from "./connectors/firefly.js";
 import { Watcher } from "./watcher/watcher.js";
-import { runMailIngest, type MailConnector } from "./watcher/mail.js";
+import { isConfigured, runMailIngest, type MailConnector } from "./watcher/mail.js";
 import { EmailConnector } from "./connectors/email.js";
 import { GmailConnector } from "./connectors/gmail.js";
 import { ContentStoreClient } from "./a12/content.js";
@@ -297,7 +297,10 @@ export function buildRuntime(config: Config): Runtime {
  * an error: a household that has not set a letterbox up has not got one.
  */
 function buildMailbox(config: Config): MailConnector | undefined {
-    if (config.mail.host === "") return undefined;
+    // The same question the ingest asks, from the same function — see `isConfigured`. This used to
+    // test `config.mail.host === ""`, which is the IMAP-shaped version of the question and answers
+    // "no letterbox" for a perfectly well configured Gmail deployment.
+    if (!isConfigured(config.mail)) return undefined;
 
     const gmail = config.mail.gmail;
     if (config.mail.transport === "gmail" && !gmail?.refreshToken) {
@@ -355,9 +358,16 @@ function buildProvider(
 ): LlmProvider {
     switch (profile.provider) {
         case "openai":
-            return new OpenAiProvider(profile.baseUrl, profile.apiKey, fetch, profile.temperature);
+            return new OpenAiProvider(
+                profile.baseUrl,
+                profile.apiKey,
+                fetch,
+                profile.temperature,
+                undefined,
+                profile.systemSuffix,
+            );
         case "anthropic":
-            return new AnthropicProvider(profile.baseUrl, profile.apiKey);
+            return new AnthropicProvider(profile.baseUrl, profile.apiKey, fetch, profile.systemSuffix);
         case "scripted":
             return ScriptedProvider.fromFile(profile.scriptFile, context);
     }
