@@ -43,11 +43,70 @@ function getTableColumnsSize(table: TableNode): number {
  */
 export function createTableTransformer(getTransformers: () => Transformer[]): ElementTransformer {
     function $createTableCell(textContent: string): TableCellNode {
-        // \n and | are escaped in serialized cell content; cell padding is trimmed.
-        const content = textContent.replace(/\\n/g, "\n").replace(/\\\|/g, "|").trim();
+        // Undo only this layer's own `\n` / `\|` escapes, and step over a markdown-escaped `\\` as a
+        // unit so its trailing `n` or `|` is not misread as one of ours (that misread turned a literal
+        // `\n` the User typed into a real newline, and a trailing `\` swallowed the next cell). The
+        // `\\` itself is left intact for the inner markdown parser, which owns backslash escaping.
+        const content = unescapeCellStructure(textContent).trim();
         const cell = $createTableCellNode(TableCellHeaderStates.NO_STATUS);
         $convertFromMarkdownString(content, getTransformers(), cell);
         return cell;
+    }
+
+    /**
+     * Split a table row on its *unescaped* `|` separators. A regex lookbehind cannot tell an escaped
+     * backslash (`\\`) before a real separator from an escaped pipe (`\|`), so a cell ending in a
+     * backslash would swallow the next cell. Scan instead, stepping over every escape pair intact.
+     */
+    function splitRowCells(row: string): string[] {
+        const cells: string[] = [];
+        let current = "";
+        for (let index = 0; index < row.length; index += 1) {
+            const ch = row[index];
+            if (ch === "\\" && index + 1 < row.length) {
+                current += ch + row[index + 1];
+                index += 1;
+                continue;
+            }
+            if (ch === "|") {
+                cells.push(current);
+                current = "";
+                continue;
+            }
+            current += ch;
+        }
+        cells.push(current);
+        return cells;
+    }
+
+    // Undo this layer's `\n` / `\|` escapes only. A markdown-escaped `\\` is copied through as a unit
+    // so its following character is never mistaken for one of ours; every other `\x` keeps its
+    // backslash for the inner markdown parser.
+    function unescapeCellStructure(text: string): string {
+        let out = "";
+        for (let index = 0; index < text.length; index += 1) {
+            const ch = text[index];
+            if (ch === "\\" && index + 1 < text.length) {
+                const next = text[index + 1];
+                if (next === "\\") {
+                    out += "\\\\";
+                    index += 1;
+                    continue;
+                }
+                if (next === "n") {
+                    out += "\n";
+                    index += 1;
+                    continue;
+                }
+                if (next === "|") {
+                    out += "|";
+                    index += 1;
+                    continue;
+                }
+            }
+            out += ch;
+        }
+        return out;
     }
 
     function mapToTableCells(textContent: string): TableCellNode[] | null {
@@ -55,7 +114,7 @@ export function createTableTransformer(getTransformers: () => Transformer[]): El
         if (!match?.[1]) {
             return null;
         }
-        return match[1].split(/(?<!\\)\|/).map((text) => $createTableCell(text));
+        return splitRowCells(match[1]).map((text) => $createTableCell(text));
     }
 
     return {
@@ -74,6 +133,11 @@ export function createTableTransformer(getTransformers: () => Transformer[]): El
                 for (const cell of row.getChildren()) {
                     if ($isTableCellNode(cell)) {
                         rowOutput.push(
+                            // Escape only the two structural characters that would break a one-line
+                            // cell. Backslash itself is the inner markdown's to escape (it emits `\\`),
+                            // so this layer must NOT touch it — doing so double-escaped and corrupted
+                            // the content. The import side is escape-aware so it does not mistake the
+                            // `n` of a markdown-escaped `\\n` for this layer's newline escape.
                             $convertToMarkdownString(getTransformers(), cell)
                                 .replace(/\n/g, "\\n")
                                 .replace(/\|/g, "\\|")

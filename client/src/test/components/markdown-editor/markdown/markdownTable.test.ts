@@ -15,7 +15,11 @@ describe("TABLE transformer", () => {
         // escaped pipe inside a cell
         "| a\\|b | c |\n| --- | --- |\n| 1 | 2 |",
         // inline formatting in cells
-        "| **bold** | _em_ |\n| --- | --- |\n| `code` | [l](https://e.com) |"
+        "| **bold** | _em_ |\n| --- | --- |\n| `code` | [l](https://e.com) |",
+        // BUG-17: a literal backslash-n the User typed stays literal, not a newline
+        "| foo\\\\nbar | c |\n| --- | --- |\n| 1 | 2 |",
+        // BUG-17: a cell ending in a backslash does not swallow the next cell
+        "| x\\\\ | y |\n| --- | --- |\n| 1 | 2 |"
     ])("round-trips %j", (markdown) => {
         expect(roundTrip(markdown)).toBe(markdown);
     });
