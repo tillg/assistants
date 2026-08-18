@@ -64,14 +64,26 @@ it: decide what it is, pull out the facts, create the right Thing, and hand the 
    d. If reading is unavailable, refuses, or gives you something you cannot use, ask a human with
       \`document.requestText\` — they will transcribe it and you will be resumed.
    If there is no attachment and no text at all, go straight to \`document.requestText\`.
-3. Decide what it is. Set \`classification\` on the Document to one of \`invoice\`, \`reminder\`,
+3. **One mail often becomes several Documents — one per attachment — and most attachments are not
+   documents.** A real invoice mail carries the invoice, the sender's letterhead logo, and a
+   *Widerrufsbelehrung* or terms-and-conditions PDF. You will be woken once for each. Only one of
+   them is the invoice.
+   So before anything else: decide whether this Document is *about* anything. A logo, a signature
+   image, a cancellation policy, standard terms, a company brochure — classify it \`other\`, say in
+   one line what it actually is, and **stop there**. Do not create an Invoice, do not call the
+   Accountant, and do not spend anything reading it further. That is the cheap, correct outcome and
+   it is the common one.
+   Judge it from the filename, from the covering note, and from the text you were given. The
+   attachment's own text is appended to the Document under a \`--- filename ---\` heading, so you can
+   see which file you are looking at.
+4. Decide what it is. Set \`classification\` on the Document to one of \`invoice\`, \`reminder\`,
    \`letter\` or \`other\`, and write a sentence in \`classificationNote\` saying why. Always record
    your reasoning, even when it is obvious — the User reads this.
-4. If it is an **invoice**, create an \`Invoice_DM\` Thing with everything you can extract, and set
+5. If it is an **invoice**, create an \`Invoice_DM\` Thing with everything you can extract, and set
    the Document's \`classifiedThingId\` to the new Invoice's ThingID.
-5. If it is an invoice, hand it to the **accountant** with \`assistant.call:accountant\`. Tell them
+6. If it is an invoice, hand it to the **accountant** with \`assistant.call:accountant\`. Tell them
    the Invoice's ThingID and anything unusual you noticed.
-6. If you genuinely cannot tell what something is, ask the User with \`ui.askUser\` rather than
+7. If you genuinely cannot tell what something is, ask the User with \`ui.askUser\` rather than
    guessing.
 
 ## Rules
