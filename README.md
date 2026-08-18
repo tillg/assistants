@@ -404,7 +404,8 @@ server — add an entry under `profiles` and give it a name you would recognise 
   "baseUrl": "https://gateway.example.com/v1",   // no trailing slash needed
   "model": "gpt-4o",                             // what the Turn asks for
   "temperature": 0,                              // optional; omitted means the provider's default
-  "requiresKey": true                            // optional; false for a server that wants no key
+  "requiresKey": true,                           // optional; false for a server that wants no key
+  "systemSuffix": "…"                            // optional; a sentence about this model, on every Turn
 }
 ```
 
@@ -422,6 +423,7 @@ Rules worth knowing before you write one:
 | `baseUrl` | Defaults to the provider's own (`https://api.openai.com/v1`, `https://api.anthropic.com`) if you leave it out |
 | `temperature` | Sent only when present. Set it to `0` for a local quantized model — see below |
 | `requiresKey` | Set `false` only for a server that genuinely wants no key — a local one usually does want one. Otherwise the startup check below is what you want |
+| `systemSuffix` | Optional. A sentence about *this model* appended to the system prompt of every Turn on this profile. It is where a model's quirks are said out loud, so the Assistant's own instruction can stay about the household — see the local setup below, where it is what makes a 4-bit Qwen's tool calls arrive as calls |
 | the name | Letters, digits and underscores, starting with a letter — because it becomes the name of an environment variable |
 
 **The keys live in `.env`, one per profile.** That is why adding a profile touches two files and no
@@ -482,7 +484,107 @@ Receptionist's first Turn returned its tool call as *text* on all three attempts
 Conversation escalated to the User — while the same server, asked directly with the same prompt and
 tools, answers with a structured `tool_calls` array ([D-058](DECISIONS.md)). That is the Runtime
 working as intended rather than a misconfiguration, but it means a local model is not yet a
-drop-in: expect escalations, and `"active": "scripted"` is one line away.
+drop-in: expect escalations, and `"active": "scripted"` is one line away. *Why* it happens, and the
+one line that fixes it, are in the next section.
+
+#### The local setup on this machine
+
+What `local_qwen` actually talks to, measured 2026-08-18:
+
+| | |
+|---|---|
+| Machine | MacBook Pro `Mac16,5` — Apple **M4 Max**, 16 CPU cores (12P/4E), **40-core GPU**, **64 GB** unified memory |
+| Server | **oMLX 0.5.7** (`brew install jundot/omlx/omlx`), an OpenAI-compatible multi-model server for Apple Silicon, on top of `mlx` 0.32 / `mlx-lm` 0.31.3 |
+| How it runs | `omlx start` — a managed background process (`omlx-server`), bound to `127.0.0.1:8000`, `auto_start_on_launch` |
+| Config | `~/.omlx/settings.json`; models are plain directories under `~/.omlx/models` |
+| Model | `Qwen3-Coder-30B-A3B-Instruct-4bit` — 16 GB on disk, 262144-token context, served under that exact id |
+| Key | `auth.api_key` in `~/.omlx/settings.json` (`omlx-local` here), which is what `LOCAL_QWEN_KEY` in `.env` has to match — an unauthenticated request gets `{"error":{"message":"API key required"}}` |
+| Measured speed | ~57–91 tokens/second decode on completions of a few hundred tokens; a 4096-token completion takes ~45 s |
+| Reach from the container | `http://host.docker.internal:8000/v1`, because oMLX binds the host's loopback and the Runtime is in a container |
+
+`omlx stop` / `omlx restart` manage it; `omlx diagnose` checks the installation; `~/.omlx/logs/server.log`
+carries one line per completion with model, token count, rate and `finish_reason`, which is the
+quickest way to see whether a Turn ever reached the model.
+
+**Why the tool calls arrive as text.** It is not the temperature and not the Runtime. Qwen3-Coder
+does not emit the JSON tool-call format the OpenAI API is built around; it emits XML, and the
+contract in its own chat template is that the call is *nested inside* `<tool_call>…</tool_call>`:
+
+```
+<tool_call>
+<function=thing_create>
+<parameter=type>
+invoice
+</parameter>
+</function>
+</tool_call>
+```
+
+`mlx-lm` ships a `qwen3_coder` parser for exactly this, and oMLX does select it — but the parser
+keys on the literal `<tool_call>` opener to know where a call begins. At 4-bit this model **drops
+the wrapper** and emits the bare `<function=…>` block, so the server sees no call, returns
+`finish_reason: "stop"` with the markup as `content`, and the Runtime does the only correct thing
+with it: refuses to mistake it for an answer, retries, escalates. Reproduced directly against the
+server with `temperature: 0` and with `tool_choice` set to `auto`, `required` and a named function —
+all three came back as content, never as `tool_calls`.
+
+**One sentence fixes it, and it lives on the profile.** `local_qwen` carries a `systemSuffix`,
+appended to the system prompt of every Turn taken on that profile:
+
+> When you call a function you MUST wrap the call in `<tool_call>` and `</tool_call>` tags, exactly
+> as the format instructions say.
+
+Measured through the Runtime's own provider against the live server: the same request that throws
+`emitted a tool call as text` without it comes back as a structured `tool_calls` array with it. The
+wording has to be an unconditional imperative — the same instruction phrased conditionally ("*when*
+you write a call in the `<function=…>` format…") left all three test prompts as markup — which is
+exactly why it belongs to the profile and not to the Assistant, and why no hosted profile should
+carry one: it names a markup format, and a model that speaks JSON natively has no business being
+told to write XML tags.
+
+It is a mitigation, not a guarantee. The failure is not deterministic — the same model answered a
+one-tool prompt with a proper structured call unprompted and dropped the wrapper on a two-tool one —
+which is why there is a second line of defence behind it.
+
+**The Runtime also reads the markup.** When a completion carries no `tool_calls` but does carry a
+`<function=…>` block, the OpenAI provider parses that block into a real tool call rather than
+throwing: the call was meant, only the envelope was missing. Values arrive as text in that format,
+so they are coerced to what the tool's own schema declares — `amount` comes back as the number
+`120.5`, not the string `"120.50"` — and any prose the model wrote around the call is kept, because
+its template invites reasoning before one.
+
+The guard that makes this safe is a **shape, not a vendor**: the block has to name a tool *this very
+request offered*. That is why it is not restricted to Qwen models by name. A model that never writes
+those tags never reaches the code; an Assistant merely *discussing* a call names nothing that was
+offered and recovers nothing, so it stays the error it has always been. A name check would instead
+read `model` strings that are free-form by design — an Azure deployment called anything at all, a
+gateway serving Qwen under `default` — and would fail in exactly the cases it was written for.
+Measured: the two-tool request that throws without the `systemSuffix` comes back as a structured
+`thing_create` call with `amount: 120.5`, recovered from the markup.
+
+A completion with no readable call in it is still an error, and the Turn still retries and
+escalates.
+
+#### Local models that could drive the loop
+
+Everything below fits the 64 GB budget with room for the KV cache (keep weights under ~45 GB), is
+published as MLX and runs under this same oMLX server; the parser column is the `mlx-lm` tool
+parser that would handle it, because *the format the server can parse* is what decides whether the
+loop runs at all.
+
+| Model | MLX weights | Format / parser | Pros | Cons |
+|---|---|---|---|---|
+| **Devstral-Small-2-24B-Instruct-2512** | 15 GB @4-bit, 27 GB @8-bit | Mistral `[TOOL_CALLS]` JSON — `mistral` parser | Dense and purpose-built for agentic tool loops; JSON format, so no XML wrapper to lose; community reports it beating the MoE Qwen coders on tool-chain reliability rather than on speed | Slower per token than a 3B-active MoE; coding-shaped, weakest of this list at open-ended household prose |
+| **GLM-4.7-Flash** | 17 GB @4-bit, 32 GB @8-bit | `<arg_key>` XML — dedicated `glm47` parser | Trained for agentic use; its own well-supported parser; 8-bit fits comfortably here, which is the quantization level at which format compliance stops being a coin flip | Reasoning-style output needs handling; least mileage in this stack so far |
+| **Qwen3.6-27B** (dense) | 16 GB @4-bit, 23 GB @6-bit | Qwen XML | Dense Qwen has the steadiest tool-call behaviour in the family under agentic harnesses — the reported failure mode of the A3B MoE siblings is malformed calls, not weak answers | Same XML-wrapper family risk as today's model; slower than A3B |
+| **Qwen3.6-35B-A3B** | 20 GB @4-bit, 38 GB @8-bit | Qwen XML | Newest generalist; 3B active parameters means it stays fast on this machine; 8-bit is affordable at 64 GB and is the real answer to the wrapper problem | Reported to produce malformed tool calls more often than the dense 27B, and to drift between XML and JSON shapes in long contexts |
+| **gpt-oss-20b** (MXFP4) | 12 GB | Harmony — handled by oMLX natively (`gpt_oss` model type) | Agent-tuned and small enough to leave the machine usable; the server understands its format without a `mlx-lm` parser | Reported to misformat calls on longer multi-step chains — the exact failure this stack already has. The 120b that fixes that is 62 GB of weights, which does not leave room to run |
+| **gemma-4-26B-A4B-it-QAT** | 16 GB @4-bit | `gemma4` parser | Quantization-aware training, so 4-bit is honest here; strong multilingual prose, which matters for a German household | Tool use is the least proven part of it for long agent loops |
+| **Qwen3-Coder-30B-A3B-Instruct at 6/8-bit** | 25 GB @6-bit, 33 GB @8-bit | `qwen3_coder` | Changes nothing but the file on disk — same id, same profile, same parser; the wrapper omission is a quantization artifact and higher precision is the direct answer to it | Still the XML-wrapper format, still MoE; a bigger download for a model whose format is the problem |
+
+None of them is urgent, because the two defences above are not model-specific: reading the markup
+works for any Qwen-family model whether or not the server's parser ever sees a wrapper, and a
+profile that needs a sentence of its own can say so without any code learning its name.
 
 ### Schedules and the timezone they are read in
 
@@ -816,19 +918,22 @@ silently returns nothing.
 
 This is one running vertical slice, not a finished system. What is honestly missing:
 
-- **TODO — the model must be able to call tools, and the shipped local one cannot.** Every Assistant
-  in this system works by asking for a tool and being given the result, so a model that cannot emit a
-  structured tool call cannot do anything here at all. `Qwen3-Coder-30B-A3B-Instruct-4bit`, served
-  locally, **writes its tool calls as prose in the response body**, so every Receptionist and
-  Accountant Turn fails all three attempts and the Conversation escalates. The symptom is not obvious
-  from the outside: the Dashboard shows Conversations in flight and none running, and the
-  agent-dependent end-to-end specs fail without saying why.
+- **The model must be able to call tools, and the shipped local one needs help to.** Every Assistant
+  in this system works by asking for a tool and being given the result, so a model whose calls do not
+  arrive as calls cannot do anything here at all. `Qwen3-Coder-30B-A3B-Instruct-4bit`, served
+  locally, **writes its tool calls as markup in the response body**, so Receptionist and Accountant
+  Turns failed all three attempts and the Conversation escalated. The symptom was not obvious from
+  the outside: the Dashboard shows Conversations in flight and none running, and the agent-dependent
+  end-to-end specs fail without saying why.
 
-  Nothing in this repository is wrong when that happens, and no amount of prompt work fixes it —
-  it is a capability of the model. Until a tool-calling model is configured in `llm.json`, the
-  deterministic half of the system works fully (post arrives, Documents are created, text is
-  extracted) and the judging half does not. `scripted` is not a substitute: it replays a fixture, so
-  it proves the wiring and not the reasoning.
+  This is no longer a wall, and the cause was narrower than "it cannot call tools": the model drops
+  the `<tool_call>` wrapper its own template requires, so the server's parser never sees a call. Two
+  defences now stand behind that, both described under [the local setup](#the-local-setup-on-this-machine)
+  — the `systemSuffix` on the profile, which makes the model emit the wrapper, and the provider's
+  own reading of the markup when it does not. Both are measured against the live server rather than
+  assumed. What is honestly still open is **how far a 4-bit model holds up over a long Conversation**,
+  which is a question about judgement and not about wiring; `scripted` remains no substitute, since it
+  replays a fixture and so proves the wiring rather than the reasoning.
 
 
 - **Authentication is real, its configuration is development-grade.** The mechanism is the one A12
