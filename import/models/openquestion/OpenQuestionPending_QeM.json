@@ -44,8 +44,25 @@
       "pageSize": 10
     },
     "constraint": {
-      "operator": "undefined_match",
-      "field": "/OpenQuestion/AnsweredAt"
+      "operator": "and",
+      "operands": [
+        {
+          "operator": "undefined_match",
+          "field": "/OpenQuestion/AnsweredAt"
+        },
+        {
+          "operator": "undefined_match",
+          "field": "/OpenQuestion/Text"
+        },
+        {
+          "operator": "undefined_match",
+          "field": "/OpenQuestion/Choice"
+        },
+        {
+          "operator": "undefined_match",
+          "field": "/OpenQuestion/Confirmed"
+        }
+      ]
     }
   }
 }
