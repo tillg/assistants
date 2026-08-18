@@ -1,12 +1,16 @@
 /** OpenAI-compatible chat-completions provider. Works against OpenAI and any compatible gateway. */
 
+import { createHash } from "node:crypto";
+
 import {
     isTransientStatus,
     TransientLlmError,
     type LlmProvider,
     type LlmRequest,
+    type LlmMessage,
     type LlmResponse,
     type LlmToolCall,
+    type ToolSchema,
 } from "./provider.js";
 
 interface OpenAiToolCall {
@@ -32,6 +36,10 @@ interface OpenAiUsage {
  * Deliberately narrow: it must not match an Assistant legitimately *discussing* a tool call in
  * prose. `<function=` and `<tool_call>` together with an opening angle bracket are the wire markers
  * the parser itself looks for, so matching them means the gateway saw the same thing and gave up.
+ *
+ * A profile whose model does this has a `systemSuffix` to answer it with — see `llm.json.example`,
+ * where `local_qwen` carries the sentence that makes a 4-bit Qwen wrap its calls properly. This
+ * check is what remains for the times the sentence does not hold.
  */
 const MALFORMED_TOOL_CALL = /<tool_call>|<function=/;
 
@@ -56,6 +64,7 @@ export class OpenAiProvider implements LlmProvider {
         private readonly fetchImpl: typeof fetch = fetch,
         private readonly temperature?: number,
         private readonly maxTokens: number = 4096,
+        private readonly systemSuffix?: string,
     ) {}
 
     async complete(request: LlmRequest): Promise<LlmResponse> {
@@ -70,7 +79,7 @@ export class OpenAiProvider implements LlmProvider {
             // ten minutes. A Turn that needs more than this has lost the thread anyway.
             max_tokens: this.maxTokens,
             ...(this.temperature === undefined ? {} : { temperature: this.temperature }),
-            messages: request.messages.map((message) => {
+            messages: withSystemSuffix(request.messages, this.systemSuffix).map((message) => {
                 if (message.role === "tool") {
                     return { role: "tool", content: message.content, tool_call_id: message.toolCallId };
                 }
@@ -142,6 +151,31 @@ export class OpenAiProvider implements LlmProvider {
         // Reported as an error instead, which is a shape the loop already knows how to carry: the
         // model sees it on the next Turn and can call the Operation properly. ADR-0015 is the rule
         // being kept here — nothing ends silently, least of all something that ended by accident.
+        // Before giving up on it: the markup *is* a tool call, and one written in a format we can
+        // read. A model that meant to call an Operation and merely failed to get it past the
+        // gateway's parser should have its call honoured rather than its Turn spent on a retry.
+        if (toolCalls.length === 0 && MALFORMED_TOOL_CALL.test(text)) {
+            const recovered = toolCallsFromMarkup(text, request.tools);
+            if (recovered.length > 0) {
+                return {
+                    // Whatever the model wrote *around* the call is kept: its own template invites
+                    // reasoning before one, and a transcript that drops it reads as though the
+                    // Assistant acted without saying why. Only the markup itself goes.
+                    text: withoutMarkup(text),
+                    toolCalls: recovered,
+                    finishReason: "wants-tools",
+                    ...(payload.usage
+                        ? {
+                              usage: {
+                                  promptTokens: payload.usage.prompt_tokens ?? 0,
+                                  completionTokens: payload.usage.completion_tokens ?? 0,
+                              },
+                          }
+                        : {}),
+                };
+            }
+        }
+
         if (toolCalls.length === 0 && MALFORMED_TOOL_CALL.test(text)) {
             // Thrown rather than returned, so `callLlmWithRetries` retries it inside the Turn. A
             // malformed emission is exactly the failure a retry fixes — the same prompt at
@@ -175,6 +209,110 @@ export class OpenAiProvider implements LlmProvider {
                 : {}),
         };
     }
+}
+
+/**
+ * The profile's `systemSuffix` on the end of the system message the loop already sends — or on one
+ * of its own, for a caller that sends none.
+ *
+ * It goes last because it is the thing the model is meant to remember, and it is one string rather
+ * than a whole system prompt per profile because the Assistant's own instruction is the Assistant's
+ * business: a profile should be able to say what its *model* needs, without owning what the
+ * Receptionist is for.
+ */
+function withSystemSuffix(messages: LlmMessage[], suffix?: string): LlmMessage[] {
+    if (!suffix) return messages;
+    const system = messages.findIndex((message) => message.role === "system");
+    if (system === -1) return [{ role: "system", content: suffix }, ...messages];
+    return messages.map((message, index) =>
+        index === system ? { ...message, content: `${message.content}\n\n${suffix}` } : message,
+    );
+}
+
+/**
+ * A whole call, as Qwen writes one: the opening tag, everything up to the matching close.
+ *
+ * `[\s\S]` rather than `.` because the parameters are on their own lines, and non-greedy so two
+ * calls in one message stay two calls.
+ */
+const MARKUP_CALL = /<function=([A-Za-z0-9_.-]+)>([\s\S]*?)<\/function>/g;
+
+const MARKUP_PARAMETER = /<parameter=([A-Za-z0-9_.-]+)>([\s\S]*?)<\/parameter>/g;
+
+/**
+ * The tool calls hidden in markup the gateway did not parse.
+ *
+ * Deliberately **not** gated on the model's name. What is being read here is a shape, not a
+ * vendor: a name that is one of the tools *this very request offered*, wrapped in the exact tags
+ * the format uses. A model that never writes those tags never reaches this code, and one that
+ * writes them while merely discussing a tool — the case the ordinary `MALFORMED_TOOL_CALL` check
+ * has always had to survive — names nothing that was offered and so recovers nothing. A name
+ * check, by contrast, would read `model` strings that are free-form by design (`gpt-4o` on an
+ * Azure deployment called something else entirely, a gateway serving Qwen under `default`) and
+ * would fail exactly where it was needed.
+ *
+ * Returns an empty array when nothing safely readable is there, which leaves the caller to report
+ * the emission as the error it has always been.
+ */
+function toolCallsFromMarkup(text: string, tools: ToolSchema[]): LlmToolCall[] {
+    const offered = new Map(tools.map((tool) => [tool.name, tool]));
+    const calls: LlmToolCall[] = [];
+
+    for (const [, name, body] of text.matchAll(MARKUP_CALL)) {
+        const tool = offered.get(name!);
+        if (!tool) continue;
+
+        const args: Record<string, unknown> = {};
+        for (const [, key, raw] of body!.matchAll(MARKUP_PARAMETER)) {
+            args[key!] = coerce(raw!.trim(), declaredType(tool, key!));
+        }
+        // Distinguishable in a transcript from an id the gateway issued, because the difference
+        // matters when reading back a Conversation that only worked because of this.
+        calls.push({ id: `markup_${calls.length}_${createHash("sha1").update(`${name}${body}`).digest("hex").slice(0, 8)}`, name: name!, arguments: args });
+    }
+
+    return calls;
+}
+
+/** The prose a recovered call was written among, with the call itself and its wrapper taken out. */
+function withoutMarkup(text: string): string {
+    return text
+        .replace(MARKUP_CALL, "")
+        .replace(/<\/?tool_call>/g, "")
+        .trim();
+}
+
+/** What the tool's schema says this parameter is, if it says anything. */
+function declaredType(tool: ToolSchema, parameter: string): string {
+    const properties = (tool.parameters as { properties?: Record<string, { type?: unknown }> }).properties;
+    const declared = properties?.[parameter]?.type;
+    return typeof declared === "string" ? declared : "string";
+}
+
+/**
+ * Markup carries every value as text, so a number arrives as `"120.50"` and an Operation expecting
+ * a number is handed a string. The schema says what it should have been, which is the same thing
+ * the model's own reference parser reads — anything unreadable is left as the text it was, for the
+ * tool layer to reject in its own words.
+ */
+function coerce(value: string, type: string): unknown {
+    if (type === "number" || type === "integer") {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : value;
+    }
+    if (type === "boolean") {
+        if (value === "true") return true;
+        if (value === "false") return false;
+        return value;
+    }
+    if (type === "object" || type === "array") {
+        try {
+            return JSON.parse(value);
+        } catch {
+            return value;
+        }
+    }
+    return value;
 }
 
 /**

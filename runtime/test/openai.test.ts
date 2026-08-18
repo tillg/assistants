@@ -14,7 +14,16 @@ import type { LlmRequest } from "../src/llm/provider.js";
 const REQUEST: LlmRequest = {
     model: "some-model",
     messages: [{ role: "user", content: "do the thing" }],
-    tools: [{ name: "thingstore__get", description: "read a Thing", parameters: { type: "object" } }],
+    tools: [
+        {
+            name: "thingstore__get",
+            description: "read a Thing",
+            parameters: {
+                type: "object",
+                properties: { model: { type: "string" }, page: { type: "number" } },
+            },
+        },
+    ],
 };
 
 /** A gateway that answers once, with whatever the case needs. */
@@ -70,18 +79,85 @@ describe("the OpenAI-compatible provider", () => {
         expect(sent["max_tokens"]).toBe(4096);
     });
 
-    it("refuses to read a tool call emitted as text as though it were an answer", async () => {
-        // The exact shape a 4-bit Qwen3 produced: HTTP 200, `stop`, no `tool_calls`, markup as
-        // content. Read as an answer it ends the Conversation `answered` having done nothing.
+    it("reads a tool call the gateway left as markup as the call it is", async () => {
+        // The exact shape a 4-bit Qwen3 produces: HTTP 200, `stop`, no `tool_calls`, and the call
+        // written out in the format its own template describes — because it dropped the
+        // `<tool_call>` wrapper the server's parser keys on. The call was meant; only the envelope
+        // was missing.
         const provider = new OpenAiProvider(
             "http://gateway/v1",
             "key",
             gateway({
                 message: {
                     content:
-                        "Let me get the details. <function=thingstore__get> <parameter=model> " +
-                        "Document_DM </parameter> </function> </tool_call>",
+                        "<function=thingstore__get>\n<parameter=model>\nDocument_DM\n</parameter>\n" +
+                        "<parameter=page>\n2\n</parameter>\n</function>",
                 },
+                finish_reason: "stop",
+            }),
+        );
+
+        const response = await provider.complete(REQUEST);
+
+        expect(response.finishReason).toBe("wants-tools");
+        expect(response.toolCalls).toHaveLength(1);
+        expect(response.toolCalls[0]!.name).toBe("thingstore__get");
+        // Markup carries every value as text; the schema says `page` is a number.
+        expect(response.toolCalls[0]!.arguments).toEqual({ model: "Document_DM", page: 2 });
+        // The markup itself is not also handed back as prose — it was a call, not an answer.
+        expect(response.text).toBe("");
+    });
+
+    it("keeps the reasoning a recovered call was written among", async () => {
+        // The model's own template invites prose before a call. A transcript that drops it reads as
+        // though the Assistant acted without saying why.
+        const provider = new OpenAiProvider(
+            "http://gateway/v1",
+            "key",
+            gateway({
+                message: {
+                    content:
+                        "Let me look that up first.\n<tool_call>\n<function=thingstore__get>\n" +
+                        "<parameter=model>\nDocument_DM\n</parameter>\n</function>\n</tool_call>",
+                },
+                finish_reason: "stop",
+            }),
+        );
+
+        const response = await provider.complete(REQUEST);
+
+        expect(response.toolCalls).toHaveLength(1);
+        expect(response.text).toBe("Let me look that up first.");
+    });
+
+    it("reads two calls in one message as two calls", async () => {
+        const provider = new OpenAiProvider(
+            "http://gateway/v1",
+            "key",
+            gateway({
+                message: {
+                    content:
+                        "<function=thingstore__get>\n<parameter=model>\nA\n</parameter>\n</function>\n" +
+                        "<function=thingstore__get>\n<parameter=model>\nB\n</parameter>\n</function>",
+                },
+                finish_reason: "stop",
+            }),
+        );
+
+        const response = await provider.complete(REQUEST);
+
+        expect(response.toolCalls.map((call) => call.arguments["model"])).toEqual(["A", "B"]);
+    });
+
+    it("refuses to read markup naming a tool the request never offered", async () => {
+        // The guard that makes reading markup safe at all: a shape, not a vendor. An Assistant
+        // discussing a call it did not make names nothing that was offered, so nothing is invoked
+        // — and it stays the error it has always been rather than becoming an answer.
+        const provider = new OpenAiProvider(
+            "http://gateway/v1",
+            "key",
+            gateway({
+                message: { content: "You would write <function=some__other> to do that." },
                 finish_reason: "stop",
             }),
         );
@@ -89,6 +165,65 @@ describe("the OpenAI-compatible provider", () => {
         // Transient, so the Turn retries it rather than escalating something the model can fix.
         await expect(provider.complete(REQUEST)).rejects.toThrow(/as text rather than as a structured call/);
         await expect(provider.complete(REQUEST)).rejects.toBeInstanceOf(TransientLlmError);
+    });
+
+    it("appends the profile's systemSuffix to the system message the loop sends", async () => {
+        // Measured: `Qwen3-Coder-30B-A3B-Instruct-4bit` drops the `<tool_call>` wrapper its own
+        // template requires and its calls arrive as text — three prompts out of three. With this
+        // sentence on the system message, three structured calls. It is the profile's because it is
+        // true of that model and of no hosted one.
+        let sent: Record<string, unknown> = {};
+        const provider = new OpenAiProvider(
+            "http://gateway/v1",
+            "key",
+            gateway({ message: { content: "fine" }, finish_reason: "stop" }, (body) => (sent = body)),
+            0,
+            undefined,
+            "Wrap every call in <tool_call> tags.",
+        );
+
+        await provider.complete({
+            ...REQUEST,
+            messages: [{ role: "system", content: "You are the Receptionist." }, ...REQUEST.messages],
+        });
+
+        const messages = sent["messages"] as { role: string; content: string }[];
+        expect(messages[0]).toEqual({
+            role: "system",
+            content: "You are the Receptionist.\n\nWrap every call in <tool_call> tags.",
+        });
+    });
+
+    it("carries the systemSuffix on a system message of its own when the caller sends none", async () => {
+        let sent: Record<string, unknown> = {};
+        const provider = new OpenAiProvider(
+            "http://gateway/v1",
+            "key",
+            gateway({ message: { content: "fine" }, finish_reason: "stop" }, (body) => (sent = body)),
+            0,
+            undefined,
+            "Wrap every call in <tool_call> tags.",
+        );
+
+        await provider.complete(REQUEST);
+
+        const messages = sent["messages"] as { role: string; content: string }[];
+        expect(messages[0]).toEqual({ role: "system", content: "Wrap every call in <tool_call> tags." });
+        expect(messages).toHaveLength(2);
+    });
+
+    it("says nothing extra when the profile sets no systemSuffix", async () => {
+        // The sentence names a markup format. A profile that has not asked for it — every hosted
+        // one — must not have its model told to write XML tags it otherwise never writes.
+        let sent: Record<string, unknown> = {};
+        const provider = new OpenAiProvider("http://gateway/v1", "key", gateway(
+            { message: { content: "fine" }, finish_reason: "stop" },
+            (body) => (sent = body),
+        ));
+
+        await provider.complete(REQUEST);
+
+        expect(sent["messages"]).toEqual([{ role: "user", content: "do the thing" }]);
     });
 
     it("still reads an ordinary answer as an answer", async () => {
