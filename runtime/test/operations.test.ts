@@ -231,6 +231,34 @@ describe("thingstore.update", () => {
         const after = await stepsOf(harness, thingId);
         expect((after.steps ?? []).map((step) => step.seq)).toEqual([1, 2, 3]);
     });
+
+    it("does not let a model overwrite the machine fields it names in an update", async () => {
+        // BUG-03: `create` overrides idempotencyKey / createdByConversationId after its spread;
+        // `update` spread the model's fields verbatim, so an Assistant could rewrite a Thing's dedup
+        // and provenance anchors — which crash recovery keys off — just by naming the field.
+        const harness = buildHarness([]);
+        const thingId = await processWithThreeSteps(harness);
+        const before = await harness.things.get<Record<string, unknown>>(SPECS.Process_DM, `Process_DM/${thingId}`);
+
+        const outcome = await call(harness, "thingstore.update", {
+            model: "Process_DM",
+            thingId,
+            fields: {
+                status: "done",
+                idempotencyKey: "hijacked:9",
+                createdByConversationId: "someone-else",
+                createdAt: "1999-01-01T00:00:00",
+            },
+        });
+
+        expect(outcome.kind).toBe("value");
+        const after = await harness.things.get<Record<string, unknown>>(SPECS.Process_DM, `Process_DM/${thingId}`);
+        expect(after.data.idempotencyKey, "the dedup anchor is unchanged").toBe("process-with-steps");
+        expect(after.data.createdByConversationId ?? "").not.toBe("someone-else");
+        expect(String(after.data.createdAt ?? "")).toBe(String(before.data.createdAt ?? ""));
+        // The one field it was allowed to change did change.
+        expect(after.data.status).toBe("done");
+    });
 });
 
 describe("the idempotency key creation is keyed on", () => {

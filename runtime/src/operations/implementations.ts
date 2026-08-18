@@ -484,7 +484,16 @@ export function buildOperations(deps: OperationDeps): OperationImplementation[] 
             // so sending the whole snapshot read a moment ago would revert anything saved in between
             // — it preserves the other fields as they were at the read, which is not what "the others
             // are preserved" means to anyone reading it.
-            const merged: Record<string, unknown> = { ...fields };
+            // Machine fields are the store's to write, never the model's. `thingstore.create`
+            // overrides `idempotencyKey` / `createdByConversationId` after its spread; `update` has to
+            // strip them, or an Assistant could rewrite a Thing's dedup and provenance anchors — which
+            // crash recovery (`findByIdempotencyKey`, the create / assistant.call reconcilers) keys
+            // off — just by naming the field. `updatedAt` is force-stamped by `update` regardless.
+            const MACHINE_FIELD_KEYS = ["idempotencyKey", "createdByConversationId", "createdAt", "updatedAt"];
+            const merged: Record<string, unknown> = {};
+            for (const [key, value] of Object.entries(fields)) {
+                if (!MACHINE_FIELD_KEYS.includes(key)) merged[key] = value;
+            }
             // Repeating groups are merged row by row, not replaced. A plain spread made "add step 4"
             // destroy steps 1 to 3 — on the one list README calls append-only — and reported success.
             // These need the stored rows, which is the one thing worth re-reading for.
