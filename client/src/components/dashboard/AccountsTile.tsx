@@ -77,9 +77,14 @@ const Nothing = styled.span`
     ${mutedText}
 `;
 
-/** A total short of a row is a wrong number unless it says so; it says so where it is read. */
+/**
+ * A total short of a row is a wrong number unless it says so; it says so where it is read.
+ *
+ * `smallFontSize` — an absolute 14px — and not the `0.9em` it was: inside a body that was itself `0.9em`
+ * that compounded to about 13px, which is under the floor for text a household is meant to act on.
+ */
 const Caveat = styled(Nothing)`
-    font-size: 0.9em;
+    font-size: ${({ theme }) => theme.typography.fontSize.smallFontSize};
 `;
 
 export function AccountsTile() {

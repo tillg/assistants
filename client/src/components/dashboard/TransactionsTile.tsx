@@ -2,6 +2,8 @@ import { useMemo } from "react";
 import { format, isValid, parseISO, subDays } from "date-fns";
 import styled from "styled-components";
 
+import { CssEllipsis } from "@com.mgmtp.a12.widgets/widgets-core";
+
 import { PLACE_ICONS } from "../icons";
 
 import { BOOKKEEPING_URL } from "./BookkeepingButton";
@@ -80,23 +82,27 @@ const When = styled.span`
 /**
  * Truncation rather than wrapping: a description long enough to wrap would make one row two rows tall,
  * and ten bookings must occupy ten lines at every width or the Tile changes height with its contents.
+ *
+ * `CssEllipsis` rather than the three-rule `overflow`/`text-overflow`/`white-space` incantation this was,
+ * and it brings something the incantation did not: it puts the full text in a `title` when — and only
+ * when — it actually had to cut it, so a truncated description is still readable by hovering it.
+ *
+ * `maxLine={1}` is given rather than left to the widget, which otherwise measures its parent's height on
+ * mount to decide how many lines fit. That measurement wants a parent whose height does not depend on its
+ * contents, and a Tile's is precisely that: it grows with its rows. One line is the rule here anyway.
+ *
+ * The two flex rules stay ours: the widget knows how to clamp text, not how wide it is allowed to be.
  */
-const What = styled.span`
+const What = styled(CssEllipsis)`
     flex: 1 1 auto;
     /* A flex item refuses to shrink below its content unless it is told it may. */
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 `;
 
-const Route = styled.span`
+const Route = styled(CssEllipsis)`
+    ${mutedText}
     flex: 0 1 auto;
     min-width: 0;
-    overflow: hidden;
-    ${mutedText}
-    text-overflow: ellipsis;
-    white-space: nowrap;
 `;
 
 const Figure = styled.span`
@@ -171,8 +177,8 @@ export function TransactionsTile() {
                         {rows.map((booking, index) => (
                             <Row key={`${booking.transactionId}-${index}`} data-role="tile-transactions-booking">
                                 <When>{day(booking.date)}</When>
-                                <What>{booking.description}</What>
-                                <Route>{route(booking.from, booking.to)}</Route>
+                                <What maxLine={1}>{booking.description}</What>
+                                <Route maxLine={1}>{route(booking.from, booking.to)}</Route>
                                 <Figure>{amount(booking.amount, booking.currency)}</Figure>
                             </Row>
                         ))}

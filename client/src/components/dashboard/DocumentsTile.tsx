@@ -74,9 +74,14 @@ const Chart = styled.div`
     height: 5rem;
 `;
 
+/**
+ * The named discrepancy, in the smallest size the theme offers for text meant to be read. It was
+ * `0.85em` inside a `0.9em` body, which compounded to about 12px — the smallest thing on the Dashboard
+ * was the sentence explaining why the number above it disagrees with the curve beside it.
+ */
 const Lag = styled.p`
     ${mutedText}
-    font-size: 0.85em;
+    font-size: ${({ theme }) => theme.typography.fontSize.smallFontSize};
 `;
 
 export function DocumentsTile() {

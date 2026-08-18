@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import styled, { css } from "styled-components";
 
-import { Card } from "@com.mgmtp.a12.widgets/widgets-core";
+import { Card, Typography } from "@com.mgmtp.a12.widgets/widgets-core";
 
 /**
  * The only component that knows what a Tile looks like: an icon, a title, and then three **optional**
@@ -30,6 +30,19 @@ import { Card } from "@com.mgmtp.a12.widgets/widgets-core";
  * overlay appears and `BasePage.finishedLoading()` returns while the numbers are still in flight; an
  * attribute the spec can wait on is the alternative to an arbitrary sleep. `data-variant` is there for
  * the same reason: a Tile silently reverting to the wrong shape is a thing a spec should catch.
+ *
+ * **Sizes come from the theme, and never from an `em`.** Every rule here was once a fraction — `0.9em` on
+ * the body, `0.8em` on the footer — and `em` compounds: a `0.9em` row inside a `0.9em` body renders at
+ * `0.81em`, so the Tiles bottomed out around 12px while every stylesheet involved looked innocent. The
+ * rules below therefore name a **token** (`theme.typography.fontSize.*`, absolute `rem`) or name nothing
+ * at all, and the floor across the Dashboard is `smallFontSize`, 14px.
+ *
+ * **`Typography.Headline` draws both headings**, so the title's and the big number's size, weight and
+ * near-black headline colour are the platform's rather than three hand-set rules kept in step by hand.
+ * It is the only widget used here: `Typography.Body` writes its own `data-role` onto the element *after*
+ * the props it was handed, so anything it wrapped would lose the attribute the tests and the e2e page
+ * object find it by — and it contributes nothing else a token does not. The two headings survive that
+ * because a heading needs no `data-role`, or (for the number) can carry it on a wrapper.
  */
 
 export type TileState = "loading" | "ready" | "error";
@@ -96,25 +109,41 @@ const Inside = styled.div`
     color: ${({ theme }) => theme.colors.text.color};
 `;
 
-const Heading = styled.div`
-    display: flex;
-    gap: 0.5rem;
-    align-items: baseline;
-    font-weight: 600;
+/**
+ * Both headings on a Tile: the title at `level={2}`, the big number at `level={1}`.
+ *
+ * Level 2 rather than the levels that sound like a card title — this theme sizes `headline3` at 14px,
+ * `headline4` at 12px *and uppercases it*, and `headline5` at 14.4px, all of them **smaller** than the
+ * 16px the title already was, which is the wrong direction for a Dashboard that was reported as reading
+ * too small. `headline2` is 18px semi-bold; `headline1` is 2rem, exactly the size the hand-set rule it
+ * replaces was asking for.
+ *
+ * The margin is the one thing overridden. A12's headlines carry the margins of a heading that separates
+ * sections of a *form* — 24px above the title, 12px below it — which inside a 1rem-padded Tile is a gap
+ * above the icon and a doubled gap below it, on top of the column's own `gap`. `&&` because the widget's
+ * rule and ours are both a single class, and equal specificity would leave stylesheet insertion order to
+ * decide it.
+ */
+const Headline = styled(Typography.Headline)`
+    && {
+        margin: 0;
+    }
 `;
 
-const Headline = styled.div`
-    font-size: 2rem;
-    font-weight: 600;
-    line-height: 1.1;
-`;
-
-/** The same height the headline occupies, so a Tile does not jump when its number arrives. */
-const Placeholder = styled(Headline)`
-    width: 3ch;
-    border-radius: 0.2rem;
-    background: ${({ theme }) => theme.colors.divider.color};
-    color: transparent;
+/**
+ * The same height the headline occupies, so a Tile does not jump when its number arrives.
+ *
+ * The grey block is the headline *inside* this wrapper rather than the wrapper itself: it has to be the
+ * widget's own size — 2rem, so `3ch` is three of the digits that are coming — and the widget sets its own
+ * colour, which would leave the em dash legibly dark on the grey without a rule reaching in to hide it.
+ */
+const Placeholder = styled.div`
+    & > * {
+        width: 3ch;
+        border-radius: 0.2rem;
+        background: ${({ theme }) => theme.colors.divider.color};
+        color: transparent;
+    }
 `;
 
 const Body = styled.div`
@@ -122,7 +151,8 @@ const Body = styled.div`
     flex: 1;
     flex-direction: column;
     gap: 0.2rem;
-    font-size: 0.9em;
+    /* Named, not inherited: a Tile's body is the platform's body size wherever this chrome is mounted. */
+    font-size: ${({ theme }) => theme.typography.fontSize.mediumFontSize};
 `;
 
 /**
@@ -145,14 +175,20 @@ export const mutedText = css`
     opacity: 0.72;
 `;
 
+/**
+ * `smallFontSize` — 14px, the smallest the theme offers for text meant to be read, and the floor for
+ * anything on a Tile. Quieter than the body it follows, which is the hierarchy the old `0.8em` was after
+ * before compounding took it down to about 13px.
+ */
 const Footer = styled.div`
     ${mutedText}
-    font-size: 0.8em;
+    font-size: ${({ theme }) => theme.typography.fontSize.smallFontSize};
 `;
 
+/** The one line a Tile has when it has nothing else: body size, so it is not the quietest thing on it. */
 const Sorry = styled.div`
     color: ${({ theme }) => theme.colors.variant.text.warning};
-    font-size: 0.9em;
+    font-size: ${({ theme }) => theme.typography.fontSize.mediumFontSize};
 `;
 
 const Anchor = styled.a`
@@ -172,10 +208,19 @@ const ButtonFrame = styled(Frame)`
     background: ${({ theme }) => theme.colors.background.secondaryBackground};
 `;
 
-const ButtonInside = styled(Heading)`
+/**
+ * A label, not a heading — so no `Typography.Headline`: a control announcing itself as a heading is a
+ * lie to a screen reader's landmark list, and the widget's inner title element is a flex row of its own
+ * that the `↗` would have to be fought into the far end of. Body size at 600, which is where it already
+ * was; the compounding `em`s were never here.
+ */
+const ButtonInside = styled.div`
+    display: flex;
+    gap: 0.5rem;
     justify-content: space-between;
     padding: 0.75rem 1rem;
     color: ${({ theme }) => theme.colors.text.color};
+    font-size: ${({ theme }) => theme.typography.fontSize.mediumFontSize};
     font-weight: 600;
 `;
 
@@ -202,18 +247,25 @@ export function DashboardTile({
             </ButtonInside>
         ) : (
             <Inside>
-                <Heading>
-                    <span aria-hidden>{icon}</span>
-                    <span>{title}</span>
-                </Heading>
+                <Headline level={2}>
+                    <span aria-hidden>{icon}</span> <span>{title}</span>
+                </Headline>
 
                 {state === "loading" && (expectsHeadline ?? headline !== undefined) && (
-                    <Placeholder data-role={`${role}-headline-placeholder`}>—</Placeholder>
+                    <Placeholder data-role={`${role}-headline-placeholder`}>
+                        <Headline level={1}>—</Headline>
+                    </Placeholder>
                 )}
                 {state === "error" && <Sorry data-role={`${role}-error`}>could not read this</Sorry>}
 
+                {/*
+                 * The `data-role` sits on a wrapper because `Typography.Headline` writes its own last and
+                 * would swallow one handed in — and this attribute is how the spec finds the number.
+                 */}
                 {state === "ready" && headline !== undefined && (
-                    <Headline data-role={`${role}-headline`}>{headline}</Headline>
+                    <div data-role={`${role}-headline`}>
+                        <Headline level={1}>{headline}</Headline>
+                    </div>
                 )}
                 {state === "ready" && body !== undefined && <Body data-role={`${role}-body`}>{body}</Body>}
                 {state === "ready" && footer !== undefined && <Footer data-role={`${role}-footer`}>{footer}</Footer>}
