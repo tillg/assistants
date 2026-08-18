@@ -449,6 +449,18 @@ describe("thingstore.search", () => {
         expect(outcome.kind).toBe("value");
         expect(outcome.kind === "value" && (outcome.value as unknown[]).length).toBeGreaterThan(0);
     });
+
+    it("clamps a negative or fractional limit to a valid page size", async () => {
+        // BUG-04: `Number(limit) || 25` only caught falsy values, so `-5` and `3.7` reached the store
+        // as pageSize and came back an opaque RPC error the model could not act on.
+        const harness = buildHarness([]);
+        await harness.things.create(SPECS.Invoice_DM, { invoiceNumber: "L-1", idempotencyKey: "l-1" });
+
+        for (const limit of [-5, 0, 3.7]) {
+            const outcome = await call(harness, "thingstore.search", { model: "Invoice_DM", limit });
+            expect(outcome.kind, `limit ${limit} is coerced, not a store error`).toBe("value");
+        }
+    });
 });
 
 /**

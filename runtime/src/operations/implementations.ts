@@ -547,7 +547,12 @@ export function buildOperations(deps: OperationDeps): OperationImplementation[] 
             }
             const spec = specFor(model);
             const field = args["field"] ? String(args["field"]) : undefined;
-            const limit = Number(args["limit"] ?? 25) || 25;
+            // `|| 25` only catches falsy values, so a negative or fractional limit used to reach the
+            // store as-is and come back an opaque RPC error the model cannot act on. Clamp to a
+            // positive integer first, as listTransactions already does; the upper bound below is a
+            // deliberate error, not a silent clamp.
+            const requested = Number(args["limit"] ?? 25);
+            const limit = Number.isFinite(requested) ? Math.max(1, Math.floor(requested)) : 25;
             if (limit > PAGE_SIZE_MAX) {
                 // Clamping silently was the bug: a model that asked for everything, got a hundred
                 // rows and was told nothing has no way to know it did not see everything.
