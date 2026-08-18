@@ -92,6 +92,21 @@ const PAGE_SIZE = 100;
 const FROZEN_FRONTIER_WARN_AFTER_MS = 5 * 60_000;
 
 /**
+ * How many pages of waiting Conversations one answered scan will walk before it stops for this pass.
+ *
+ * There has to be a number here, and both directions of getting it wrong are outages. Without a
+ * bound, a store holding tens of thousands of waiting Conversations turns one pass into a walk of
+ * all of them, every two seconds, and a scan that never returns is its own outage — the other six
+ * scans are behind it. With the bound but without the cursor that goes with it, the pass stops in
+ * the same place for ever and everything behind that place is lost, which is precisely the failure
+ * this constant exists inside the fix for. Three pages is 300 Conversations and 300 question reads
+ * per pass: enough that no real household ever needs a second pass, small enough that a store which
+ * has somehow accumulated ten thousand waiting Conversations is covered in 34 passes — a little over
+ * a minute — rather than by one pass that never ends.
+ */
+const ANSWERED_SCAN_MAX_PAGES = 3;
+
+/**
  * How long a Schedule may be held by an unfinished run before it is worth saying so.
  *
  * Longer than the frontier warning, because a held schedule is more ordinary and less urgent: the
@@ -129,6 +144,12 @@ export class Watcher {
 
     /** Assistants whose `cron` could not be read, so the complaint is made once per process. */
     private readonly badCrons = new Set<string>();
+
+    /**
+     * Where the answered scan stopped sweeping, as a `createdAt` — `undefined` means "at the
+     * beginning". See {@link scanAnswered} for what it is for and why it is only in memory.
+     */
+    private answeredCursor: string | undefined;
 
     /** Per Assistant: the slot its schedule is held at, and whether that has been reported. */
     private readonly stalledSlots = new Map<
@@ -578,51 +599,154 @@ export class Watcher {
      * Stamping the question would give it a second Runtime write, at the worst possible moment —
      * the User may still be editing the record they just saved. Continuing clears `waitingFor`,
      * so the Conversation stops matching this scan, and the question is never touched twice.
+     *
+     * **It sweeps; it does not look at whatever hundred the store hands back.** For a long time this
+     * scan read one unordered page of 100 waiting Conversations, iterated exactly those and returned.
+     * That is fine while a household has a dozen questions open and silently terminal once it has
+     * more than a hundred: which 100 came back was an arbitrary window, nothing favoured the rows
+     * that had just been answered, and there was neither a second page nor a position to carry
+     * forward. Measured on a live stack with 501 waiting Conversations — an Accountant sat with
+     * `waitingFor = "user"` and a `currentQuestionId` pointing at a question the User had answered
+     * ten minutes earlier, the invoice slice timed out waiting for an approval that could therefore
+     * never be raised, and every health check stayed green throughout. The comment above about
+     * widening the `waitingFor` filter describes fixing that same shape of failure once already; the
+     * cap put it straight back at a hundred rows instead of at one Connector.
+     *
+     * So: ordered oldest-first by `createdAt`, bounded below by a cursor, and walked page by page.
+     * Raising the constant was the tempting fix and is not one — it moves the cliff from 100 to
+     * 1000 and leaves it there. Three properties are what matter, and each costs something:
+     *
+     *   - **Bounded per pass.** {@link ANSWERED_SCAN_MAX_PAGES} pages, because the other six scans
+     *     are queued behind this one and a pass that walks ten thousand Conversations every two
+     *     seconds is its own outage.
+     *   - **Eventual coverage.** When the pages run out the cursor is kept, so the next pass carries
+     *     on from where this one stopped rather than re-reading the same first page; when a page
+     *     comes back short the sweep has reached the end and the cursor returns to the beginning.
+     *     A Conversation is therefore reached within `ceil(waiting / 300)` passes however many
+     *     others are waiting, which is the guarantee the cap did not have at any size.
+     *   - **No new store field.** The cursor lives in memory, so a restart resumes from the
+     *     beginning. That is the safe direction — it re-examines rows rather than skipping them —
+     *     and it is the same choice the frozen-frontier and stalled-schedule notes make: a restart
+     *     is allowed to cost a little duplicated reading, and is not allowed to lose a position that
+     *     would have let something be missed.
+     *
+     * The trade the cursor cannot pay for is a `createdAt` tie: the field is second-granular, so more
+     * than a page of Conversations born inside one second cannot be enumerated at all — `search`
+     * takes no page number and there is no second orderable field to break the tie on. That case
+     * steps past the group and says so in the log, which is described where it happens.
      */
     private async scanAnswered(handled: Set<string>): Promise<number> {
-        // `waitingFor` is "user" for ui.askUser and "tool" for every Manual Connector — and a
-        // Manual Connector is answered through exactly the same Open Question. Filtering on
-        // "user" alone left every email.send / bank.sendMoney / document.requestText suspended
-        // forever: no other scan can reach a waiting Conversation either, so it was terminal and
-        // silent, with the heartbeat still green.
-        const waiting = await this.deps.things.search<Conversation>(
-            SPECS.Conversation_DM,
-            and(
-                eq(fieldPath(SPECS.Conversation_DM, "status"), "waiting"),
-                or(
-                    eq(fieldPath(SPECS.Conversation_DM, "waitingFor"), "user"),
-                    eq(fieldPath(SPECS.Conversation_DM, "waitingFor"), "tool"),
-                ),
-                not(unset(fieldPath(SPECS.Conversation_DM, "currentQuestionId"))),
-            ),
-            100,
-        );
-
+        const spec = SPECS.Conversation_DM;
         let continued = 0;
-        for (const conversation of waiting) {
-            const questionId = conversation.data.currentQuestionId;
-            if (!questionId) continue;
-            let question: Stored<OpenQuestion>;
-            try {
-                question = await this.deps.things.get<OpenQuestion>(
-                    SPECS.OpenQuestion_DM,
-                    `OpenQuestion_DM/${questionId}`,
-                );
-            } catch (error) {
-                // The question is gone — most likely deleted by hand. The Conversation is waiting
-                // on something that no longer exists, so without this it would wait forever.
-                log.warn("the open question a conversation was waiting on has gone", {
-                    questionId,
-                    conversationId: conversation.thingId,
-                    error: describeError(error),
-                });
+        /**
+         * Where this pass starts sweeping. `undefined` is the beginning, which is where a freshly
+         * started Runtime always begins.
+         */
+        let cursor = this.answeredCursor;
+        /**
+         * Every waiting Conversation this pass has already looked at. The cursor is a `date_range`
+         * and `from` is inclusive, so consecutive pages overlap on the boundary second by
+         * construction; this is what keeps the overlap from being counted as progress.
+         */
+        const examined = new Set<string>();
+
+        for (let page = 0; page < ANSWERED_SCAN_MAX_PAGES; page += 1) {
+            // `waitingFor` is "user" for ui.askUser and "tool" for every Manual Connector — and a
+            // Manual Connector is answered through exactly the same Open Question. Filtering on
+            // "user" alone left every email.send / bank.sendMoney / document.requestText suspended
+            // forever: no other scan can reach a waiting Conversation either, so it was terminal and
+            // silent, with the heartbeat still green.
+            //
+            // Ordered oldest-first and bounded below by the cursor, which is the whole of the fix:
+            // an unordered single page is an arbitrary window, and a window is not a sweep.
+            const waiting = await this.deps.things.search<Conversation>(
+                spec,
+                and(
+                    eq(fieldPath(spec, "status"), "waiting"),
+                    or(
+                        eq(fieldPath(spec, "waitingFor"), "user"),
+                        eq(fieldPath(spec, "waitingFor"), "tool"),
+                    ),
+                    not(unset(fieldPath(spec, "currentQuestionId"))),
+                    ...(cursor === undefined
+                        ? []
+                        : [
+                              {
+                                  operator: "date_range",
+                                  field: fieldPath(spec, "createdAt"),
+                                  from: cursor,
+                              } as Constraint,
+                          ]),
+                ),
+                PAGE_SIZE,
+                byCreatedAt(spec, "ASC"),
+            );
+
+            /** The newest `createdAt` this page contained: where the next page picks up. */
+            let newest = cursor;
+            /** Rows in this page the pass had not already examined — its progress, in other words. */
+            let fresh = 0;
+
+            for (const conversation of waiting) {
+                const createdAt = conversation.data.createdAt ?? "";
+                if (createdAt && (newest === undefined || createdAt > newest)) newest = createdAt;
+                if (examined.has(conversation.docRef)) continue;
+                examined.add(conversation.docRef);
+                fresh += 1;
+
+                const questionId = conversation.data.currentQuestionId;
+                if (!questionId) continue;
+                let question: Stored<OpenQuestion>;
+                try {
+                    question = await this.deps.things.get<OpenQuestion>(
+                        SPECS.OpenQuestion_DM,
+                        `OpenQuestion_DM/${questionId}`,
+                    );
+                } catch (error) {
+                    // The question is gone — most likely deleted by hand. The Conversation is waiting
+                    // on something that no longer exists, so without this it would wait forever.
+                    log.warn("the open question a conversation was waiting on has gone", {
+                        questionId,
+                        conversationId: conversation.thingId,
+                        error: describeError(error),
+                    });
+                    appendEntry(conversation.data, {
+                        role: "system",
+                        kind: "error",
+                        text: `The question you were waiting on (\`${questionId}\`) no longer exists. It was probably deleted. Ask again if you still need an answer.`,
+                    });
+                    conversation.data.currentQuestionId = "";
+                    conversation.data.waitingFor = "";
+                    conversation.data.status = "running";
+                    await this.deps.things.update(
+                        SPECS.Conversation_DM,
+                        conversation.docRef,
+                        conversation.data as Record<string, unknown>,
+                    );
+                    handled.add(conversation.docRef);
+                    await this.runTurn(conversation.docRef);
+                    continued += 1;
+                    continue;
+                }
+                // NOT `answeredAt` alone. Nothing stamps it — it is a plain editable DateTime on the
+                // form — so a User who types an answer, sets Confirmed and presses Save has, from
+                // their point of view, answered; and the Conversation would wait forever. Any answer
+                // field being filled in means answered. `answeredAt` stays as the record of *when*,
+                // for anyone who fills it in.
+                if (!isAnswered(question.data)) continue;
+
                 appendEntry(conversation.data, {
-                    role: "system",
-                    kind: "error",
-                    text: `The question you were waiting on (\`${questionId}\`) no longer exists. It was probably deleted. Ask again if you still need an answer.`,
+                    role: "user",
+                    kind: "answer",
+                    text: renderAnswer(question.data),
+                    // Every answer carries the id of the question it answers, not only the ones that
+                    // matter to something. The approval walk-back reads it, and the alternative is a
+                    // scan that has to know which questions are approvals — which is the same coupling
+                    // in the more fragile direction.
+                    questionId,
                 });
-                conversation.data.currentQuestionId = "";
                 conversation.data.waitingFor = "";
+                conversation.data.currentQuestionId = "";
                 conversation.data.status = "running";
                 await this.deps.things.update(
                     SPECS.Conversation_DM,
@@ -632,37 +756,50 @@ export class Watcher {
                 handled.add(conversation.docRef);
                 await this.runTurn(conversation.docRef);
                 continued += 1;
+            }
+
+            // A short page is the end of the sweep: nothing waiting exists past the newest row this
+            // page contained, so the next pass starts from the beginning again. This is the only
+            // place the cursor is allowed to go backwards, and it has to exist — a cursor that only
+            // ever advanced would walk off the end of the data and never look at the beginning
+            // again, which is the same loss as the cap with the rows in the other order.
+            if (waiting.length < PAGE_SIZE) {
+                this.answeredCursor = undefined;
+                return continued;
+            }
+
+            if (fresh === 0) {
+                // A full page in which every row had already been examined. The cursor is a second-
+                // granular `createdAt`, so this means more than PAGE_SIZE waiting Conversations share
+                // one second and the store cannot be asked for the rest of them: `search` offers no
+                // page number, and there is no second orderable field to break the tie on. Stepping
+                // one second past the group is the only way to keep the sweep moving; the honest cost
+                // is that the Conversations in the tail of that group are not looked at on this
+                // sweep, and the honest alternative is a scan that stops here for ever, which is the
+                // failure being fixed. Said out loud, because an operator who ever sees this line has
+                // a Conversation that may be answered and unreached.
+                const tied = parseIso(newest);
+                log.warn(
+                    `more than ${PAGE_SIZE} waiting Conversations were created in the same second, so ` +
+                        `some of them cannot be reached by this scan; stepping past them`,
+                    { createdAt: newest, examined: examined.size },
+                );
+                if (tied === undefined) {
+                    this.answeredCursor = undefined;
+                    return continued;
+                }
+                cursor = nowIso(new Date(tied + 1_000));
                 continue;
             }
-            // NOT `answeredAt` alone. Nothing stamps it — it is a plain editable DateTime on the
-            // form — so a User who types an answer, sets Confirmed and presses Save has, from
-            // their point of view, answered; and the Conversation would wait forever. Any answer
-            // field being filled in means answered. `answeredAt` stays as the record of *when*,
-            // for anyone who fills it in.
-            if (!isAnswered(question.data)) continue;
 
-            appendEntry(conversation.data, {
-                role: "user",
-                kind: "answer",
-                text: renderAnswer(question.data),
-                // Every answer carries the id of the question it answers, not only the ones that
-                // matter to something. The approval walk-back reads it, and the alternative is a
-                // scan that has to know which questions are approvals — which is the same coupling
-                // in the more fragile direction.
-                questionId,
-            });
-            conversation.data.waitingFor = "";
-            conversation.data.currentQuestionId = "";
-            conversation.data.status = "running";
-            await this.deps.things.update(
-                SPECS.Conversation_DM,
-                conversation.docRef,
-                conversation.data as Record<string, unknown>,
-            );
-            handled.add(conversation.docRef);
-            await this.runTurn(conversation.docRef);
-            continued += 1;
+            cursor = newest;
         }
+
+        // Out of pages, not out of Conversations. Remember where the sweep got to, so the next pass
+        // carries on from here instead of starting again at the same first page for ever — which is
+        // exactly what the uncapped, unordered single page used to do, and how a Conversation whose
+        // answer had been sitting in the store for ten minutes was never come back for.
+        this.answeredCursor = cursor;
         return continued;
     }
 

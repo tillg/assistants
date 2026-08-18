@@ -388,6 +388,74 @@ describe("the catalogue check in front of the scan", () => {
     });
 });
 
+describe("the answered scan (scan 2)", () => {
+    it("resumes a Conversation whose answer is waiting behind the first page", async () => {
+        // The scan read one page of 100 waiting Conversations and iterated exactly that, with no
+        // paging, no watermark and no ordering — so which 100 it got was whatever window the store
+        // happened to hand back. Measured on a live stack with 501 waiting Conversations: an
+        // Accountant kept `waitingFor = "user"` and a `currentQuestionId` pointing at a question the
+        // User had answered ten minutes earlier, and nothing ever came back for it. Terminal and
+        // silent, with the heartbeat green throughout — the same failure the scan's own comment
+        // records having fixed once already, reintroduced by the cap.
+        //
+        // The blockers here carry questions that are **not** answered, and that is the whole point:
+        // with every question answered the cap only costs a pass, because a resumed Conversation
+        // leaves the query. It is the unanswered majority — which is what a real inbox is — that
+        // fills the page for ever and makes the loss permanent.
+        const harness = buildHarness([{ text: "Thank you, noted.", finishReason: "answered" }]);
+        const assistant = await harness.seedAssistant({ triggers: [] });
+
+        const t0 = Date.now() - 3_600_000;
+        /** One waiting Conversation with one Open Question, answered or not. Oldest first. */
+        async function waiting(index: number, answered: boolean): Promise<string> {
+            const question = await harness.things.create(SPECS.OpenQuestion_DM, {
+                conversationId: `pending-${index}`,
+                assistantKey: assistant.data.key ?? "",
+                kind: "free-text",
+                prompt: `Question ${index}?`,
+                ...(answered ? { text: "Yes, go ahead.", answeredAt: nowIso() } : {}),
+                idempotencyKey: `question-${index}`,
+            });
+            const conversation = await harness.things.create(SPECS.Conversation_DM, {
+                assistantKey: assistant.data.key ?? "",
+                title: `waiting ${index}`,
+                status: "waiting",
+                waitingFor: "user",
+                currentQuestionId: question.thingId,
+                turnCount: 1,
+                maxTurns: 20,
+                escalationCount: 0,
+                entries: [{ seq: 1, at: nowIso(), role: "user", kind: "prompt", text: "Do the thing." }],
+                // Distinct seconds, ascending with the index, so "behind the first page" is a fact
+                // about the data rather than about the order the store felt like answering in.
+                createdAt: nowIso(new Date(t0 + index * 1_000)),
+                idempotencyKey: `waiting-${index}`,
+            });
+            return conversation.docRef;
+        }
+
+        for (let index = 0; index < 120; index += 1) await waiting(index, false);
+        const answeredLast = await waiting(120, true);
+
+        // Bounded: a handful of passes, not "eventually". Three is enough for any mechanism that
+        // covers 121 rows at all, and a fourth would hide a cliff rather than expose one.
+        for (let pass = 0; pass < 3; pass += 1) await harness.watcher.scan();
+
+        const resumed = await harness.conversation(answeredLast);
+        expect(resumed.data.currentQuestionId).toBe("");
+        expect(resumed.data.waitingFor).toBe("");
+        expect(resumed.data.status).not.toBe("waiting");
+        expect((resumed.data.entries ?? []).some((entry) => entry.kind === "answer")).toBe(true);
+
+        // And the unanswered 120 are left exactly where they were: the fix is about reaching them,
+        // not about deciding for the User.
+        const stillWaiting = (await conversations(harness)).filter(
+            (row) => row.data.status === "waiting",
+        );
+        expect(stillWaiting).toHaveLength(120);
+    });
+});
+
 describe("result delivery (scan 5)", () => {
     it("does not rewrite the transcript of a caller that has already finished", async () => {
         // `awaitMode: "detach"` still sets `parentConversationId`, so the child matches scan 5 and
