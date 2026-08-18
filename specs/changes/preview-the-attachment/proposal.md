@@ -60,26 +60,47 @@ and:
 So there is no `Document_FM` setting to switch on, and no exposition that does this. A PDF is, to the
 platform, a file with an icon.
 
-## The open question this change has to answer first
+## How the bytes are fetched — settled, in a browser
 
-**How do we get the bytes?** This is not settled, and pretending otherwise would put a guess in a
-spec.
+Two steps, both measured on the wire in a live session:
 
-| Route | Status |
+1. `POST /api/v2/rpc` with the User's Keycloak bearer token — `LOAD_ATTACHMENT_URL`, taking
+   `{attachmentId, docRef}` — returns
+   `{"location": "http://localhost:8082/cs/download/<ticket>?filename=…"}`
+2. `GET` that location — **no Authorization header, no cookie** — returns the PDF.
+
+The UUID in that URL is a **single-use download ticket**, not a content-store id. Replaying it answers
+`error.content-store.ticket.unavailable`; two consecutive `LOAD_ATTACHMENT_URL` calls mint two
+different tickets; even a bare `HEAD` spends one. `/cs/download/{id}` is deliberately unauthenticated
+— it is on the UAA introspection whitelist — because **the ticket is the capability**.
+
+### The earlier failure was mine, and worth recording
+
+An earlier draft of this document asserted that `LOAD_ATTACHMENT_URL` was broken here, that
+`content-storage=db` was the likely cause, and that every attachment the mail ingest had stored was
+therefore unreachable. All of that was wrong, and the mistake is instructive: the `attachmentId` and
+`docRef` I tested with were **stale**. I had deleted and re-ingested those Documents myself while
+fixing an unrelated bug, and then diagnosed a platform fault from identifiers that no longer existed.
+Side by side against the live server, the stale pair reproduces `error.attachment.notFound` exactly
+while the current pair returns a location.
+
+`content-storage=db` is a red herring — the content store issues tickets regardless of where the bytes
+are persisted.
+
+## What actually makes this hard
+
+Not the fetching. Four obstacles, every one measured in the browser rather than reasoned about:
+
+| | Finding |
 |---|---|
-| `/api/v2/attachment` | upload only — verified |
-| `/cs/download/<UUID>` | the documented download path, but that UUID is a **content-store** id, not the `attachment_id` on the Document |
-| `LOAD_ATTACHMENT_URL` (JSON-RPC) | what `platformAttachmentLoader.retrieveDownloadLink()` calls. **Answers `"No URL from attachmentId … could be found"` for our attachments** — verified against the live store with a valid token and the correct `docRef` shape |
+| **`Content-Disposition: attachment`, unconditionally** | a live `<iframe src={location}>` stayed blank and Chrome **downloaded** the file. `?disposition=inline` is ignored. This alone rules out the obvious implementation |
+| **CORS blocks reading the bytes into JS** | `fetch(location)` from `http://localhost:8081` fails — no `Access-Control-Allow-Origin`. The frontend's nginx proxies `/api` and `/actuator` only, so `/cs` is a different origin. So the blob-URL workaround does not work either |
+| **The ticket is single-use** | a preview must mint its own, and must not spend the one the Download menu item is about to use. A *failed* CORS fetch still reaches the server and consumes it |
+| **No `Accept-Ranges`, no `Content-Length`** | the response is chunked, so incremental or range-based loading is impossible. Any reader gets one full read or nothing |
 
-The likely cause is that this deployment sets
-`mgmtp.a12.dataservices.contentstore.storage.content-storage=db`, so content lives in the Data
-Services database rather than at a location a URL could point to.
-
-Which raises a question **larger than this change**: if `LOAD_ATTACHMENT_URL` cannot resolve our
-attachments, then the form's own **download** action cannot either — and every attachment the mail
-ingest has ever stored may be unreachable from the web application. That is being verified in a real
-browser before a line of this change is written, because the answer decides whether this is a
-preview feature or a bug report with a preview attached.
+**Consequence, and it changes the shape of the change: this is not client-only.** An inline preview
+needs a same-origin, authenticated endpoint on the application server that reads the attachment and
+re-serves it as `Content-Disposition: inline`. That is a server change, and it is the honest cost.
 
 ## Scope
 
@@ -90,7 +111,8 @@ preview feature or a bug report with a preview attached.
 | **A preview component** | `client/src/components/document/` — fetches the attachment, renders it, revokes the object URL on unmount. Read-only |
 | **Where it appears** | the Document form, beneath or beside the attachment field. Exact seam depends on the answer above |
 | **PDF only** | images already work; everything else keeps today's icon |
-| **Tests** | component tests for the three states (loading, rendered, refused) plus one e2e that opens the real Document and asserts the preview is present |
+| **A server route** | a same-origin, authenticated endpoint that re-serves the attachment as `Content-Disposition: inline`. Forced by the findings above, not a design preference |
+| **Tests** | component tests for the three states (loading, rendered, refused), a server test for the route, plus one e2e that opens a Document and asserts the preview is present |
 
 **Out of scope**
 

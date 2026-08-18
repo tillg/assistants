@@ -24,49 +24,67 @@ Rendering with `pdfjs` in the client would be rebuilding a viewer that is alread
 that `pdfjs-dist` *is* a dependency of this project, in the **Runtime**, to extract text without a
 canvas. Different problem, different process, and worth saying so before somebody unifies them.
 
-## The unknown, and why it comes first
+## How it actually works — measured, not inferred
 
-**We cannot yet fetch the bytes.** Three routes, none of them working:
+Every row below was observed on the wire in a live browser session.
 
-| Route | What happened |
-|---|---|
-| `/api/v2/attachment` | upload only — verified against the live server |
-| `/cs/download/<UUID>` | documented as the download path, but the UUID is a **content-store** id and we hold an `attachment_id`. A `404` for ours |
-| `LOAD_ATTACHMENT_URL` | what the platform's own loader calls. Answers **`"No URL from attachmentId … could be found"`** for our attachments — correct `docRef` shape, valid token, verified twice |
+```mermaid
+sequenceDiagram
+    participant C as AttachmentPreview
+    participant N as frontend (nginx :8081)
+    participant S as server (:8082)
+    participant CS as content store
 
-`platformAttachmentLoader.retrieveDownloadLink()` is a two-line function and its whole body is that
-third row:
-
-```js
-const downloadRequest = RequestBuilder.loadAttachmentURL(attachment.attachment_id, documentId);
-const [{ result }] = await Dispatcher.rpc(language, [downloadRequest]);
-return result.location;
+    C->>N: POST /api/v2/rpc  LOAD_ATTACHMENT_URL {attachmentId, docRef}
+    Note over C,N: Authorization: BEARER <the User's Keycloak token>
+    N->>S: proxied
+    S-->>C: { location: ".../cs/download/<ticket>?filename=..." }
+    Note over S,CS: a single-use ticket, minted per call
+    C->>S: GET /cs/download/<ticket>   (no auth — the ticket IS the capability)
+    S-->>C: 200 application/pdf<br/>Content-Disposition: ATTACHMENT ← the problem
 ```
 
-The likely cause is one line of server configuration:
+**`/cs/download/{id}` is deliberately unauthenticated** — it sits on the UAA introspection whitelist —
+because the ticket carries the authority. The ticket is spent on first use: replaying answers
+`error.content-store.ticket.unavailable`, two consecutive `LOAD_ATTACHMENT_URL` calls return two
+different UUIDs, and even a `HEAD` consumes one.
 
-```
-mgmtp.a12.dataservices.contentstore.storage.content-storage=db
-```
+### The four obstacles, and why the obvious implementation fails
 
-Content is persisted in the Data Services database, so there may be no *location* for a URL to point
-at. If that is right, then **`retrieveDownloadLink` cannot work in this deployment for any attachment**
-— which means the form's existing download action is also broken, and has been since before this
-change was thought of.
-
-### Two possible worlds, and they need different changes
-
-| | If the browser CAN download today | If it cannot |
+| Obstacle | Evidence | Consequence |
 |---|---|---|
-| what we learned | we were asking wrongly; the browser knows a route we have not found | the platform's download path does not fit `content-storage=db`, or our upload is incomplete |
-| this change becomes | a preview component, as proposed | a **bug fix** — restore downloading — with the preview on top |
-| the risk | low | the fix may be one property (`content-storage=cs`), which changes where every existing attachment lives |
-| who is affected | nobody else | every attachment the mail ingest has stored, and the User's real invoice |
+| **`Content-Disposition: attachment`, always** | a live iframe pointed at a fresh ticket stayed blank and Chrome downloaded the file. `?disposition=inline&inline=true` is ignored | **`<iframe src={location}>` cannot work** |
+| **CORS** | `fetch(location)` from `http://localhost:8081` → *"No 'Access-Control-Allow-Origin' header is present"*. nginx proxies `/api` and `/actuator` only; `/cs` is another origin | **the blob-URL workaround cannot work either** |
+| **Single-use ticket** | verified by replay and by two consecutive mints | a preview must mint its own, and a *failed* fetch still spends one |
+| **No `Accept-Ranges`, no `Content-Length`** | chunked response | no incremental or range-based loading; one full read or nothing |
 
-**This is being settled in a real browser before anything is built**, by driving the running
-application, opening the Abschlagsrechnung Document and recording every request it makes. That is the
-same method that settled the upload route, where the documentation was also wrong and the web
-application's own request was the only reliable witness.
+There is **no** `X-Frame-Options` and **no** CSP on the response — framing is not what is blocked. The
+disposition header is.
+
+### Therefore: a server route, and this change is not client-only
+
+An inline preview needs a **same-origin, authenticated endpoint on the application server** that reads
+the attachment and re-serves it with `Content-Disposition: inline`. Two shapes, and the choice matters:
+
+| | re-serve inline | return bytes for a blob URL |
+|---|---|---|
+| the client does | `<iframe src="/api/…/preview?…">` | `fetch` → `Blob` → `createObjectURL` |
+| needs | nothing else | an object URL to revoke, and lifetime discipline |
+| the browser's viewer | works | works |
+| **preferred** | **yes** — no lifetime to get wrong, no blob to leak | only if the first proves impossible |
+
+Note what this does to the change's cost: the server here is *"a smart store — three hand-written Java
+classes, none of them domain-aware"*. Adding a fourth is not free, and
+[ADR-0023](../../../docs/adr/0023-the-runtime-is-the-door-outward.md) already argued against making the
+server the place that grows integrations. **This is not that** — it reads an attachment the store
+already holds, for the User who is already authenticated, and reaches nothing foreign — but the
+resemblance is close enough that the distinction should be stated in the change rather than assumed.
+
+**A cheaper alternative to weigh first: proxy `/cs` through nginx.** That makes the download
+same-origin and dissolves the CORS obstacle for one line of compose configuration. It does **not**
+solve the disposition header, so a blob URL would still be needed — but it removes a server route in
+favour of client code. Inferred from the compose configuration, *not* tested, and worth testing before
+choosing.
 
 ## The component, assuming the bytes are reachable
 
@@ -83,7 +101,8 @@ interface AttachmentPreviewProps {
 | Concern | Decision |
 |---|---|
 | **when it renders** | `mimeType === "application/pdf"` and an `attachmentId` is present. Anything else renders nothing at all — not an empty frame, not a placeholder |
-| **how it fetches** | through `platformAttachmentLoader`, or whatever the browser investigation shows is right. **Not** a hand-rolled token fetch: there is none in `client/src` today and this should not be the first |
+| **how it fetches** | from the same-origin server route, or via `platformAttachmentLoader` + a proxied `/cs`. **Not** a hand-rolled token fetch: there is none in `client/src` today and this should not be the first |
+| **tickets** | mint a fresh one per preview. Never reuse, and never spend the one the Download menu item is about to use |
 | **not through `useExternalCall`** | that seam is `ConnectorLocator → getServerConnector().fetchData()` with a `JsonRpc2Request` payload — JSON-RPC framing, wrong for a binary body, and a second way of attaching a token for no gain |
 | **object URL lifetime** | created on load, **revoked on unmount and on `attachmentId` change**. A 175 KB invoice leaked per Document view is a leak nobody notices until a long session |
 | **states** | loading, rendered, and refused. Refused shows the filename and a download link — the behaviour we have today — because a preview that fails must degrade to the thing it replaced |
@@ -129,6 +148,8 @@ it, because it is the difference between a component and a platform customisatio
 | **Render with `pdfjs` in the client** | rebuilds a viewer the browser already ships, adds a canvas dependency to the client, and the first thing anyone would ask of it is paging and zoom, which are free the other way |
 | **Server-side rendering to PNG** | a converter in the server, an image per page to store or cache, and a new failure mode — for something the client can do with no request at all beyond fetching the file |
 | **A thumbnail via A12's thumbnail mechanism** | `thumbnail.preview.enabled=true` is set and produces thumbnails for images. A one-page thumbnail of an invoice is not readable, which is the requirement |
+| **`<iframe src={location}>` directly** | measured: the frame stays blank and the browser downloads the file, because `Content-Disposition` is `attachment` and the query parameters that would change it are ignored |
+| **Making `/cs/download` serve `inline`** | it is the platform's endpoint and its header is the platform's decision. Changing it would alter what every download in the application does, to serve a preview |
 | **Open in a new tab** | already effectively what downloading does, and it is the context switch this change exists to remove |
 | **Show `extractedText` instead** | already on the form, and it is *not the document* — for a scan it is empty, and for the Widerrufsbelehrung it is four thousand characters of boilerplate. The point is to see the page |
 

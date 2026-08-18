@@ -14,38 +14,57 @@ Step 1 can change what this change *is*. Nothing else should be started until it
   restart, without asking.
 - Test-first, as everywhere else here: the component's three states get tests before the component.
 
-## 1. Settle how the bytes are fetched — **in a real browser**
+## 1. Settle how the bytes are fetched — **DONE**, in a real browser
 
-The one step that can invalidate the design.
+Recorded here rather than deleted, because the answer is the change's main finding and the mistake in
+asking is worth keeping.
 
-- [ ] Drive the running application: log in, open the Document
-      `Document_DM/119f03d5-8281-4ec8-89ca-ea817d9e9ea4`
-      (*Fwd: Abschlagsrechnung RE0520 … — Abschlagsrechnung_RE0520_17.08.2026.pdf*)
-- [ ] Record **every** network request made while opening it and while interacting with the attachment
-      field. The browser's own request is the only reliable witness — it was for the upload route,
-      where the documentation was wrong
-- [ ] Try the download action. Capture method, URL, auth mechanism, status, content-type, size
-- [ ] Note what the field renders for a PDF today: icon, filename, thumbnail, any download affordance
-- [ ] Compare against an attachment **not** uploaded by our Runtime — create a scratch Document, upload
-      a small PNG through the UI, download it, then delete the scratch Document. If the browser's own
-      upload downloads and ours does not, the fault is in our upload
-- [ ] **Verify and record which world we are in:**
-  - **(a) the browser can download ours** → continue at step 2 as proposed
-  - **(b) it cannot** → this becomes a bug fix first. Go to step 1b, and tell the User: every
-    attachment the mail ingest has stored is unreachable from the application, which is a bigger fact
-    than a missing preview
+- [x] The download **works**. `LOAD_ATTACHMENT_URL` returns
+      `{location: ".../cs/download/<ticket>?filename=…"}`; a `GET` on it returns the PDF, 175362 bytes,
+      `PDF document, version 1.6`. `Logo.pdf` too. Runtime-uploaded attachments are fine and the mime
+      type was set correctly
+- [x] **The earlier "the platform is broken" diagnosis was wrong, and the fault was mine.** I tested
+      with a stale `attachmentId`/`docRef` — I had deleted and re-ingested those Documents myself
+      while fixing the date-format bug. Side by side against the live server, the stale pair reproduces
+      `error.attachment.notFound` and the current pair returns a location. `content-storage=db` is a
+      red herring: tickets are issued regardless of where bytes live
+- [x] The ticket is **single-use**: replay answers `error.content-store.ticket.unavailable`, two calls
+      mint two UUIDs, a `HEAD` spends one. `/cs/download/{id}` is unauthenticated on purpose — it is on
+      the UAA introspection whitelist, and the ticket is the capability
+- [x] What the field renders today: a ~225×170 box with a generic inline-SVG "PDF" wordmark, **no
+      thumbnail and no visible filename** (it is in the `title` attribute and a hidden-text span). The
+      only affordance is a `more_vert` button opening Replace / Download / Delete. Screenshots in
+      `tmp/attachment-field-pdf.png`, `tmp/attachment-menu.png`, `tmp/doc-form-full.png`
+- [x] **Four obstacles, all measured:** `Content-Disposition: attachment` is unconditional and defeats
+      `<iframe src>`; CORS blocks `fetch` from `:8081` to `:8082`, so the blob workaround fails as-is;
+      the ticket is single-use; and the response is chunked with no `Accept-Ranges`, so no incremental
+      loading. No `X-Frame-Options`, no CSP — framing is not the problem, the header is
 
-## 1b. Only in world (b) — restore downloading
+**So the change is not client-only.** Two things to weigh, in this order, before writing the component:
 
-- [ ] Establish whether `LOAD_ATTACHMENT_URL` can ever resolve under
-      `contentstore.storage.content-storage=db`, or whether it requires `cs`
-- [ ] **Do not change `content-storage` casually.** It decides where every existing attachment lives;
-      flipping it may orphan what is already stored. Establish what happens to existing rows *before*
-      proposing it, and say so explicitly
-- [ ] If the fault is instead in our upload — a missing field, a step the browser performs and we do
-      not — fix `runtime/src/a12/content.ts` and re-ingest the real mail to prove it
-- [ ] **Verify:** the download action works in the browser for a Runtime-uploaded attachment. That is
-      the gate; the preview is worthless without it
+- [ ] **Try proxying `/cs` through nginx** — one line in `compose/docker-compose.yml`, which is
+      currently `/api` and `/actuator` only. That makes the download same-origin and dissolves CORS.
+      **Inferred from the compose file, not tested — test it.** It does *not* fix the disposition
+      header, so a blob URL is still needed
+- [ ] **Otherwise: a same-origin authenticated route on the application server** that reads the
+      attachment and re-serves it `Content-Disposition: inline`. Prefer this shape over returning bytes
+      for a blob, because there is then no object-URL lifetime to get wrong
+- [ ] **Verify** whichever is chosen with a real PDF rendered in a real browser before building the
+      component around it. Note that the server is "a smart store — three hand-written Java classes";
+      adding a fourth deserves the paragraph in
+      [architecture.md](architecture.md#therefore-a-server-route-and-this-change-is-not-client-only)
+      about why this is not the thing ADR-0023 refused
+
+## 1c. Two platform-side observations, neither ours to fix
+
+- [ ] `aria-labelledby` on the attachment options button references
+      `a12-Attachment-f_attachment-content-visible-text`, which **does not exist in the DOM** — a
+      dangling ARIA reference, pre-existing and platform-side. Record it; do not patch the platform
+- [ ] Playwright's real `page.click()` does not reach this application's React handlers at all — no
+      network, no state change, no error. Synthetic `dispatchEvent(new MouseEvent("click", {bubbles: true}))`
+      works. Also `appsetup.ts` sets `deepLinking.onlyWelcomePage: true`, so the URL hash is inert and
+      navigation is click-only. **Both matter for writing the e2e in step 4** — and the first may
+      explain e2e flakiness elsewhere
 
 ## 2. The component, tests first
 
@@ -115,13 +134,16 @@ own data by a `Title` prefix, and since the letterbox, `Title` is **the subject 
 ## Sequencing
 
 ```
-1. browser: how do we get the bytes?
-   ├── (a) we can  ──────────────► 2. component ─► 3. in the form ─► 4. e2e ─► 6. docs ─► 7. close
-   └── (b) we cannot ─► 1b. fix downloading ─┘
-                        (may be an ADR, and affects every stored attachment)
+1. how do we get the bytes?  ── DONE: we can, but Content-Disposition and CORS defeat the obvious way
+        │
+        ├── try: proxy /cs through nginx (one compose line, untested) ─┐
+        └── or:  a same-origin inline route on the server ────────────┤
+                                                                      ▼
+                        2. component ─► 3. in the form ─► 4. e2e ─► 6. docs ─► 7. close
 
-5. the E2E-prefix delete hazard — independent, do it whichever world we are in
+5. the E2E-prefix delete hazard — independent, worth doing even if the preview is abandoned
 ```
 
-Step 1 is the only step that can tell us something we do not know. Everything after it is bounded
-work, and step 5 is worth doing even if the preview is abandoned.
+Step 1 is done and it moved the change: this is no longer client-only. The remaining decision is
+whether a compose line can replace a server route, and that is one experiment rather than a design
+argument.
