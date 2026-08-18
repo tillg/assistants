@@ -138,7 +138,9 @@ function pairIntoReceipts(entries: readonly TranscriptEntry[]): TranscriptItem[]
             // arguments beside call #2's result, and the successful call rendered as "no result".
             let result: TranscriptEntry | undefined;
             for (const later of entries.slice(index + 1)) {
-                if (later.kind === "tool-intent" && later.toolName === entry.toolName) break;
+                if (later.kind === "tool-intent" && later.toolName === entry.toolName) {
+                    break;
+                }
                 if (later.kind === "tool-result" && later.toolName === entry.toolName && !claimed.has(later)) {
                     result = later;
                     break;
