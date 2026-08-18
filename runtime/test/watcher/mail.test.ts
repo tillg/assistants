@@ -649,9 +649,13 @@ describe("runMailIngest", () => {
             "<fwd-two@example.com>#1",
             "<fwd-two@example.com>#2",
         ]);
-        expect(created.map((document) => document.data.title)).toEqual([
-            "Fwd: zwei Rechnungen",
-            "Fwd: zwei Rechnungen",
+        // Distinguishable, and that is the point. These two titles were previously identical, which
+        // is how a real three-attachment invoice mail came to look like the same Document filed
+        // three times — the refs differed and a second poll created nothing, but a human identifies
+        // a Thing by its title.
+        expect(created.map((document) => document.data.title).sort()).toEqual([
+            "Fwd: zwei Rechnungen — erste.pdf",
+            "Fwd: zwei Rechnungen — zweite.pdf",
         ]);
         expect(new Set(created.map((document) => document.data.extractedText)).size).toBe(1);
         expect(mailbox.uids(PROCESSED)).toEqual([9]);

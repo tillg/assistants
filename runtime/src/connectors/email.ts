@@ -179,7 +179,20 @@ export async function parseMessage(
                   },
               ]
             : kept.map((attachment) => ({
-                  title: subject || attachment.filename,
+                  // The filename joins the title as soon as one message becomes more than one
+                  // Document, because otherwise they arrive indistinguishable.
+                  //
+                  // Measured: a real builder's invoice carried three PDFs — the invoice, the
+                  // sender's letterhead logo and a Widerrufsbelehrung — and produced three Documents
+                  // all titled "Fwd: Abschlagsrechnung RE0520 von A.H-Bau". In the overview that
+                  // reads as the same thing filed three times, and the User's first conclusion was
+                  // that deduplication was broken. It was not: the refs differ and a second poll
+                  // creates nothing. Only the *title* collided, and a title is what a human
+                  // identifies a Thing by.
+                  //
+                  // A single attachment keeps the bare subject: there is nothing to tell it apart
+                  // from, and the subject is the more useful of the two.
+                  title: titleFor(subject, attachment.filename, kept.length),
                   receivedAt,
                   externalRef: `${messageId}#${attachment.part}`,
                   extractedText,
@@ -214,6 +227,18 @@ function synthesiseMessageId(uid: number, origin: MessageOrigin | undefined): st
 function refToken(value: string): string {
     const token = value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-");
     return token.length > 0 ? token : "unknown";
+}
+
+/**
+ * What a human will identify this Document by in a list of them.
+ *
+ * One attachment: the subject, which is what the mail is about. Several: the subject *and* the
+ * filename, because three Documents sharing one title are indistinguishable in an overview however
+ * different their contents are. No subject at all: the filename carries it alone.
+ */
+function titleFor(subject: string, filename: string, keptCount: number): string {
+    if (subject === "") return filename || NO_SUBJECT;
+    return keptCount > 1 ? `${subject} — ${filename}` : subject;
 }
 
 interface KeptAttachment {
