@@ -550,6 +550,44 @@ describe("result delivery (scan 5)", () => {
     });
 });
 
+describe("the woken scan (scan 3)", () => {
+    it("wakes a due Conversation buried behind 100 not-yet-due sleepers", async () => {
+        // BUG-02: scanWoken read one unordered window of 100 with no `wakeAt <= now` bound, then
+        // skipped the not-yet-due rows in memory. A page of future sleepers meant every due
+        // Conversation past position 100 was never fetched and missed its deadline for ever. The
+        // query is now bounded to due rows and ordered earliest-first.
+        const harness = buildHarness([{ text: "carried on", finishReason: "answered" }]);
+        const t0 = Date.now() - 3_600_000;
+        await seedState(harness, nowIso(new Date(t0)));
+        await harness.seedAssistant({ key: "sleeper", triggers: [] });
+
+        for (let i = 0; i < 100; i += 1) {
+            await harness.things.create(SPECS.Conversation_DM, {
+                assistantKey: "sleeper",
+                status: "waiting",
+                waitingFor: "user",
+                wakeAt: nowIso(new Date(Date.now() + 3_600_000 + i * 1_000)),
+                createdAt: nowIso(new Date(t0 + i * 1_000)),
+                idempotencyKey: `future-sleeper-${i}`,
+            });
+        }
+        const due = await harness.things.create(SPECS.Conversation_DM, {
+            assistantKey: "sleeper",
+            status: "waiting",
+            waitingFor: "user",
+            wakeAt: nowIso(new Date(Date.now() - 60_000)),
+            createdAt: nowIso(new Date(t0 + 500_000)),
+            entries: [{ seq: 1, at: nowIso(), role: "user", kind: "prompt", text: "wake me" }],
+            idempotencyKey: "due-sleeper",
+        });
+
+        await harness.watcher.scan();
+
+        const after = await harness.conversation(due.docRef);
+        expect(after.data.wakeAt ?? "", "the due Conversation was woken past the future sleepers").toBe("");
+    });
+});
+
 describe("the RuntimeState the scan writes back", () => {
     it("does not undo a pause issued while the scan was in flight", async () => {
         // The global kill switch. `scan()` reads the state at the top of a pass that takes seconds

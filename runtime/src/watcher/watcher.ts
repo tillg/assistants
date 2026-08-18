@@ -16,6 +16,7 @@ import { log, describeError } from "../log.js";
 import {
     and,
     byCreatedAt,
+    byField,
     eq,
     nowIso,
     not,
@@ -813,13 +814,25 @@ export class Watcher {
     // ---------------------------------------------------------------- scan 3: wakeAt
 
     private async scanWoken(handled: Set<string>): Promise<number> {
+        const spec = SPECS.Conversation_DM;
+        // Bounded to the rows that are actually *due* (`wakeAt <= now`) and ordered earliest-first,
+        // so the 100-cap holds due wake-ups rather than an arbitrary window of sleeping ones. Without
+        // the bound, a page of not-yet-due rows was skipped whole while genuinely-due Conversations
+        // past position 100 were never fetched and missed their deadline for ever.
+        const nowStamp = nowIso();
         const waiting = await this.deps.things.search<Conversation>(
-            SPECS.Conversation_DM,
+            spec,
             and(
-                eq(fieldPath(SPECS.Conversation_DM, "status"), "waiting"),
-                not(unset(fieldPath(SPECS.Conversation_DM, "wakeAt"))),
+                eq(fieldPath(spec, "status"), "waiting"),
+                not(unset(fieldPath(spec, "wakeAt"))),
+                {
+                    operator: "date_range",
+                    field: fieldPath(spec, "wakeAt"),
+                    to: nowStamp,
+                } as Constraint,
             ),
             100,
+            byField(spec, "wakeAt", "ASC"),
         );
         const now = Date.now();
         let continued = 0;
@@ -849,13 +862,25 @@ export class Watcher {
     // ---------------------------------------------------------------- scan 4: expired leases
 
     private async scanExpiredLeases(handled: Set<string>): Promise<number> {
+        const spec = SPECS.Conversation_DM;
+        // Bounded to the leases that have actually *expired* (`leaseUntil <= now`) and ordered
+        // oldest-first, so the 100-cap is expired leases rather than an arbitrary window of running
+        // Conversations — an unordered window could leave a genuinely-stuck Conversation past
+        // position 100 unrecovered indefinitely.
+        const nowStamp = nowIso();
         const running = await this.deps.things.search<Conversation>(
-            SPECS.Conversation_DM,
+            spec,
             and(
-                eq(fieldPath(SPECS.Conversation_DM, "status"), "running"),
-                not(unset(fieldPath(SPECS.Conversation_DM, "leaseUntil"))),
+                eq(fieldPath(spec, "status"), "running"),
+                not(unset(fieldPath(spec, "leaseUntil"))),
+                {
+                    operator: "date_range",
+                    field: fieldPath(spec, "leaseUntil"),
+                    to: nowStamp,
+                } as Constraint,
             ),
             100,
+            byField(spec, "leaseUntil", "ASC"),
         );
         const now = Date.now();
         let recovered = 0;

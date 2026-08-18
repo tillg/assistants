@@ -321,9 +321,17 @@ export const eq = (field: string, value: string | number | boolean): Constraint 
  * not `order`). Verified against the live store on all eight Models, including alongside
  * `exact_match` and `date_range`, and on a second page.
  */
-export const byCreatedAt = (spec: ModelSpec, direction: "ASC" | "DESC"): QuerySpec["sort"] => [
+export const byCreatedAt = (spec: ModelSpec, direction: "ASC" | "DESC"): QuerySpec["sort"] =>
+    byField(spec, "createdAt", direction);
+
+/**
+ * Order by any one field, with the same three required knobs {@link byCreatedAt} documents. Used by
+ * the time-based scans to sort on `wakeAt` / `leaseUntil` so a capped page is the *due* rows, not an
+ * arbitrary window of the sleeping ones.
+ */
+export const byField = (spec: ModelSpec, field: string, direction: "ASC" | "DESC"): QuerySpec["sort"] => [
     {
-        field: path(spec, "createdAt"),
+        field: path(spec, field),
         direction,
         nullHandling: "NULLS_LAST",
         ignoreCase: false,
