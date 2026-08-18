@@ -79,7 +79,12 @@ describe("AssistantsTile", () => {
         // BUG-12: one nameless row is filtered out of a two-row page (total 2, pageCount 2), so only
         // one name shows — but there is nothing more to reveal. Computing "more" from the shown count
         // said "and 1 more" that no next screen could show.
-        renderTile({ ...TWO, assistants: [{ key: "accountant", name: "Accountant", enabled: true }], total: 2, pageCount: 2 });
+        renderTile({
+            ...TWO,
+            assistants: [{ key: "accountant", name: "Accountant", enabled: true }],
+            total: 2,
+            pageCount: 2
+        });
 
         expect(screen.queryByTestId("tile-assistants-more")).not.toBeInTheDocument();
     });

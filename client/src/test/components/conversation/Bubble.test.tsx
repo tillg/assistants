@@ -94,7 +94,9 @@ describe("Bubble", () => {
     it("keeps the token footnote behind the collapse, with the text it belongs to", () => {
         // BUG-13: the footnote sat outside the (open || !collapsible) guard, so a collapsed entry
         // carrying tokens leaked its cost while its body stayed hidden — label-and-nothing-else broken.
-        renderBubble(entry({ kind: "system", role: "system", text: SYSTEM_PROMPT, promptTokens: 120, completionTokens: 34 }));
+        renderBubble(
+            entry({ kind: "system", role: "system", text: SYSTEM_PROMPT, promptTokens: 120, completionTokens: 34 })
+        );
 
         expect(screen.queryByTestId("transcript-cost-footnote")).toBeNull();
 
