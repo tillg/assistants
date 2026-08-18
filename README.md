@@ -816,6 +816,21 @@ silently returns nothing.
 
 This is one running vertical slice, not a finished system. What is honestly missing:
 
+- **TODO — the model must be able to call tools, and the shipped local one cannot.** Every Assistant
+  in this system works by asking for a tool and being given the result, so a model that cannot emit a
+  structured tool call cannot do anything here at all. `Qwen3-Coder-30B-A3B-Instruct-4bit`, served
+  locally, **writes its tool calls as prose in the response body**, so every Receptionist and
+  Accountant Turn fails all three attempts and the Conversation escalates. The symptom is not obvious
+  from the outside: the Dashboard shows Conversations in flight and none running, and the
+  agent-dependent end-to-end specs fail without saying why.
+
+  Nothing in this repository is wrong when that happens, and no amount of prompt work fixes it —
+  it is a capability of the model. Until a tool-calling model is configured in `llm.json`, the
+  deterministic half of the system works fully (post arrives, Documents are created, text is
+  extracted) and the judging half does not. `scripted` is not a substitute: it replays a fixture, so
+  it proves the wiring and not the reasoning.
+
+
 - **Authentication is real, its configuration is development-grade.** The mechanism is the one A12
   intends — Keycloak as the identity provider, OIDC, no password checked anywhere else. No
   credential is committed any more ([D-023](DECISIONS.md)), but what is *generated* still is not
