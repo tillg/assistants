@@ -43,6 +43,13 @@ export type Assistants =
           readonly assistants: readonly AssistantSummary[];
           /** `fullSize` — may exceed `assistants.length`, and the Tile says so when it does. */
           readonly total: number;
+          /**
+           * How many rows this page actually held, BEFORE the no-name filter. The Tile's "and N more"
+           * is `total - pageCount`, not `total - assistants.length`: a row dropped by the filter is
+           * still on the page, so counting it as "more" would promise rows the next screen cannot
+           * show.
+           */
+          readonly pageCount: number;
           readonly readAt: Date;
       }
     | { readonly state: "error" };
@@ -94,14 +101,17 @@ function summarise(entry: unknown): AssistantSummary | undefined {
     return { key, name, enabled: body?.["Enabled"] === true };
 }
 
-async function readAssistants(): Promise<{ assistants: AssistantSummary[]; total: number } | undefined> {
+async function readAssistants(): Promise<
+    { assistants: AssistantSummary[]; total: number; pageCount: number } | undefined
+> {
     try {
         const [response] = await Dispatcher.rpc(LANGUAGE, [REQUEST]);
         // `entries` is optional on the response type — a projection may return none at all.
         const entries: unknown[] = response.result.entries ?? [];
         return {
             assistants: entries.map(summarise).filter((assistant): assistant is AssistantSummary => !!assistant),
-            total: response.result.fullSize
+            total: response.result.fullSize,
+            pageCount: entries.length
         };
     } catch (error) {
         // Fails soft, like every read on this Dashboard: the Tile says so and the other three stand.

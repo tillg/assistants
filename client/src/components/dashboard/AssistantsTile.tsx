@@ -31,7 +31,9 @@ export function AssistantsTile() {
     const dispatch = useDispatch();
     const assistants = useAssistants();
 
-    const hidden = assistants.state === "ready" ? assistants.total - assistants.assistants.length : 0;
+    // Rows beyond this page, not rows the filter dropped from it: `total - pageCount`, so an entry
+    // with no name (present on the page, filtered from the list) never inflates "and N more".
+    const hidden = assistants.state === "ready" ? Math.max(0, assistants.total - assistants.pageCount) : 0;
 
     return (
         <DashboardTile

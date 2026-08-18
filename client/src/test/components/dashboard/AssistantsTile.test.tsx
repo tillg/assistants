@@ -22,6 +22,7 @@ const TWO: Assistants = {
         { key: "receptionist", name: "Receptionist", enabled: false }
     ],
     total: 2,
+    pageCount: 2,
     readAt: new Date("2026-08-17T14:32:07")
 };
 
@@ -70,6 +71,15 @@ describe("AssistantsTile", () => {
 
     it("says nothing of the sort when the page is the whole set", () => {
         renderTile(TWO);
+
+        expect(screen.queryByTestId("tile-assistants-more")).not.toBeInTheDocument();
+    });
+
+    it("does not invent 'more' when a page entry was dropped by the no-name filter", () => {
+        // BUG-12: one nameless row is filtered out of a two-row page (total 2, pageCount 2), so only
+        // one name shows — but there is nothing more to reveal. Computing "more" from the shown count
+        // said "and 1 more" that no next screen could show.
+        renderTile({ ...TWO, assistants: [{ key: "accountant", name: "Accountant", enabled: true }], total: 2, pageCount: 2 });
 
         expect(screen.queryByTestId("tile-assistants-more")).not.toBeInTheDocument();
     });

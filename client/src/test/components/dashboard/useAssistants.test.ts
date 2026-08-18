@@ -165,6 +165,9 @@ describe("useAssistants", () => {
 
         await waitFor(() => expect(result.current.state).toBe("ready"));
         expect(result.current.state === "ready" && result.current.assistants).toHaveLength(1);
+        // BUG-12: pageCount is the pre-filter page length, so the Tile's "and N more" counts rows
+        // beyond the page, not rows the filter dropped from it.
+        expect(result.current.state === "ready" && result.current.pageCount).toBe(2);
     });
 
     it("reads once on mount and does not poll", async () => {
