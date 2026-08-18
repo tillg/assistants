@@ -61,13 +61,18 @@ const leftover = text
     .split("\n")
     .filter((line) => !line.trimStart().startsWith("#") && line.includes(PLACEHOLDER));
 
+// Validate BEFORE writing. Writing a poisoned .env first and exiting 1 afterwards left the broken
+// file on disk, and the next run's "already exists — leaving it alone" guard then made it permanent
+// until a manual `rm .env`. `render.mjs` writes nothing until it all substitutes cleanly; so does this.
+if (leftover.length > 0) {
+    // A CHANGE_ME_GENERATED that did not match the `NAME='...'` shape above — a malformed example.
+    console.error(`.env.example still contains ${PLACEHOLDER} on:`);
+    for (const line of leftover) console.error(`  ${line}`);
+    console.error("\nRefusing to write a poisoned .env. Fix .env.example and re-run.");
+    process.exit(1);
+}
+
 writeFileSync(ENV_FILE, text);
 
 console.log(`wrote .env from .env.example, generating ${generated.length} credentials:`);
 for (const name of generated) console.log(`  ${name}`);
-if (leftover.length > 0) {
-    // A CHANGE_ME_GENERATED that did not match the `NAME='...'` shape above — a malformed example.
-    console.error(`\n.env still contains ${PLACEHOLDER} on:`);
-    for (const line of leftover) console.error(`  ${line}`);
-    process.exit(1);
-}
