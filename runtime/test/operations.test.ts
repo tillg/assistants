@@ -463,6 +463,25 @@ describe("thingstore.search", () => {
     });
 });
 
+describe("ui.askUser", () => {
+    it("refuses a kind outside its enum, including the connectors' perform surface", async () => {
+        // BUG-05: the enum was cast, not enforced, and raiseQuestion also accepts "perform" — the
+        // surface reserved for granted manual connectors. An Assistant could mint one just by naming
+        // the kind.
+        const harness = buildHarness([]);
+        for (const kind of ["perform", "nonsense"]) {
+            const outcome = await call(harness, "ui.askUser", { kind, prompt: "please" });
+            expect(outcome.kind, `kind ${kind}`).toBe("error");
+        }
+    });
+
+    it("still raises an ordinary confirm question", async () => {
+        const harness = buildHarness([]);
+        const outcome = await call(harness, "ui.askUser", { kind: "confirm", prompt: "ok?" });
+        expect(outcome.kind).toBe("pending");
+    });
+});
+
 /**
  * The two allow-lists, which are the whole of what an Assistant may reach through the ThingStore.
  *

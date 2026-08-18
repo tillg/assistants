@@ -655,7 +655,14 @@ export function buildOperations(deps: OperationDeps): OperationImplementation[] 
             },
         },
         async execute(args, context): Promise<OperationOutcome> {
-            const kind = String(args["kind"] ?? "free-text") as "free-text" | "confirm" | "choice";
+            const kind = String(args["kind"] ?? "free-text");
+            // The schema's enum is not enforced by the runtime, and `raiseQuestion` also accepts
+            // "perform" — the surface reserved for granted manual connectors (bank.sendMoney, …). An
+            // Assistant granted none of those could otherwise mint a "please do this by hand" question
+            // just by naming the kind, so the enum is checked here.
+            if (kind !== "free-text" && kind !== "confirm" && kind !== "choice") {
+                return { kind: "error", message: `Unknown question kind "${kind}". Use free-text, confirm or choice.` };
+            }
             const prompt = String(args["prompt"] ?? "").trim();
             if (!prompt) return { kind: "error", message: "A question needs a prompt." };
             const questionId = await deps.raiseQuestion({
