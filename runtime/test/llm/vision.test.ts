@@ -24,6 +24,7 @@ const PROFILE: LlmProfile = {
     baseUrl: "https://api.anthropic.com",
     model: "claude-opus-5",
     temperature: undefined,
+    systemSuffix: undefined,
     scriptFile: "",
     apiKey: "",
     apiKeyVariable: "ANTHROPIC_VISION_KEY",

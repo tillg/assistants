@@ -63,6 +63,20 @@ export interface LlmProfile {
     readonly model: string;
     /** Sent to the provider only when the profile sets it, so its own default stands otherwise. */
     readonly temperature: number | undefined;
+    /**
+     * A sentence about *this model* appended to the system prompt of every Turn taken on this
+     * profile — the place a model's quirks are said out loud.
+     *
+     * It exists because a local, quantized model can need an instruction no hosted one should ever
+     * be given: `Qwen3-Coder-30B-A3B-Instruct-4bit` drops the `<tool_call>` wrapper its own template
+     * requires, so its calls arrive as text and nothing is invoked, and one imperative sentence
+     * ("you MUST wrap the call in <tool_call> and </tool_call> tags") fixes it — measured, three
+     * prompts out of three. Told the same thing, a model that speaks JSON natively would have been
+     * taught to write XML it otherwise never writes. So it belongs to the profile, beside the
+     * endpoint and the model it is true of, and not to the Assistant, whose instruction is about
+     * the household rather than about anybody's tokenizer.
+     */
+    readonly systemSuffix: string | undefined;
     /** Only meaningful for `scripted`: where the recorded responses are read from. */
     readonly scriptFile: string;
     readonly apiKey: string;
@@ -75,6 +89,7 @@ interface RawProfile {
     baseUrl?: unknown;
     model?: unknown;
     temperature?: unknown;
+    systemSuffix?: unknown;
     requiresKey?: unknown;
     scriptFile?: unknown;
 }
@@ -219,6 +234,19 @@ function resolveProfile(
         temperature = raw.temperature;
     }
 
+    let systemSuffix: string | undefined;
+    if (raw.systemSuffix !== undefined && raw.systemSuffix !== null) {
+        if (typeof raw.systemSuffix !== "string" || raw.systemSuffix.trim() === "") {
+            throw new ConfigurationError(
+                `The LLM profile "${active}" in ${where} has a "systemSuffix" that is not a ` +
+                    `sentence: ${JSON.stringify(raw.systemSuffix)}\n\n` +
+                    `  It is text appended to the system prompt of every Turn on this profile. ` +
+                    `Remove the key rather than setting it empty.`,
+            );
+        }
+        systemSuffix = raw.systemSuffix.trim();
+    }
+
     const apiKeyVariable = variableFor(active);
     // Uppercase is what `.env` uses throughout and what the documentation shows; the profile's own
     // spelling is accepted too, because that is the obvious thing to type after naming a profile.
@@ -232,7 +260,17 @@ function resolveProfile(
         );
     }
 
-    return { name: active, provider: name, baseUrl, model, temperature, scriptFile, apiKey, apiKeyVariable };
+    return {
+        name: active,
+        provider: name,
+        baseUrl,
+        model,
+        temperature,
+        systemSuffix,
+        scriptFile,
+        apiKey,
+        apiKeyVariable,
+    };
 }
 
 /**

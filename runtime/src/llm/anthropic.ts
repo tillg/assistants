@@ -24,13 +24,15 @@ export class AnthropicProvider implements LlmProvider {
         private readonly baseUrl: string,
         private readonly apiKey: string,
         private readonly fetchImpl: typeof fetch = fetch,
+        /** The profile's, appended to the system prompt — see `withSystemSuffix` in `openai.ts`. */
+        private readonly systemSuffix?: string,
     ) {}
 
     async complete(request: LlmRequest): Promise<LlmResponse> {
-        const system = request.messages
-            .filter((message) => message.role === "system")
-            .map((message) => message.content)
-            .join("\n\n");
+        const system = [
+            ...request.messages.filter((message) => message.role === "system").map((message) => message.content),
+            ...(this.systemSuffix ? [this.systemSuffix] : []),
+        ].join("\n\n");
 
         const messages = request.messages
             .filter((message) => message.role !== "system")

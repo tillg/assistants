@@ -17,6 +17,13 @@
     "does want one, so `local_qwen` reads LOCAL_QWEN_KEY like any other profile), scriptFile",
     "(scripted only). `Assistant.LlmModel` overrides `model` for that one Assistant.",
     "",
+    "`systemSuffix` (optional) is a sentence about *this model* added to the system prompt of every",
+    "Turn taken on this profile — the place a model's quirks are said out loud, so the Assistant's",
+    "own instruction can stay about the household. `local_qwen` carries one because a 4-bit",
+    "Qwen3-Coder drops the `<tool_call>` wrapper its own template requires, so its calls arrive as",
+    "text and nothing is invoked; that one sentence fixes it. Do not put it on a hosted profile:",
+    "it names a markup format a model that speaks JSON natively should never be shown.",
+    "",
     "There is a second, optional switch: `vision`, a sibling of `active`, naming the profile that",
     "`document.readScan` sends a scanned PDF to. Leave it out — as this file does — and there is no",
     "vision model: reading a scan is unavailable and an Assistant that meets a PDF with no text",
@@ -66,7 +73,8 @@
       "provider": "openai",
       "baseUrl": "http://host.docker.internal:8000/v1",
       "model": "Qwen3-Coder-30B-A3B-Instruct-4bit",
-      "temperature": 0
+      "temperature": 0,
+      "systemSuffix": "When you call a function you MUST wrap the call in <tool_call> and </tool_call> tags, exactly as the format instructions say."
     }
   }
 }

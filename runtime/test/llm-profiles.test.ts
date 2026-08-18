@@ -27,6 +27,7 @@ const PROFILES = {
             baseUrl: "http://host.docker.internal:8000/v1",
             model: "qwen3-coder-30b",
             temperature: 0,
+            systemSuffix: "Wrap every call in <tool_call> tags.",
         },
     },
 };
@@ -62,6 +63,24 @@ describe("LLM profiles", () => {
         const withTemperature = { ...PROFILES, active: "local_qwen" };
         expect(loadLlmProfile(fileWith(withTemperature), { LOCAL_QWEN_KEY: "x" }).temperature).toBe(0);
         expect(loadLlmProfile(fileWith(PROFILES), { AZURE_GPT_KEY: "x" }).temperature).toBeUndefined();
+    });
+
+    it("carries the systemSuffix only when the profile sets one", () => {
+        // It is the place a model's own quirk is said out loud — a 4-bit Qwen needs to be told to
+        // wrap its tool calls, and a hosted model must never be told any such thing.
+        const local = loadLlmProfile(fileWith({ ...PROFILES, active: "local_qwen" }), { LOCAL_QWEN_KEY: "x" });
+        expect(local.systemSuffix).toBe("Wrap every call in <tool_call> tags.");
+        expect(loadLlmProfile(fileWith(PROFILES), { AZURE_GPT_KEY: "x" }).systemSuffix).toBeUndefined();
+    });
+
+    it("refuses a systemSuffix that is not a sentence, rather than appending nothing", () => {
+        const broken = {
+            ...PROFILES,
+            active: "local_qwen",
+            profiles: { ...PROFILES.profiles, local_qwen: { ...PROFILES.profiles.local_qwen, systemSuffix: "  " } },
+        };
+
+        expect(() => loadLlmProfile(fileWith(broken), { LOCAL_QWEN_KEY: "x" })).toThrow(/not a sentence/);
     });
 
     it("asks a scripted profile for no key at all, which is what keeps the default stack free", () => {
