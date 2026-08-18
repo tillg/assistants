@@ -455,3 +455,122 @@ This one was found by *running*, and it is the only one that was a mistake in a 
 the original. A change that is right in principle can still be wrong in a way only the stack can
 tell you — and the two URLs that had to stay `localhost` are exactly the two whose value is baked
 into something outside the file being edited.
+
+---
+
+## Fourth pass — the first real email
+
+The User created the Gmail label, forwarded a real builder's invoice, and asked why it was not in the
+system. It was not in the system because nothing had ever been stored. Three defects, found in the
+order a real message meets them.
+
+### B-25 — every real email failed to store · REPRODUCED · FIXED
+
+`Document_DM`'s `ReceivedAt` is a `DateTimeType` formatted `yyyy-MM-dd'T'HH:mm:ss` — **no
+milliseconds, no zone**. The Connector reports an ordinary ISO 8601 instant, which has both, so the
+store refused every Document with *"the given value is not valid for type date representation"* and the
+message went to the failed folder.
+
+The normalisation already existed in the file. It was applied only to the fallback, never to the value
+used in practice.
+
+**How it survived 383 green tests.** The assertion covering that field read:
+
+```ts
+expect(document?.data.receivedAt).toBe("2026-01-13T17:02:11.000Z");
+```
+
+— the exact value no A12 server accepts. Written from what the code *did* rather than from what the
+Model *declares*, and the in-memory store the unit tests write through does not validate formats. The
+test now also pins the shape with a regex, so the format cannot drift back.
+
+Note what the failure handling did while this was broken: counted the message failed, moved it to
+`assistants/failed`, carried on. That part behaved exactly as designed.
+
+### B-26 — the covering note was hiding the invoice · REPRODUCED · FIXED · **my error**
+
+Reading the attachment's text layer happened only when the mail body was empty. The stated reasoning
+was that a forward's covering note is context the Receptionist wants and must not be overwritten. The
+first half is right; the conclusion was wrong. **Almost every forward has a covering note**, so in
+practice the invoice was never read at all.
+
+Measured on the real message: three attachments, a 568-character note, and a Document carrying
+*"Begin forwarded message: From: Andreas Herescu…"* and not one figure from the invoice. The
+Receptionist could not have extracted an amount from it, which is the entire purpose of the exercise.
+
+This one is mine rather than an agent's: it is what the brief I wrote asked for, in those words. The
+test that covered it asserted `not.toContain("Rechnungsnummer")` — it *required* the invoice to be
+absent — so the specification and its test agreed with each other and both were wrong.
+
+Now both, joined, with the attachment's text under a `--- filename ---` heading. The same invoice went
+from 568 characters to 1475, and `Rechnungsnr. RE0520` with `Gesamtbetrag 3.570,00` is in the field the
+Accountant reads. The heading is not decoration: three PDFs in one message would otherwise leave the
+model guessing which text belonged to which file.
+
+### B-27 — three attachments read as three copies · FIXED
+
+The User's reasonable conclusion from the overview was *"it's in three times, we need a dedupe"*. The
+dedupe was working: three different files, three different refs, and a second poll against the live
+store created nothing and skipped three. **Only the title collided** — all three read
+`Fwd: Abschlagsrechnung RE0520 von A.H-Bau` — and a title is what a human identifies a Thing by.
+
+So the data was right and the presentation lied. The filename now joins the title as soon as one
+message becomes more than one Document; a single attachment keeps the bare subject. And again the test
+had pinned the confusion in place, asserting both titles were *identical*.
+
+Worth separating from a real gap, which remains open: the dedupe is keyed on `Message-ID` plus MIME
+part, so **forwarding the same invoice twice creates a second set of Documents** — Gmail mints a new
+`Message-ID`. Catching that means comparing content rather than identifiers, which is judgement, and
+belongs where the other judgement went.
+
+### B-28 — the e2e cleanup deletes Documents by a title prefix, and titles are now untrusted · OPEN
+
+Found by the parallel session. `e2e/tests/base/0-clean.setup.ts` deletes `Document_DM` Things whose
+`Title` starts with `E2E`, and it runs as a setup dependency of essentially every e2e run — it reported
+deleting a leftover Document during last night's runs, so it is live.
+
+Since the letterbox, `Title` is **the subject line of an email**. A forwarded mail whose subject begins
+`E2E` would be silently deleted by the next test run. Untrusted input meeting a delete.
+
+**Left open**, with a recommendation rather than a patch: scope the cleanup by something the ingest
+cannot produce — `Source` is `email` for every ingested Document and `E2E` for none — rather than
+constraining what subject lines the household is allowed to forward. A cleanup should not delete Things
+it did not create, and that is true regardless of what any subject line says. It is in the preview
+change's plan as step 5, because it wants doing whichever way that change goes.
+
+## Corrections to this log
+
+Two claims made in it were wrong, and both were corrected by running something rather than reasoning
+about it. Recording them because the pattern is the most useful thing here.
+
+### C-01 — "the platform's attachment download is broken" · WRONG
+
+Asserted, with a measurement to back it: `LOAD_ATTACHMENT_URL` answering *"No URL from attachmentId …
+could be found"*, blamed on `contentstore.storage.content-storage=db`, and concluded that every
+attachment the mail ingest had stored was unreachable from the web application.
+
+All false. The `attachmentId` and `docRef` were **stale** — I had deleted and re-ingested those
+Documents myself an hour earlier while fixing B-25, then diagnosed a platform fault from identifiers
+that no longer existed. Side by side against the live server, the stale pair reproduces the error and
+the current pair returns a location. `content-storage=db` is a red herring; the content store issues
+tickets regardless of where bytes are persisted.
+
+The measurement was real. The thing measured was not what I thought it was.
+
+### C-02 — "the single-use download ticket is an obstacle" · WRONG
+
+Listed as one of four obstacles to a preview. It is not an obstacle; it is a sound design, and the
+User's pushback — *"if I upload a doc, I must get a handle to download it, no?"* — was the correct
+reading.
+
+You do get a handle: `attachment_id`, on the Document, durable and reusable without limit. The ticket
+is a one-shot redemption of it. Verified with the same handle throughout: two mints give two different
+URLs, each fetches the full 175362 bytes, and replaying a spent one answers 404.
+
+And the reason is good. `/cs/download/{id}` is unauthenticated by design, so a permanent URL for a
+household invoice would leak for ever — browser history, proxy logs, a `Referer` header, a shared
+screenshot. Single-use makes a leaked URL worthless within moments, and the authentication happens at
+the mint step against the User's own token.
+
+Of the four obstacles that draft listed, only two block anything: `Content-Disposition: attachment` and
+CORS.
