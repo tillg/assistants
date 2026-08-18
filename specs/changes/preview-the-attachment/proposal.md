@@ -89,14 +89,14 @@ are persisted.
 
 ## What actually makes this hard
 
-Not the fetching. Four obstacles, every one measured in the browser rather than reasoned about:
+Not the fetching, and not the ticket. **Two** real obstacles, both measured in the browser rather than reasoned about — plus two constraints that read like obstacles and are not:
 
 | | Finding |
 |---|---|
 | **`Content-Disposition: attachment`, unconditionally** | a live `<iframe src={location}>` stayed blank and Chrome **downloaded** the file. `?disposition=inline` is ignored. This alone rules out the obvious implementation |
 | **CORS blocks reading the bytes into JS** | `fetch(location)` from `http://localhost:8081` fails — no `Access-Control-Allow-Origin`. The frontend's nginx proxies `/api` and `/actuator` only, so `/cs` is a different origin. So the blob-URL workaround does not work either |
-| **The ticket is single-use** | a preview must mint its own, and must not spend the one the Download menu item is about to use. A *failed* CORS fetch still reaches the server and consumes it |
-| **No `Accept-Ranges`, no `Content-Length`** | the response is chunked, so incremental or range-based loading is impossible. Any reader gets one full read or nothing |
+| *(not a blocker)* the ticket is single-use | you keep a **durable handle** — `attachment_id`, on the Document, reusable for ever. The ticket is a one-shot redemption of it, and minting one costs a single JSON-RPC call. It is single-use precisely because `/cs/download` is unauthenticated: a permanent unauthenticated URL for a household invoice would leak for ever |
+| *(not a blocker)* no `Accept-Ranges`, no `Content-Length` | chunked, so no incremental or range-based read. Constrains *how*, not *whether* |
 
 **Consequence, and it changes the shape of the change: this is not client-only.** An inline preview
 needs a same-origin, authenticated endpoint on the application server that reads the attachment and

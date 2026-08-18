@@ -49,14 +49,39 @@ because the ticket carries the authority. The ticket is spent on first use: repl
 `error.content-store.ticket.unavailable`, two consecutive `LOAD_ATTACHMENT_URL` calls return two
 different UUIDs, and even a `HEAD` consumes one.
 
-### The four obstacles, and why the obvious implementation fails
+### You do get a durable handle — the ticket is not it
+
+Worth stating plainly, because an earlier draft of this document listed the ticket as an *obstacle* and
+that was a misreading. There are **two** levels, and only one of them is ephemeral:
+
+| | what it is | lifetime |
+|---|---|---|
+| **`attachment_id`** | the durable handle, stored on the Document's attachment group | for ever, and reusable without limit |
+| **the ticket** | a one-shot redemption of that handle for bytes | one `GET`, then gone |
+
+Measured, with the same `attachment_id` and `docRef` throughout: two `LOAD_ATTACHMENT_URL` calls mint
+**two different** ticket URLs; each fetches the full 175362 bytes with a `200`; and replaying a spent
+one answers `404`. So nothing is lost and nothing needs storing — the handle on the Document is
+permanent, and you exchange it for a fresh URL whenever you want the file.
+
+**And the reason is sound.** `/cs/download/{id}` is unauthenticated by design. A permanent
+unauthenticated URL for a household invoice would leak for ever — into browser history, proxy logs, a
+`Referer` header, a shared screenshot. Making it single-use means a leaked URL is worthless within
+moments. The authentication happens at the mint step, against the User's own token, and the ticket is a
+capability with a deliberately tiny blast radius.
+
+The practical cost to a preview is therefore **one extra JSON-RPC call per preview**, which is not an
+obstacle in any meaningful sense. The only real rule is *mint your own* — never reuse a ticket and
+never spend the one the Download menu item is about to use.
+
+### What actually blocks the obvious implementation — two things, not four
 
 | Obstacle | Evidence | Consequence |
 |---|---|---|
 | **`Content-Disposition: attachment`, always** | a live iframe pointed at a fresh ticket stayed blank and Chrome downloaded the file. `?disposition=inline&inline=true` is ignored | **`<iframe src={location}>` cannot work** |
 | **CORS** | `fetch(location)` from `http://localhost:8081` → *"No 'Access-Control-Allow-Origin' header is present"*. nginx proxies `/api` and `/actuator` only; `/cs` is another origin | **the blob-URL workaround cannot work either** |
-| **Single-use ticket** | verified by replay and by two consecutive mints | a preview must mint its own, and a *failed* fetch still spends one |
-| **No `Accept-Ranges`, no `Content-Length`** | chunked response | no incremental or range-based loading; one full read or nothing |
+| *(not a blocker)* single-use ticket | verified by replay and by two consecutive mints | mint one per preview; a *failed* fetch also spends one |
+| *(not a blocker)* no `Accept-Ranges`, no `Content-Length` | chunked response | constrains *how* it is read — one full read, no ranges — not whether |
 
 There is **no** `X-Frame-Options` and **no** CSP on the response — framing is not what is blocked. The
 disposition header is.
