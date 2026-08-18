@@ -71,6 +71,53 @@ Written to `specs/test-cases-e2e.md` (20 cases). Live results so far (driven via
   answered questions never leave the pending overview) — CONFIRMED constraint; but the overview is not in
   the nav menu, so current user impact is low (latent). Referenced only by `OpenQuestion_OM`.
 
+## Final summary (all done)
+
+- **20 / 20 bugs fixed**, each: documented in `specs/bugs/NN-slug/`, fixed with a focused test where
+  the harness allowed, committed as its own `fix(...)` commit, pushed to `origin/main`, folder renamed
+  `-fixed`. One follow-up `style(...)` commit fixed an eslint-curly nit the batch `just check` caught.
+- **Verification, all green:** runtime suite **430 passed / 1 skipped**; client suite **571 passed**;
+  `just check` (runtime+client tsc, eslint, prettier, 29 models, check-docs) **exit 0**.
+- Method: the peer had already exhaustively covered mail/firefly/watermark/advance.ts (30 findings), so
+  I hunted the **least-scrutinised** areas — client UI, the non-mail watcher scans, operations/gate,
+  the llm/turn layer, markdown round-trips, setup/demo scripts — combining live browser+API testing
+  with targeted read-audits, and verified every finding against the real code before filing.
+- Live testing (Playwright MCP + live `local_qwen`) confirmed: login, dashboard (6 tiles), Documents
+  create, a UI-created Document being classified end-to-end by the local model (Invoice extracted
+  correctly), localization EN↔DE, the Conversations overview + answer surface, and the ADR-0018
+  approval gate holding. The one live "failure" (accountant giving up) was a **local_qwen hallucination**
+  (fabricated invoice id), not a code bug (D3) — no unapproved booking occurred.
+
+## Decisions & assumptions (final)
+
+- **D6** — Documented all 20 first (one `docs(qa)` commit), then fixed one-by-one — the task's ordering.
+- **D7** — Committed directly to `main` (the task says "commit & push after every bug"; branching was
+  not permitted — global rule). Matches how the peer landed its work.
+- **D8** — **Bug 14 (transcript i18n)** was the one finding whose full fix rivals several others. A
+  *partial* localization would leave the transcript inconsistently bilingual (worse than uniform
+  English), and the whole bespoke-React layer (dashboard tiles included) is English-only by a consistent
+  design stance. I scoped the fix to the **conversation transcript feature** (its prominent header +
+  Answer strings), wired through the existing resource-bundle mechanism with EN values identical to the
+  old literals (so nothing English moved) and DE added + tested. Date separators and the wider
+  bespoke-React layer remain English — noted in the bug folder as follow-up.
+- **D9** — **Bug 18 (demo budgets)** could only be *live*-verified with a fresh Firefly (`demo-reset`),
+  which wipes the household's real books (the three real invoice Documents + their bookings). I did NOT
+  run it; the fix is verified by reasoning (the connector already maps `budgetName`→`budget_name`; the
+  widened Health window now covers the demo's health-invoice dates). Flagged for the user to confirm.
+- **D10** — Did **not** re-report/re-fix the peer's already-handled findings, nor the deliberately-OPEN
+  ones (registry idempotency B-10, BUG-23 read-half, the E2E-title-prefix delete B-28, the suspend-drops
+  -remaining-toolcalls note which is the peer's loop-driver area). Listed under "Not filed" below.
+- **D11** — After all fixes, rebuilt the stack (`just build` + restart) to redeploy the changes into the
+  running containers and smoke-test the browser-observable ones live. (The unit/integration suites are
+  the real verification for the non-visible fixes — scan ordering, reconcile, markdown round-trips.)
+
+## For the user to review
+
+- **Bug 18** wants a live check on a fresh Firefly (`just demo-reset`) — destructive, so I left it.
+- **Bug 14** is a *scoped* i18n fix (transcript feature only); extending it to the dashboard tiles and
+  date separators is a reasonable follow-up if full German coverage is wanted.
+- **Bug 10** fixes a query for an overview that is currently not in the nav menu (latent); worth a glance.
+
 ## Bugs found — the 20
 
 Found by combining live browser/API testing with targeted code audits over the *least-scrutinized*
