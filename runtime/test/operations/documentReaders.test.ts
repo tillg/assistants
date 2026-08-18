@@ -316,6 +316,12 @@ describe("document.extractText", () => {
             characters: "already there".length,
             alreadyExtracted: true,
         });
+        // BUG-06: a `replace` re-read cannot be proven landed from a non-empty field — the old text
+        // is still there. So reconcile must report interrupted, not alreadyExtracted.
+        expect(await extractText.reconcile!({ thingId: filled, replace: true }, CONTEXT)).toEqual({
+            kind: "error",
+            message: expect.stringContaining("interrupted"),
+        });
     });
 });
 
@@ -435,6 +441,12 @@ describe("document.readScan", () => {
         expect(valueOf((await readScan.reconcile!({ thingId: filled }, CONTEXT))!)).toEqual({
             characters: "read by a model".length,
             alreadyRead: true,
+        });
+        // BUG-06: a `replace` re-read over existing text cannot be proven landed, and believing it
+        // wrongly also skips a paid re-read. Report interrupted, not alreadyRead.
+        expect(await readScan.reconcile!({ thingId: filled, replace: true }, CONTEXT)).toEqual({
+            kind: "error",
+            message: expect.stringContaining("interrupted"),
         });
     });
 });

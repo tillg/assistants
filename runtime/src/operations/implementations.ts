@@ -1462,6 +1462,18 @@ export function buildOperations(deps: OperationDeps): OperationImplementation[] 
             // re-run can do is cost a Turn.
             const characters = await textOnDocument(args);
             if (characters === undefined) return undefined;
+            // A `replace` reconcile cannot tell the Document's *old* text from a *newly written* one:
+            // if the call was interrupted after the read but before the write, the pre-existing text
+            // still makes the field non-empty. So a non-empty field is no proof the overwrite landed —
+            // report interrupted, and let the model re-read rather than trust stale text.
+            const replace = args["replace"] === true || args["replace"] === "true";
+            if (replace) {
+                return {
+                    kind: "error",
+                    message:
+                        "This replace-extraction was interrupted; the Document may still hold its previous text rather than the re-read. Call it again with replace: true — repeating it is safe.",
+                };
+            }
             return characters > 0
                 ? { kind: "value", value: { characters, alreadyExtracted: true } }
                 : {
@@ -1555,6 +1567,17 @@ export function buildOperations(deps: OperationDeps): OperationImplementation[] 
             // rather than inviting a retry.
             const characters = await textOnDocument(args);
             if (characters === undefined) return undefined;
+            // See document.extractText.reconcile: a `replace` re-read cannot be proven landed from a
+            // non-empty field, and here believing it wrongly also skips a paid re-read. Report
+            // interrupted so the model decides whether the re-read is still worth its cost.
+            const replace = args["replace"] === true || args["replace"] === "true";
+            if (replace) {
+                return {
+                    kind: "error",
+                    message:
+                        "This replace-scan was interrupted; the Document may still hold its previous text rather than the re-read. Reading it again costs money; do it only if the document is still worth it.",
+                };
+            }
             return characters > 0
                 ? { kind: "value", value: { characters, alreadyRead: true } }
                 : {
