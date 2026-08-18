@@ -206,10 +206,14 @@ export async function loadDemo(
             for (const invoice of DEMO_INVOICES) {
                 if (!invoice.booked) continue;
                 const thingId = invoiceIds.get(invoice.key);
-                const expenseAccount =
-                    invoice.processKey === "process:renovation"
-                        ? "Expenses:House:Renovation"
-                        : "Expenses:Health";
+                const renovation = invoice.processKey === "process:renovation";
+                const expenseAccount = renovation ? "Expenses:House:Renovation" : "Expenses:Health";
+                // Carry the budget on the split, not only the expense account: Firefly computes a
+                // budget's "spent" from the transactions tagged with it, so a booking with no
+                // budget_name leaves the budget report at zero — which is exactly the number the
+                // Accountant's budget-checking skill demo must not show. (data.ts: "booked to the
+                // renovation account so the budget report stays honest".)
+                const budgetName = renovation ? "Renovation" : "Health";
                 await firefly.postTransaction({
                     groupTitle: `${invoice.issuerName} ${invoice.invoiceNumber}`,
                     externalId: `demo:${invoice.key}`,
@@ -223,6 +227,7 @@ export async function loadDemo(
                             currencyCode: invoice.currency,
                             sourceAccount: "Payables",
                             destinationAccount: expenseAccount,
+                            budgetName,
                             notes: `Invoice ${invoice.invoiceNumber} — ThingID ${thingId ?? "unknown"}`,
                         },
                     ],

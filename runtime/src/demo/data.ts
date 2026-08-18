@@ -379,6 +379,9 @@ export const DEMO_ACCOUNTS = [
 export const DEMO_BUDGET_WINDOW = { start: "2026-01-01", end: "2027-12-31" };
 
 export const DEMO_BUDGETS = [
-    { name: "Health", amount: "300.00", start: "2026-08-01", end: "2026-08-31" },
+    // The window has to cover the demo's own health invoices (2026-05 and 2026-06) or the Accountant's
+    // budget report shows zero spent even once each booking carries its budget — the two halves of the
+    // same fix. A €300 budget against ~€312 booked is a deliberately instructive "slightly over" state.
+    { name: "Health", amount: "300.00", start: "2026-01-01", end: "2026-12-31" },
     { name: "Renovation", amount: "48000.00", start: "2026-01-01", end: "2027-12-31" },
 ] as const;
