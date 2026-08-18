@@ -165,13 +165,78 @@ export interface MailConfig {
     readonly pollIntervalMs: number;
     readonly maxPerPoll: number;
     readonly maxAttachmentBytes: number;
+
+    /**
+     * Which wire the letterbox is read over. Everything above this field is shared by both: the
+     * four folders, the allowlist, the poll interval and the caps are decisions about the
+     * *household*, not about a protocol, and duplicating them per transport would be four more
+     * places for the allowlist to disagree with itself.
+     *
+     * Optional for the same reason `secure` is: absent means the transport that was here before
+     * this one existed, so a `MailConfig` built by hand — a test, the end-to-end tier's throwaway
+     * IMAP server — keeps working without knowing a choice was added. `loadConfig` always sets it.
+     */
+    readonly transport?: MailTransport;
+    /**
+     * The Gmail API's half of the credentials, empty unless `MAIL_TRANSPORT=gmail`.
+     *
+     * A refresh-token grant, not a password: Gmail's IMAP needs the `https://mail.google.com/`
+     * scope and therefore an App Password and 2FA on the account, which this household does not
+     * have. It does have a completed OAuth consent — the sibling `wikai` project already uses it —
+     * so these four values already exist and no new setup is asked of anybody. See `.env.example`
+     * for the two commands that print them.
+     */
+    readonly gmail?: GmailCredentials;
 }
+
+/** IMAP by default; `gmail` when a refresh token says the OAuth grant is the way in. */
+export type MailTransport = "imap" | "gmail";
+
+export interface GmailCredentials {
+    /** The mailbox. Empty means the API's `me` — the account the grant belongs to. */
+    readonly user: string;
+    readonly clientId: string;
+    readonly clientSecret: string;
+    readonly refreshToken: string;
+}
+
+/**
+ * What `MAIL_HOST` holds when the transport is Gmail.
+ *
+ * The mail ingest reads an empty `host` as "the household has no letterbox" and returns without
+ * opening anything — the correct default, and the one thing standing between a Gmail-only
+ * deployment and a scan that never runs, because there is no IMAP host to name. So a configured
+ * Gmail transport fills it with the transport's own name, which is also what
+ * the Connector records in `MessageOrigin.host` for every message it produces: one word, true in both places.
+ */
+const GMAIL_HOST = "gmail";
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     void env;
     // Read before the object literal because `inboundSecret` is conditional on it: the secret is
     // required exactly when the door is open, and optional when it is not.
     const inboundPort = number("INBOUND_PORT", 0);
+
+    // Read before the mail block for the same reason: `MAIL_HOST` depends on it. The default is
+    // whichever transport the environment has actually been given credentials for — a household
+    // that pastes a refresh token in has said what it means, and should not also have to learn
+    // that a switch exists. Anything other than the exact word `gmail` is IMAP, so a typo falls
+    // back to the transport that was there before rather than to a half-configured new one.
+    const gmail: GmailCredentials = {
+        user: optional("GMAIL_USER", ""),
+        clientId: optional("GMAIL_CLIENT_ID", ""),
+        clientSecret: optional("GMAIL_CLIENT_SECRET", ""),
+        refreshToken: optional("GMAIL_REFRESH_TOKEN", ""),
+    };
+    const transport: MailTransport =
+        optional("MAIL_TRANSPORT", gmail.refreshToken === "" ? "imap" : "gmail") === "gmail"
+            ? "gmail"
+            : "imap";
+    // Only a transport that could actually run gets to fill the host in. `MAIL_TRANSPORT=gmail`
+    // with no refresh token is a half-finished edit, and it must leave the letterbox switched off
+    // rather than start a poll that fails at its first call every minute.
+    const gmailReady = transport === "gmail" && gmail.refreshToken !== "";
+
     return {
         thingStoreUrl: optional("THINGSTORE_URL", "http://server:8080"),
         thingStoreUser: optional("THINGSTORE_USER", "runtime"),
@@ -214,6 +279,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         clientCallable: list("CLIENT_CALLABLE_OPERATIONS"),
 
         mail: {
+            // No sentinel. The ingest asks the transport whether there is a letterbox, so a Gmail
+            // deployment leaves this empty and nothing minds — it used to be filled with the literal
+            // "gmail" purely to satisfy a guard that was asking the wrong question.
             host: optional("MAIL_HOST", ""),
             port: number("MAIL_PORT", 993),
             user: optional("MAIL_USER", ""),
@@ -235,6 +303,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
             pollIntervalMs: number("MAIL_POLL_INTERVAL_MS", 60_000),
             maxPerPoll: number("MAIL_MAX_PER_POLL", 20),
             maxAttachmentBytes: number("MAIL_MAX_ATTACHMENT_BYTES", 25 * 1024 * 1024),
+            transport,
+            gmail,
         },
 
         // Ten pages is generous for a household invoice and mean for a pension provider's annual

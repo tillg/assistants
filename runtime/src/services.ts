@@ -19,8 +19,9 @@ import { OperationRegistry } from "./operations/registry.js";
 import { buildOperations } from "./operations/implementations.js";
 import { FireflyConnector } from "./connectors/firefly.js";
 import { Watcher } from "./watcher/watcher.js";
-import { runMailIngest } from "./watcher/mail.js";
+import { runMailIngest, type MailConnector } from "./watcher/mail.js";
 import { EmailConnector } from "./connectors/email.js";
+import { GmailConnector } from "./connectors/gmail.js";
 import { ContentStoreClient } from "./a12/content.js";
 import { OpenAiProvider } from "./llm/openai.js";
 import { AnthropicProvider } from "./llm/anthropic.js";
@@ -256,37 +257,7 @@ export function buildRuntime(config: Config): Runtime {
         }),
     );
 
-    const mailbox = config.mail.host
-        ? new EmailConnector({
-              host: config.mail.host,
-              port: config.mail.port,
-              user: config.mail.user,
-              password: config.mail.password,
-              secure: config.mail.secure,
-          })
-        : undefined;
-
-    if (mailbox) {
-        // The sender *count*, not the senders: a list that grants access is worth being able to see
-        // the size of at a glance, and `0` is the misconfiguration that matters.
-        log.info("the letterbox is configured", {
-            host: config.mail.host,
-            user: config.mail.user,
-            folder: config.mail.folderIncoming,
-            // In the log because a plaintext letterbox has to be visible somewhere a human looks.
-            // `MAIL_SECURE=false` is legitimate against a server on a private network and wrong
-            // against everything else, and a startup line is the cheapest place to notice which.
-            secure: config.mail.secure ?? true,
-            allowedSenders: config.mail.allowedSenders.length,
-            pollIntervalMs: config.mail.pollIntervalMs,
-        });
-        if (config.mail.allowedSenders.length === 0) {
-            log.warn(
-                "the letterbox has no allowed senders, so every message will be rejected. " +
-                    "Set MAIL_ALLOWED_SENDERS; empty means nobody, deliberately.",
-            );
-        }
-    }
+    const mailbox = buildMailbox(config);
 
     const watcher = new Watcher({
         things,
@@ -309,6 +280,73 @@ export function buildRuntime(config: Config): Runtime {
     });
 
     return { client, things, registry, firefly, driver, watcher, llm, llmProfile, findAssistant };
+}
+
+/**
+ * The letterbox, over whichever wire this deployment has credentials for.
+ *
+ * Two transports, one Connector shape, and the ingest above them cannot tell which it was handed —
+ * which is the point: `watcher/mail.ts` is unchanged by the existence of the Gmail one.
+ *
+ * Gmail is not an upgrade so much as the only door this household has. Gmail's IMAP requires the
+ * `https://mail.google.com/` scope, which requires an App Password, which requires 2FA on the
+ * account; the household has none of those and does have a working OAuth grant. See
+ * `connectors/gmail.ts`.
+ *
+ * Neither configured means no mailbox and therefore no `pollMailbox` — the shipped default, and not
+ * an error: a household that has not set a letterbox up has not got one.
+ */
+function buildMailbox(config: Config): MailConnector | undefined {
+    if (config.mail.host === "") return undefined;
+
+    const gmail = config.mail.gmail;
+    if (config.mail.transport === "gmail" && !gmail?.refreshToken) {
+        // A half-finished edit: the transport was named and the grant was not pasted in. Better a
+        // letterbox that is visibly off than a poll that fails at its first call every minute.
+        log.warn("MAIL_TRANSPORT is gmail but no GMAIL_REFRESH_TOKEN is set; the letterbox stays shut");
+        return undefined;
+    }
+
+    const mailbox =
+        gmail && config.mail.transport === "gmail"
+            ? new GmailConnector({
+                  user: gmail.user,
+                  clientId: gmail.clientId,
+                  clientSecret: gmail.clientSecret,
+                  refreshToken: gmail.refreshToken,
+              })
+            : new EmailConnector({
+                  host: config.mail.host,
+                  port: config.mail.port,
+                  user: config.mail.user,
+                  password: config.mail.password,
+                  secure: config.mail.secure,
+              });
+
+    // The sender *count*, not the senders: a list that grants access is worth being able to see the
+    // size of at a glance, and `0` is the misconfiguration that matters. No credential of either
+    // transport appears here — not the IMAP password and not one end of the OAuth grant.
+    log.info("the letterbox is configured", {
+        transport: config.mail.transport ?? "imap",
+        host: config.mail.host,
+        user: config.mail.transport === "gmail" ? gmail?.user || "me" : config.mail.user,
+        folder: config.mail.folderIncoming,
+        // In the log because a plaintext letterbox has to be visible somewhere a human looks.
+        // `MAIL_SECURE=false` is legitimate against a server on a private network and wrong against
+        // everything else, and a startup line is the cheapest place to notice which. Gmail's API is
+        // HTTPS and nothing else, so the setting says nothing there.
+        ...(config.mail.transport === "gmail" ? {} : { secure: config.mail.secure ?? true }),
+        allowedSenders: config.mail.allowedSenders.length,
+        pollIntervalMs: config.mail.pollIntervalMs,
+    });
+    if (config.mail.allowedSenders.length === 0) {
+        log.warn(
+            "the letterbox has no allowed senders, so every message will be rejected. " +
+                "Set MAIL_ALLOWED_SENDERS; empty means nobody, deliberately.",
+        );
+    }
+
+    return mailbox;
 }
 
 function buildProvider(

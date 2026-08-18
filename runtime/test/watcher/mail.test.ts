@@ -539,6 +539,47 @@ describe("isAllowedSender", () => {
 });
 
 describe("runMailIngest", () => {
+    it("polls over Gmail with no IMAP host at all", async () => {
+        // The guard asks the transport, not whether a host string is non-empty. A Gmail deployment
+        // has no IMAP host and needs none; this used to require the literal sentinel "gmail".
+        const mailbox = new FakeMailbox();
+        mailbox.put(INCOMING, fetched(931, "forward-one-pdf.eml"));
+
+        const summary = await ingest(
+            mailbox,
+            mailConfig({
+                host: "",
+                transport: "gmail",
+                gmail: {
+                    user: "someone@gmail.com",
+                    clientId: "a-client",
+                    clientSecret: "a-secret",
+                    refreshToken: "1//0g-a-refresh-token",
+                },
+            }),
+        );
+
+        expect(summary.created).toBe(1);
+        expect(mailbox.uids(PROCESSED)).toEqual([931]);
+    });
+
+    it("does nothing when the transport is Gmail but no grant was pasted in", async () => {
+        const mailbox = new FakeMailbox();
+        mailbox.put(INCOMING, fetched(932, "forward-one-pdf.eml"));
+
+        const summary = await ingest(
+            mailbox,
+            mailConfig({
+                host: "",
+                transport: "gmail",
+                gmail: { user: "", clientId: "", clientSecret: "", refreshToken: "" },
+            }),
+        );
+
+        expect(summary.fetched).toBe(0);
+        expect(mailbox.calls).toEqual([]);
+    });
+
     it("does nothing at all, and touches no mailbox, when the host is empty", async () => {
         const mailbox = new FakeMailbox();
         mailbox.put(INCOMING, fetched(1, "forward-one-pdf.eml"));

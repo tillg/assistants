@@ -107,6 +107,61 @@ describe("configuration", () => {
         }
     });
 
+    it("reads the letterbox over IMAP until a Gmail grant says otherwise", () => {
+        // The transport is not a switch anybody should have to find. A household that pastes a
+        // refresh token in has said what it means; one that has not is on the transport that was
+        // here before this one existed.
+        process.env["THINGSTORE_PASSWORD"] = "supplied-by-the-caller";
+        try {
+            const imap = withoutEnv("GMAIL_REFRESH_TOKEN", () =>
+                withoutEnv("MAIL_TRANSPORT", () => loadConfig()),
+            );
+            expect(imap.mail.transport).toBe("imap");
+            // And with no MAIL_HOST either, the letterbox is off — the shipped default.
+            expect(withoutEnv("MAIL_HOST", () => imap).mail.host).toBe("");
+
+            process.env["GMAIL_REFRESH_TOKEN"] = "1//0g-a-refresh-token";
+            const gmail = withoutEnv("MAIL_TRANSPORT", () => withoutEnv("MAIL_HOST", () => loadConfig()));
+            expect(gmail.mail.transport).toBe("gmail");
+            expect(gmail.mail.gmail?.refreshToken).toBe("1//0g-a-refresh-token");
+            // No sentinel: a Gmail deployment has no IMAP host and needs none. The ingest asks the
+            // transport whether there is a letterbox, not whether a host string is non-empty. This
+            // previously read `toBe("gmail")` — a value invented purely to satisfy a guard that was
+            // asking the wrong question.
+            expect(gmail.mail.host).toBe("");
+
+            // An explicit choice always wins over the inference, in both directions.
+            process.env["MAIL_TRANSPORT"] = "imap";
+            expect(withoutEnv("MAIL_HOST", () => loadConfig()).mail.transport).toBe("imap");
+            expect(withoutEnv("MAIL_HOST", () => loadConfig()).mail.host).toBe("");
+        } finally {
+            delete process.env["THINGSTORE_PASSWORD"];
+            delete process.env["GMAIL_REFRESH_TOKEN"];
+            delete process.env["MAIL_TRANSPORT"];
+        }
+    });
+
+    it("shares the folders, the allowlist and the caps between both transports", () => {
+        // The four folders and the allowlist are decisions about the *household*, not about a
+        // protocol. A second set of them per transport would be four more places for the list that
+        // grants access to disagree with itself.
+        process.env["THINGSTORE_PASSWORD"] = "supplied-by-the-caller";
+        process.env["GMAIL_REFRESH_TOKEN"] = "1//0g-a-refresh-token";
+        process.env["MAIL_ALLOWED_SENDERS"] = "Anna.Beispiel@Example.com";
+        try {
+            const config = withoutEnv("MAIL_TRANSPORT", () => withoutEnv("MAIL_HOST", () => loadConfig()));
+            expect(config.mail.transport).toBe("gmail");
+            expect(config.mail.folderIncoming).toBe("assistants");
+            expect(config.mail.folderFailed).toBe("assistants/failed");
+            expect(config.mail.allowedSenders).toEqual(["anna.beispiel@example.com"]);
+            expect(config.mail.maxPerPoll).toBe(20);
+        } finally {
+            delete process.env["THINGSTORE_PASSWORD"];
+            delete process.env["GMAIL_REFRESH_TOKEN"];
+            delete process.env["MAIL_ALLOWED_SENDERS"];
+        }
+    });
+
     it("keeps the letterbox on implicit TLS unless something says otherwise, in one greppable word", () => {
         // There is deliberately no setting that keeps TLS and stops verifying the certificate. The
         // only escape hatch is plaintext, and it is worth having exactly once: a mail server on a

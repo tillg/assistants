@@ -228,6 +228,23 @@ export interface MailIngestSummary {
 }
 
 /**
+ * Is there a letterbox at all?
+ *
+ * Asked of the **transport**, not of an IMAP host. The two are not the same question, and conflating
+ * them cost something real: this guard used to read `config.host === ""`, so a Gmail deployment — which
+ * has no IMAP host and needs none — had to be given the literal string `"gmail"` as a host to get past
+ * it. A sentinel value that exists only to satisfy a check is the check being wrong.
+ *
+ * `imap` needs somewhere to connect to; `gmail` needs a refresh token to exchange. Neither configured
+ * means no letterbox, which is the shipped default and not an error.
+ */
+function isConfigured(config: MailConfig): boolean {
+    return config.transport === "gmail"
+        ? (config.gmail?.refreshToken ?? "") !== ""
+        : config.host.trim() !== "";
+}
+
+/**
  * May this sender post to the letterbox?
  *
  * Three properties, all of them safety rather than convenience:
@@ -281,7 +298,7 @@ export async function runMailIngest(deps: MailIngestDeps): Promise<MailIngestSum
 
     // The default, and not an error: a household that has not set a mailbox up has no letterbox.
     // Checked before anything else so a disabled ingest opens no socket at all.
-    if (config.host.trim() === "") return summary;
+    if (!isConfigured(config)) return summary;
 
     try {
         // The switch in the web application, read every poll so turning it off stops the letterbox
