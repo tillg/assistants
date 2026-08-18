@@ -55,13 +55,25 @@ export default defineConfig({
         // underneath the first. Playwright has no per-project worker limit, so each one is its
         // own project and the chain of `dependencies` is what serialises them — against each
         // other and against everything in `base`.
+        // First in the chain, because it is the one that reconfigures the Runtime container: it
+        // points the letterbox at a GreenMail of its own and pins the model to `scripted`, then puts
+        // both back. Running it *before* `flow-invoice` rather than after means the stack the rest of
+        // the tier drives is the one `.env` describes, restored by a spec that has already finished.
+        {
+            name: "flow-mail",
+            use: { ...devices["Desktop Chrome"], channel: "chromium" },
+            testDir: "./tests/flow",
+            testMatch: /0-mail-arrives\.spec\.ts/,
+            timeout: 900_000,
+            dependencies: ["base"]
+        },
         {
             name: "flow-invoice",
             use: { ...devices["Desktop Chrome"], channel: "chromium" },
             testDir: "./tests/flow",
             testMatch: /1-invoice-slice\.spec\.ts/,
             timeout: 600_000,
-            dependencies: ["base"]
+            dependencies: ["flow-mail"]
         },
         {
             name: "flow-restart",

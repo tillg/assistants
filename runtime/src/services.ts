@@ -262,6 +262,7 @@ export function buildRuntime(config: Config): Runtime {
               port: config.mail.port,
               user: config.mail.user,
               password: config.mail.password,
+              secure: config.mail.secure,
           })
         : undefined;
 
@@ -272,6 +273,10 @@ export function buildRuntime(config: Config): Runtime {
             host: config.mail.host,
             user: config.mail.user,
             folder: config.mail.folderIncoming,
+            // In the log because a plaintext letterbox has to be visible somewhere a human looks.
+            // `MAIL_SECURE=false` is legitimate against a server on a private network and wrong
+            // against everything else, and a startup line is the cheapest place to notice which.
+            secure: config.mail.secure ?? true,
             allowedSenders: config.mail.allowedSenders.length,
             pollIntervalMs: config.mail.pollIntervalMs,
         });

@@ -106,4 +106,26 @@ describe("configuration", () => {
             delete process.env["SCHEDULE_TIMEZONE"];
         }
     });
+
+    it("keeps the letterbox on implicit TLS unless something says otherwise, in one greppable word", () => {
+        // There is deliberately no setting that keeps TLS and stops verifying the certificate. The
+        // only escape hatch is plaintext, and it is worth having exactly once: a mail server on a
+        // private network — a container inside this stack's own compose network, which is what the
+        // end-to-end tier points the letterbox at. Plaintext is visible in `.env`, visible in the
+        // startup log and greppable; an unverified TLS session is none of those things.
+        process.env["THINGSTORE_PASSWORD"] = "supplied-by-the-caller";
+        try {
+            expect(withoutEnv("MAIL_SECURE", () => loadConfig()).mail.secure).toBe(true);
+
+            process.env["MAIL_SECURE"] = "false";
+            expect(loadConfig().mail.secure).toBe(false);
+
+            // Anything else is not a way to switch it off. A typo must fail closed.
+            process.env["MAIL_SECURE"] = "no";
+            expect(loadConfig().mail.secure).toBe(true);
+        } finally {
+            delete process.env["THINGSTORE_PASSWORD"];
+            delete process.env["MAIL_SECURE"];
+        }
+    });
 });

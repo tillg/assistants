@@ -124,10 +124,28 @@ The step that makes the system work end to end.
 
 ## 10. End to end
 
-- [ ] An e2e that appends an `.eml` with a PDF to the test mailbox and waits for the Open Question to
+- [x] An e2e that appends an `.eml` with a PDF to the test mailbox and waits for the Open Question to
       appear in the web application's inbox — the journey from
       [functional.md](../../system/functional.md) with its first step deleted
-- [ ] **Verify:** run it against a full `docker compose` stack, not the harness
+      — `e2e/tests/flow/0-mail-arrives.spec.ts`, project `flow-mail`
+- [x] **Verify:** run it against a full `docker compose` stack, not the harness
+
+The test mailbox had to be *brought*, and that is the one thing worth writing down here. `MAIL_HOST`
+in `.env` is empty — the shipped default — so the Runtime a developer has running polls nothing, and
+there is no honest way to append to a mailbox that does not exist. So `e2e/utils/mailbox.ts` starts a
+GreenMail on the stack's own compose network, `e2e/utils/stack.ts` recreates the Runtime container
+pointing at it through a generated compose override, and the spec puts both back afterwards. Two
+consequences:
+
+- `MAIL_SECURE` is now read from `.env` — the architecture note already said it was, and only the
+  call site had it. GreenMail's IMAPS certificate cannot pass hostname verification by any route, so
+  the choice was plaintext or a `rejectUnauthorized` passthrough, and that argument is already settled
+  in [architecture.md](architecture.md).
+- the spec pins the model to `scripted` for its own run, because `llm.json` is the developer's
+  gitignored file and a model that emits tool calls as prose would fail the assertion for a reason
+  that has nothing to do with the letterbox. What arrives is therefore the Accountant's *"Book this
+  invoice?"* rather than the `document.requestText` a live model would ask for a text-free PDF —
+  the same assertion, a different question.
 
 ## 11. Manual verification, with real mail
 

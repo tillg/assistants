@@ -1,0 +1,28 @@
+{
+    "notesForUsage": [
+        "The `scripted` profile, on its own, for the end-to-end tier.",
+        "",
+        "`llm.json` at the repository root is gitignored and holds whatever model the developer is",
+        "actually using — a local one, a paid one, whatever `just setup` left plus their edits. The",
+        "mail journey must not depend on that choice: it asserts that a Document born from a mail",
+        "triggers the Receptionist exactly as a typed one does, and a model that emits its tool calls",
+        "as prose would fail that assertion for a reason that has nothing to do with the letterbox.",
+        "",
+        "So `tests/flow/0-mail-arrives.spec.ts` recreates the Runtime container with LLM_CONFIG_FILE",
+        "pointing here, and puts it back afterwards. `scripted` is a recorded substitute for a paid,",
+        "non-deterministic third party, not a mock of anything this repository owns — see",
+        "runtime/src/llm/scripted.ts — and the script it replays is the same one the compose default",
+        "uses, runtime/fixtures/llm-script.json, mounted in the image at /run/fixtures.",
+        "",
+        "There is no `vision` profile here on purpose: an absent one is the shipped default and not an",
+        "error, and nothing in this journey reads a scan."
+    ],
+    "active": "scripted",
+    "profiles": {
+        "scripted": {
+            "provider": "scripted",
+            "model": "scripted",
+            "scriptFile": "/run/fixtures/llm-script.json"
+        }
+    }
+}

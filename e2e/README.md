@@ -39,7 +39,7 @@ Useful subsets:
 
 ```bash
 npm run e2e:test        # the base project only — fast, no Assistants involved
-npm run e2e:test-flow   # the two flow specs only
+npm run e2e:test-flow   # the three flow specs only
 npm run e2e:test-ui     # the Playwright UI runner
 npm run e2e:report      # open the last HTML report
 npm run typecheck       # tsc --noEmit
@@ -70,6 +70,7 @@ Environment overrides: `BASE_URL` (8081), `THINGSTORE_URL` (8082), `FIREFLY_URL`
 | `tests/base/4-markdown-editor.spec.ts` | An Assistant's `systemPrompt` renders the Lexical markdown editor, not a text area, and markdown round-trips through a save |
 | `tests/base/5-localization.spec.ts` | The language switch |
 | `tests/base/6-favicon.spec.ts` | The favicon |
+| `tests/flow/0-mail-arrives.spec.ts` | The same journey with its first step deleted: an `.eml` is APPENDed to a GreenMail sidecar the spec starts, and the Runtime's fifth scan turns it into a Document with `Source: email`, its PDF in the Content Store, the message in `assistants/processed`, and an Open Question waiting in the UI |
 | `tests/flow/1-invoice-slice.spec.ts` | A Document arrives → Receptionist classifies it → Invoice → Accountant asks → the User answers in the UI → a real transaction in Firefly |
 | `tests/flow/2-restart.spec.ts` | ADR-0004: restarting the Runtime and the ThingStore mid-wait loses nothing, and the answer still continues the Conversation |
 
@@ -78,14 +79,22 @@ Environment overrides: `BASE_URL` (8081), `THINGSTORE_URL` (8082), `FIREFLY_URL`
 Playwright projects, chained by `dependencies`:
 
 ```
-setup-auth → setup-base → base → flow-invoice → flow-restart
-                                                     ↓
-                                                  cleanup
+setup-auth → setup-base → base → flow-mail → flow-invoice → flow-restart
+                                                                 ↓
+                                                              cleanup
 ```
 
-`base` runs in parallel; the two flow specs are separate projects precisely because Playwright
-has no per-project worker limit, and the restart spec pulls the stack out from under anything
-running beside it.
+`base` runs in parallel; the flow specs are separate projects precisely because Playwright has no
+per-project worker limit, and both `flow-mail` and `flow-restart` pull the stack out from under
+anything running beside them.
+
+`flow-mail` is first in the flow chain because it is the one that *reconfigures* the Runtime
+container — it points the letterbox at a GreenMail of its own (`MAIL_HOST` in `.env` is empty, which
+is the shipped default and why nothing else in this suite can exercise scan 5) and pins the model to
+`scripted` regardless of what `llm.json` says, then puts both back. Running it before
+`flow-invoice` rather than after means everything downstream drives the stack `.env` describes,
+restored by a spec that has already finished. `utils/stack.ts` does the restoring, through a
+generated compose override in `test-results/` rather than by editing anybody's `.env`.
 
 ## Two rules for anything added here
 

@@ -136,6 +136,18 @@ export interface MailConfig {
     readonly port: number;
     readonly user: string;
     readonly password: string;
+    /**
+     * Implicit TLS, which is what port 993 means and what every provider wants. Optional here for
+     * the same reason it is optional on `MailboxOptions`: absent means `true`, so the safe answer
+     * is the one you get by saying nothing.
+     *
+     * `MAIL_SECURE=false` is the one escape hatch, and it buys **plaintext** — not TLS with the
+     * certificate unchecked. There is deliberately no setting for that second thing. A mail server
+     * on a private network is a real configuration (a container inside this stack's own compose
+     * network, a Dovecot on localhost), and plaintext to it is visible in `.env`, named in the
+     * startup log and greppable; a TLS session that has quietly stopped verifying is none of those.
+     */
+    readonly secure?: boolean;
     /** The only folder the ingest reads. A Gmail label, seen through IMAP as a folder. */
     readonly folderIncoming: string;
     readonly folderProcessed: string;
@@ -206,6 +218,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
             port: number("MAIL_PORT", 993),
             user: optional("MAIL_USER", ""),
             password: optional("MAIL_PASSWORD", ""),
+            // Exactly the word `false` switches it off. A typo — `no`, `0`, `False` — leaves TLS on,
+            // because the failure mode of guessing wrong here is a password crossing a network in
+            // the clear.
+            secure: optional("MAIL_SECURE", "true") !== "false",
             // Gmail nests labels with `/`, and the household's label is `assistants`, after the system itself. These are
             // configuration rather than constants because the same ingest should work against a
             // provider that spells its folders differently.

@@ -306,7 +306,10 @@ the connection still looks encrypted in every log.
 
 There is one qualification, added when the connector was first tested against a real IMAP server.
 `MailboxOptions` carries an optional `secure`, defaulting to `true`, which the integration tier sets
-to `false`. The obvious alternative — trusting the test server's certificate — is impossible:
+to `false` at the call site and which `MAIL_SECURE` sets from `.env` — exactly the word `false`, so a
+typo leaves TLS on. The end-to-end tier needs the environment variable rather than the call site,
+because the process it configures is the Runtime in its container: the letterbox it polls is a
+GreenMail sidecar on the compose network (`e2e/utils/mailbox.ts`). The obvious alternative — trusting the test server's certificate — is impossible:
 GreenMail's is self-signed with no SAN, so hostname verification can never pass however the trust
 store is configured. Between a `tls: { rejectUnauthorized: false }` passthrough and a plain
 `secure: false`, the second is the smaller lie: a `tls` option is exactly the one that ends up in a
