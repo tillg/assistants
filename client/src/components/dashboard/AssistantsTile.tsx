@@ -5,7 +5,7 @@ import { openModule } from "../../sagas/openModule";
 
 import { ICONS } from "../icons";
 
-import { DashboardTile } from "./DashboardTile";
+import { DashboardTile, mutedText } from "./DashboardTile";
 import { asOf } from "./readAt";
 import { useAssistants } from "./useAssistants";
 
@@ -19,11 +19,11 @@ import { useAssistants } from "./useAssistants";
  */
 
 const Disabled = styled.span`
-    color: ${({ theme }) => theme.colors.text.secondaryColor};
+    ${mutedText}
 `;
 
 const More = styled.span`
-    color: ${({ theme }) => theme.colors.text.secondaryColor};
+    ${mutedText}
     font-style: italic;
 `;
 

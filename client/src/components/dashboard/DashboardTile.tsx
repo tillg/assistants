@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import styled from "styled-components";
+import styled, { css } from "styled-components";
 
 import { Card } from "@com.mgmtp.a12.widgets/widgets-core";
 
@@ -125,8 +125,28 @@ const Body = styled.div`
     font-size: 0.9em;
 `;
 
+/**
+ * Secondary text that can actually be read.
+ *
+ * **Not** `theme.colors.text.secondaryColor`, which every Tile reached for first and which is
+ * `rgb(226, 230, 233)` — a contrast ratio of about **1.25:1** against the Tile's white background,
+ * where WCAG AA asks 4.5:1 for body text. Measured in the browser, not guessed: the dates and the
+ * account routes on the Transactions Tile were very nearly invisible, and so was every Tile's
+ * `as of 14:32` footer. That token is a divider colour wearing a text colour's name.
+ *
+ * Opacity rather than a second colour, deliberately. It blends toward whatever is actually behind
+ * the text, so the same rule holds in a dark theme without a second definition to keep in step —
+ * which is the failure mode a hard-coded grey would have. At 0.72 over white this lands near
+ * `#6c6c6c`, about **5.3:1**, so it keeps the hierarchy that made `secondaryColor` tempting while
+ * being legible to someone who is not looking for it.
+ */
+export const mutedText = css`
+    color: ${({ theme }) => theme.colors.text.color};
+    opacity: 0.72;
+`;
+
 const Footer = styled.div`
-    color: ${({ theme }) => theme.colors.text.secondaryColor};
+    ${mutedText}
     font-size: 0.8em;
 `;
 

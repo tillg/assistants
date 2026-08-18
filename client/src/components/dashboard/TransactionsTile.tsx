@@ -5,7 +5,7 @@ import styled from "styled-components";
 import { PLACE_ICONS } from "../icons";
 
 import { BOOKKEEPING_URL } from "./BookkeepingButton";
-import { DashboardTile } from "./DashboardTile";
+import { DashboardTile, mutedText } from "./DashboardTile";
 import { amount } from "./money";
 import { asOf } from "./readAt";
 import { useExternalCall } from "./useExternalCall";
@@ -62,7 +62,7 @@ const WINDOW_DAYS = 90;
 const LIMIT = 10;
 
 const Window = styled.span`
-    color: ${({ theme }) => theme.colors.text.secondaryColor};
+    ${mutedText}
 `;
 
 const Row = styled.div`
@@ -73,7 +73,7 @@ const Row = styled.div`
 
 const When = styled.span`
     flex: none;
-    color: ${({ theme }) => theme.colors.text.secondaryColor};
+    ${mutedText}
     font-variant-numeric: tabular-nums;
 `;
 
@@ -94,7 +94,7 @@ const Route = styled.span`
     flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;
-    color: ${({ theme }) => theme.colors.text.secondaryColor};
+    ${mutedText}
     text-overflow: ellipsis;
     white-space: nowrap;
 `;
@@ -107,7 +107,7 @@ const Figure = styled.span`
 
 /** An empty body and a broken Tile look identical, so the Tile says which of the two it is. */
 const Nothing = styled.span`
-    color: ${({ theme }) => theme.colors.text.secondaryColor};
+    ${mutedText}
 `;
 
 /**

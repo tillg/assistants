@@ -4,7 +4,7 @@ Found during the autonomous session of **2026-08-17/18**, by two adversarial rev
 code and by driving the running stack. Each entry has a reproduction, because a bug report without
 one is a rumour.
 
-**Twenty-two findings. Seventeen were reproduced before being fixed.** Severity is about what happens
+**Twenty-nine findings. Nineteen were reproduced before being fixed.** Severity is about what happens
 if it fires, not about how hard it was to find.
 
 The headline: **the security property held under every attack.** `bookkeeping.postTransaction` could
@@ -243,6 +243,44 @@ considering:
 2. `stop_grace_period` was unset on every service (found by the parallel session; Docker's default
    10s is under a routine 6s Runtime stop plus a mail poll). They set 60s on `runtime`; **`server`
    is still unset and is your call**, since a Spring shutdown mid-write is not mine to decide.
+
+---
+
+### 29. Secondary text was invisible — every Tile, including the three that shipped earlier · PROVEN · fixed
+
+Reported by the User from a screenshot, and it is the one finding in this list that a person spotted
+before any tool did.
+
+`theme.colors.text.secondaryColor` resolves to **`rgb(226, 230, 233)`** on the Tile's white
+background. Measured in the browser:
+
+```
+"01.08."                    color: rgb(226, 230, 233)   ← the date
+"Payables → Expenses:Health" color: rgb(226, 230, 233)   ← the account route
+"as of 07:02"               color: rgb(226, 230, 233)   ← every Tile's footer
+"Consultation and dressing" color: rgb(51, 51, 51)      ← readable, for contrast
+```
+
+That is a contrast ratio of roughly **1.25:1**. WCAG AA asks **4.5:1** for body text. It is not dim,
+it is very nearly not there — and on the Transactions Tile it hid *the date and both account names*,
+which is most of what a booking is.
+
+**Two things I got wrong, and only one of them is new.**
+
+1. **The token is misnamed for what it does.** `secondaryColor` in this theme is a divider colour
+   wearing a text colour's name. Five Tiles reached for it independently and all five were wrong.
+2. **I treated the date and the route as decoration.** They are data — the description alone does not
+   tell you when a booking happened or which way the money went. Only the footer and the window
+   caption are genuinely secondary.
+
+**Pre-existing, and I propagated it.** `DashboardTile`'s shared `Footer` already used this token, so
+the `as of` line has been near-invisible on the Conversations, Documents and Assistants Tiles since
+that change shipped. I then copied the pattern into the two new Tiles four more times.
+
+**Fix:** one exported `mutedText` in `DashboardTile.tsx`, used in all nine places — full-strength text
+colour at `opacity: 0.72`, which lands near `#6c6c6c` and about **5.3:1**. Opacity rather than a
+second hard-coded grey, so it blends toward whatever is actually behind and the same rule holds in a
+dark theme without a second definition to keep in step.
 
 ---
 

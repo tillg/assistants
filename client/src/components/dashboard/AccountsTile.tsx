@@ -3,7 +3,7 @@ import styled from "styled-components";
 import { PLACE_ICONS } from "../icons";
 
 import { BOOKKEEPING_URL } from "./BookkeepingButton";
-import { DashboardTile } from "./DashboardTile";
+import { DashboardTile, mutedText } from "./DashboardTile";
 import { amount, totals } from "./money";
 import { asOf } from "./readAt";
 import { useExternalCall } from "./useExternalCall";
@@ -74,7 +74,7 @@ const TotalRow = styled(Row)`
 
 /** An empty body and a broken Tile look identical, so the Tile says which of the two it is. */
 const Nothing = styled.span`
-    color: ${({ theme }) => theme.colors.text.secondaryColor};
+    ${mutedText}
 `;
 
 /** A total short of a row is a wrong number unless it says so; it says so where it is read. */

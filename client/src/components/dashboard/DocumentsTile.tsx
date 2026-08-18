@@ -7,7 +7,7 @@ import { openModule } from "../../sagas/openModule";
 import { PLACE_ICONS } from "../icons";
 
 import { monthBuckets, type Ladder } from "./buckets";
-import { DashboardTile } from "./DashboardTile";
+import { DashboardTile, mutedText } from "./DashboardTile";
 import { asOf } from "./readAt";
 import { useThingCounts, type CountQuery } from "./useThingCounts";
 
@@ -75,7 +75,7 @@ const Chart = styled.div`
 `;
 
 const Lag = styled.p`
-    color: ${({ theme }) => theme.colors.text.secondaryColor};
+    ${mutedText}
     font-size: 0.85em;
 `;
 
