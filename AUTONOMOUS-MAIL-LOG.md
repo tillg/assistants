@@ -574,3 +574,68 @@ the mint step against the User's own token.
 
 Of the four obstacles that draft listed, only two block anything: `Content-Disposition: attachment` and
 CORS.
+
+---
+
+## Fifth pass — the container, and Gmail for real
+
+### B-29 — a Conversation that reaches 100 Entries can never be advanced again, and retries for ever · REPRODUCED · OPEN
+
+Found by watching the rebuilt Runtime's own logs, not by any test.
+
+`Conversation_DM`'s `Entries` group has **`repeatability: 100`**. The Loop Driver appends Entries
+without bound — a prompt, an LLM response, a tool intent, a tool result, an error — and an Assistant's
+`maxTurns` is **20**, so a Conversation that uses several Entries per Turn passes 100 long before it
+runs out of Turns. When it does, every write fails:
+
+```
+MODIFY_DOCUMENT failed … The index for group '/Conversation/Entries' was specified with 101,
+but at most 100 is allowed.  ErrorCode: zuGrosseKontextnummer
+```
+
+It is not a one-off failure. The Conversation cannot be written, so it cannot be marked failed, so it
+stays runnable, so the scan picks it up again — **once every ~7 seconds, indefinitely**. One such
+Conversation (`db637140-…`, from another session's bookkeeping tests) was doing exactly that on this
+machine, and it is the only thing in the log that is throwing.
+
+**The failure mode is the bad one.** The two caps disagree with each other: `maxTurns` is the one
+written down and reasoned about, and `Entries` is the one that actually binds. Nothing checks the
+second, and the error surfaces as an A12 validation message about row numbers rather than as
+*"this Conversation is full"*.
+
+**Left open, deliberately.** The fix is a design decision rather than a patch, and there are at least
+three defensible answers — cap Entries and end the Conversation cleanly when it is reached; raise the
+model's repeatability; or stop appending every intermediate Entry. Choosing between them decides what a
+Transcript promises, and doing that unattended, at the end of a long session, in the loop that drives
+every Assistant, is how a wedged Conversation becomes a wedged system. It is pre-existing and not
+caused by the letterbox.
+
+**Recommendation:** whatever else, the Loop Driver should refuse to append past the model's limit and
+end the Conversation with a reason, so that the failure is *"it filled up"* rather than an infinite
+retry against a validation error. `ADR-0015` says nothing ends silently, and this ends nothing at all.
+
+### What the letterbox now does, verified in the deployed container
+
+- `docker compose build runtime` + `up -d --force-recreate runtime`, twice — the second time to pick up
+  the neighbouring session's `systemSuffix` work, which is compiled into the image (`/app/dist`, not
+  `/app/src` — an earlier check looked in the wrong place and reported a false negative)
+- startup logs `the letterbox is configured {"transport":"gmail","host":"","user":"till.gartner@gmail.com","folder":"assistants","allowedSenders":1,"pollIntervalMs":60000}`
+- the User's real invoice was moved back to `assistants` by hand, and **the container found it on its
+  own schedule**: `polled the letterbox {"fetched":1,"rejected":0,"created":0,"skipped":3,"failed":0}`,
+  then moved it to `assistants/processed`
+
+`created: 0, skipped: 3` is the whole point: the three Documents were already there, so the ingest
+recognised them by `ExternalRef`, created nothing, and only then moved the message. **Idempotency
+proven against real Gmail and the real ThingStore, unattended, inside the container** — which is the
+one thing 409 unit tests could not establish.
+
+### B-30 — the same wrong question, asked in two places · FIXED
+
+Removing the `"gmail"` host sentinel corrected the guard in the ingest and missed the copy of it in
+`services.ts`, which decides whether to build a connector at all. So a correctly configured Gmail
+deployment built no mailbox, logged nothing, and reported `ingested: 0` for ever — the letterbox
+silently off with every credential present and correct.
+
+Caught only by rebuilding the container and noticing that a log line which should have appeared did
+not. `isConfigured` is now exported and both callers use it: two copies of a predicate is how the
+first gets corrected and the second does not.
