@@ -188,15 +188,34 @@ export class OpenAiProvider implements LlmProvider {
             );
         }
 
+        // A present-but-abnormal `finish_reason` (content_filter, and anything else that is neither a
+        // clean `stop` nor `length`) meant the content was blocked or otherwise did not complete —
+        // mapping it to "answered" recorded a Conversation that produced nothing as finished
+        // successfully. Escalate it instead. An *absent* reason is left as "answered": some
+        // OpenAI-compatible gateways omit it, and treating that as an error would break them.
+        const reason = choice.finish_reason;
+        const abnormal =
+            toolCalls.length === 0 && reason != null && reason !== "" && reason !== "stop" && reason !== "length";
+
         return {
             text,
             toolCalls,
             finishReason:
                 toolCalls.length > 0
                     ? "wants-tools"
-                    : choice.finish_reason === "length"
+                    : reason === "length"
                       ? "length"
-                      : "answered",
+                      : abnormal
+                        ? "error"
+                        : "answered",
+            ...(abnormal
+                ? {
+                      error: {
+                          message: `The model stopped with finish_reason "${reason}" and returned no usable completion.`,
+                          transient: false,
+                      },
+                  }
+                : {}),
             // Omitted rather than zeroed when the gateway did not report it: a zero would be a claim
             // that this Turn was free, and an OpenAI-compatible gateway is not obliged to answer.
             ...(payload.usage

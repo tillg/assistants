@@ -117,15 +117,38 @@ export class AnthropicProvider implements LlmProvider {
                 arguments: block.input ?? {},
             }));
 
+        // A present-but-abnormal `stop_reason` (e.g. "refusal") did not complete normally; mapping it
+        // to "answered" recorded an empty Conversation as finished. `end_turn` and `stop_sequence`
+        // are clean stops; `max_tokens` is length; an absent reason is left "answered". Anything else
+        // present escalates. Mirrors the OpenAI provider.
+        const reason = payload.stop_reason;
+        const abnormal =
+            toolCalls.length === 0 &&
+            reason != null &&
+            reason !== "" &&
+            reason !== "end_turn" &&
+            reason !== "stop_sequence" &&
+            reason !== "max_tokens";
+
         return {
             text,
             toolCalls,
             finishReason:
                 toolCalls.length > 0
                     ? "wants-tools"
-                    : payload.stop_reason === "max_tokens"
+                    : reason === "max_tokens"
                       ? "length"
-                      : "answered",
+                      : abnormal
+                        ? "error"
+                        : "answered",
+            ...(abnormal
+                ? {
+                      error: {
+                          message: `The model stopped with stop_reason "${reason}" and returned no usable completion.`,
+                          transient: false,
+                      },
+                  }
+                : {}),
             ...(payload.usage
                 ? {
                       usage: {

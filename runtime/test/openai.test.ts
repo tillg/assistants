@@ -167,6 +167,31 @@ describe("the OpenAI-compatible provider", () => {
         await expect(provider.complete(REQUEST)).rejects.toBeInstanceOf(TransientLlmError);
     });
 
+    it("escalates an abnormal finish_reason instead of recording an empty answer", async () => {
+        // BUG-08: content_filter (and any present-but-abnormal reason) means the content did not
+        // complete. Mapping it to "answered" recorded a Conversation that produced nothing as
+        // finished successfully. It must surface as an error the loop can escalate.
+        const provider = new OpenAiProvider(
+            "http://gateway/v1",
+            "key",
+            gateway({ message: { content: "" }, finish_reason: "content_filter" }),
+        );
+
+        const response = await provider.complete(REQUEST);
+        expect(response.finishReason).toBe("error");
+        expect(response.error?.transient).toBe(false);
+    });
+
+    it("still reports a clean stop as answered", async () => {
+        const provider = new OpenAiProvider(
+            "http://gateway/v1",
+            "key",
+            gateway({ message: { content: "all done" }, finish_reason: "stop" }),
+        );
+        const response = await provider.complete(REQUEST);
+        expect(response.finishReason).toBe("answered");
+    });
+
     it("appends the profile's systemSuffix to the system message the loop sends", async () => {
         // Measured: `Qwen3-Coder-30B-A3B-Instruct-4bit` drops the `<tool_call>` wrapper its own
         // template requires and its calls arrive as text — three prompts out of three. With this
