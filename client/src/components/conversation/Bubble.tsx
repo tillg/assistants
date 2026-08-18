@@ -129,7 +129,7 @@ export function Bubble({ entry }: BubbleProps) {
                     )}
                     {!collapsible && role.label !== undefined && <Label>{role.label}</Label>}
                     {text !== undefined && (open || !collapsible) && <Text>{text}</Text>}
-                    {recorded > 0 && (
+                    {recorded > 0 && (open || !collapsible) && (
                         <Footnote data-role="transcript-cost-footnote">
                             {`${format(entry.promptTokens ?? 0)} + ${format(entry.completionTokens ?? 0)} tokens`}
                         </Footnote>

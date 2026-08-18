@@ -91,6 +91,18 @@ describe("Bubble", () => {
         expect(screen.getByTestId("transcript-bubble-toggle")).toHaveAttribute("aria-expanded", "true");
     });
 
+    it("keeps the token footnote behind the collapse, with the text it belongs to", () => {
+        // BUG-13: the footnote sat outside the (open || !collapsible) guard, so a collapsed entry
+        // carrying tokens leaked its cost while its body stayed hidden — label-and-nothing-else broken.
+        renderBubble(entry({ kind: "system", role: "system", text: SYSTEM_PROMPT, promptTokens: 120, completionTokens: 34 }));
+
+        expect(screen.queryByTestId("transcript-cost-footnote")).toBeNull();
+
+        fireEvent.click(screen.getByTestId("transcript-bubble-toggle"));
+
+        expect(screen.getByTestId("transcript-cost-footnote")).toHaveTextContent("120 + 34 tokens");
+    });
+
     it("puts the Runtime's briefing away the same way", () => {
         renderBubble(entry({ kind: "prompt", role: "user", text: "A new medical invoice has been extracted." }));
 
