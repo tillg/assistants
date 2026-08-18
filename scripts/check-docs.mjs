@@ -31,21 +31,31 @@ const NUMBER_WORDS = [
     "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
     "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen",
     "nineteen", "twenty", "twenty-one", "twenty-two", "twenty-three", "twenty-four", "twenty-five",
+    "twenty-six", "twenty-seven", "twenty-eight", "twenty-nine", "thirty",
 ];
 
 const adrCount = readdirSync(join(ROOT, "docs/adr")).filter((name) => /^\d{4}-.*\.md$/.test(name)).length;
 const expectedWord = NUMBER_WORDS[adrCount];
 
-for (const [index, line] of readme.split("\n").entries()) {
-    const match = /\b([a-z]+(?:-[a-z]+)?)\s+architecture decision/.exec(line);
-    if (!match) continue;
-    const said = match[1];
-    if (!NUMBER_WORDS.includes(said)) continue;
-    if (said !== expectedWord) {
-        failures.push(
-            `README.md:${index + 1} says "${said} architecture decision…" but docs/adr/ holds ` +
-                `${adrCount} (${expectedWord}). Both places that count them must agree with the directory.`,
-        );
+if (expectedWord === undefined) {
+    // Past the table: comparing every number word against `undefined` would report spurious failures
+    // ending "(undefined)" and no count could ever validate. Say the actionable thing instead.
+    failures.push(
+        `check-docs: docs/adr/ holds ${adrCount} ADRs, past the NUMBER_WORDS table ` +
+            `(max ${NUMBER_WORDS.length - 1}). Extend NUMBER_WORDS in scripts/check-docs.mjs.`,
+    );
+} else {
+    for (const [index, line] of readme.split("\n").entries()) {
+        const match = /\b([a-z]+(?:-[a-z]+)?)\s+architecture decision/.exec(line);
+        if (!match) continue;
+        const said = match[1];
+        if (!NUMBER_WORDS.includes(said)) continue;
+        if (said !== expectedWord) {
+            failures.push(
+                `README.md:${index + 1} says "${said} architecture decision…" but docs/adr/ holds ` +
+                    `${adrCount} (${expectedWord}). Both places that count them must agree with the directory.`,
+            );
+        }
     }
 }
 
