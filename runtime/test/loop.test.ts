@@ -9,7 +9,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildHarness, clearCatalogue, nowIso, putCatalogue, type Harness } from "./support/harness.js";
 import { eq, path as fieldPath, SPECS } from "../src/a12/things.js";
-import { buildMessages, canonicalArgsHash } from "../src/loop/advance.js";
+import {
+    buildMessages,
+    canonicalArgsHash,
+    ENTRY_HEADROOM,
+    isFull,
+    MAX_ENTRIES,
+} from "../src/loop/advance.js";
 import { A12RpcError } from "../src/a12/client.js";
 import { FireflyError } from "../src/connectors/firefly.js";
 import type { Conversation, OpenQuestion, Operation, Stored } from "../src/domain/types.js";
@@ -244,6 +250,86 @@ describe("the catalogue a Turn loads", () => {
         const lines = warnings.mock.calls.map((call) => call.map(String).join(" "));
         warnings.mockRestore();
         expect(lines.join("\n")).toMatch(/whole page/);
+    });
+});
+
+describe("a Conversation with no room left to record anything (B-29)", () => {
+    /** Fill a Conversation's Entries to `count`, the way a long-running one fills them. */
+    async function fillEntries(harness: Harness, docRef: string, count: number): Promise<void> {
+        const stored = await harness.conversation(docRef);
+        const entries = stored.data.entries ?? [];
+        const padding = Array.from({ length: count - entries.length }, (_unused, index) => ({
+            seq: entries.length + index + 1,
+            at: "2026-08-18T12:00:00",
+            role: "assistant" as const,
+            kind: "response" as const,
+            text: `filler ${index}`,
+        }));
+        await harness.things.update(SPECS.Conversation_DM, docRef, {
+            ...stored.data,
+            entries: [...entries, ...padding],
+        });
+    }
+
+    it("stops and says why, rather than writing an entry the store will refuse", async () => {
+        const harness = buildHarness([{ text: "should never run", finishReason: "answered" }]);
+        const assistant = await harness.seedAssistant();
+        const docRef = await harness.birth({ assistant });
+        // One past the boundary: fewer than ENTRY_HEADROOM rows remain, so no Turn may start.
+        await fillEntries(harness, docRef, MAX_ENTRIES - ENTRY_HEADROOM + 1);
+
+        const result = await harness.driver.advance(docRef);
+
+        expect(result.status).toBe("failed");
+        const conversation = await harness.conversation(docRef);
+        expect(conversation.data.status).toBe("failed");
+        expect(conversation.data.finishReason).toBe("limit");
+        expect(conversation.data.leaseUntil).toBe("");
+        // Nothing ends silently (ADR-0015): the reason is on the Conversation and in the transcript.
+        expect(conversation.data.lastError).toMatch(/filled up/);
+        expect((conversation.data.entries ?? []).at(-1)?.kind).toBe("error");
+        // And it stayed inside the Model's limit while saying so.
+        expect((conversation.data.entries ?? []).length).toBeLessThanOrEqual(MAX_ENTRIES);
+    });
+
+    it("recovers a Conversation that was already at the limit before the guard existed", async () => {
+        // The wedged case: exactly MAX_ENTRIES rows, so not one more can be appended. It must still
+        // end — previously it could not be written at all, so it stayed runnable and the scan retried
+        // it every few seconds for ever.
+        const harness = buildHarness([{ text: "should never run", finishReason: "answered" }]);
+        const assistant = await harness.seedAssistant();
+        const docRef = await harness.birth({ assistant });
+        await fillEntries(harness, docRef, MAX_ENTRIES);
+
+        const result = await harness.driver.advance(docRef);
+
+        expect(result.status).toBe("failed");
+        const conversation = await harness.conversation(docRef);
+        expect(conversation.data.status).toBe("failed");
+        expect(conversation.data.lastError).toMatch(/filled up/);
+        // No epitaph, because there was no row to put it in — and crucially, no attempt to add one.
+        expect((conversation.data.entries ?? []).length).toBe(MAX_ENTRIES);
+    });
+
+    it("leaves a Conversation with room alone", async () => {
+        const harness = buildHarness([{ text: "All done.", finishReason: "answered" }]);
+        const assistant = await harness.seedAssistant();
+        const docRef = await harness.birth({ assistant });
+        // Exactly at the boundary: the full headroom is still free, so this one runs. Together with
+        // the test above this pins the boundary from both sides rather than approximately.
+        await fillEntries(harness, docRef, MAX_ENTRIES - ENTRY_HEADROOM);
+
+        const result = await harness.driver.advance(docRef);
+
+        expect(result.status).toBe("done");
+        // The Turn ran, and the rows it wrote fitted inside the Model's limit. That is what the
+        // headroom is for: a Turn that starts must be able to finish without overrunning, and this
+        // one consumed part of the reserve rather than blowing past 100.
+        const after = (await harness.conversation(docRef)).data;
+        expect((after.entries ?? []).length).toBeLessThanOrEqual(MAX_ENTRIES);
+        // Having spent the headroom, it is now full — so the *next* advance ends it cleanly rather
+        // than failing a write.
+        expect(isFull(after)).toBe(true);
     });
 });
 

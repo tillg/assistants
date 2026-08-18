@@ -83,6 +83,32 @@ const CONVERSATION = SPECS.Conversation_DM;
 const TURN_GRANT_ON_ESCALATION = 5;
 
 /**
+ * How many Entries a Conversation may hold, because that is what the Model allows.
+ *
+ * `Conversation_DM`'s `Entries` group is `repeatability: 100`. Nothing in the loop knew that, and the
+ * consequence was the worst kind of failure: a Conversation that reached the limit could no longer be
+ * written, so it could not be marked failed either, so it stayed runnable and the scan retried it
+ * **every seven seconds for ever** — against an A12 validation error about row numbers, which reads
+ * like a store fault rather than a full Conversation.
+ *
+ * Two caps disagreed and only one of them was written down. `maxTurns` defaults to 20 and is the one
+ * everybody reasons about; a Turn writes several Entries — a prompt, a response, an intent, a
+ * result — so a Conversation passes 100 Entries long before it runs out of Turns. This is the one
+ * that actually binds.
+ */
+export const MAX_ENTRIES = 100;
+
+/**
+ * How many rows are kept back, so the end can be written down.
+ *
+ * A Turn appends as it goes and cannot un-append, so stopping exactly at the limit would leave no
+ * room to say why it stopped — and [ADR-0015](../../../docs/adr/0015-nothing-ends-silently.md) is
+ * that nothing ends silently. Five is enough for the epitaph plus the entries a Turn writes before it
+ * could notice, without taking a meaningful bite out of a hundred.
+ */
+export const ENTRY_HEADROOM = 5;
+
+/**
  * What the model is told when its call was refused for want of an approval.
  *
  * The generic pending wording — *"Suspended; the answer will arrive as a later message"* — would
@@ -284,6 +310,16 @@ export function renderApprovalPrompt(operation: GrantedOperation, args: Record<s
     ].join("\n");
 }
 
+/**
+ * Has this Conversation run out of room to record anything more?
+ *
+ * Pure, and exported so the bound can be asserted directly rather than inferred from a store that
+ * refuses a write. See {@link MAX_ENTRIES} for why the bound exists and why it is not `maxTurns`.
+ */
+export function isFull(conversation: Conversation): boolean {
+    return (conversation.entries ?? []).length + ENTRY_HEADROOM > MAX_ENTRIES;
+}
+
 export function appendEntry(conversation: Conversation, entry: Omit<Entry, "seq" | "at">): Entry {
     const full: Entry = { seq: nextSeq(conversation), at: nowIso(), ...entry };
     conversation.entries = [...(conversation.entries ?? []), full];
@@ -400,6 +436,15 @@ export class LoopDriver {
         }
         if (!this.claimLease(conversation)) {
             return { status: conversation.status ?? "running", turnsRun: 0, note: "leased elsewhere" };
+        }
+
+        // Before anything appends: is there room left to append into? A Conversation that has filled
+        // its Entries group cannot be written at all, which means it cannot even be marked failed —
+        // so this has to be checked before the Turn starts rather than discovered when the write is
+        // refused.
+        if (isFull(conversation)) {
+            await this.endBecauseFull(stored);
+            return { status: "failed", turnsRun: 0, note: "entries full" };
         }
 
         const assistant = await this.loadAssistant(conversation.assistantKey ?? "");
@@ -1114,6 +1159,48 @@ export class LoopDriver {
             2,
         );
         return found[0];
+    }
+
+    /**
+     * End a Conversation that has no room left to record anything, and say so.
+     *
+     * It ends as `failed` rather than `done` because nothing was concluded — the work stopped
+     * because the record filled up, which is a different thing from finishing, and the User may want
+     * to start a fresh Conversation for whatever was left. `lastError` carries that in words, because
+     * a status alone would be the silent stop ADR-0015 forbids.
+     *
+     * **The epitaph is appended only if there is room for it.** A Conversation that is already at the
+     * Model's limit — one that filled up before this guard existed — cannot take another row, and
+     * trying is precisely the write that fails. In that case the reason goes in `lastError` only, and
+     * the Conversation still ends. Recovering the stuck ones matters more than recording the ending
+     * twice.
+     */
+    private async endBecauseFull(stored: Stored<Conversation>): Promise<void> {
+        const conversation = stored.data;
+        const held = (conversation.entries ?? []).length;
+        const reason =
+            `This conversation filled up: it holds ${held} of the ${MAX_ENTRIES} entries a ` +
+            `conversation can record, so nothing further can be written to it. It has stopped here. ` +
+            `Start a new one if the work still needs doing.`;
+
+        if (held < MAX_ENTRIES) {
+            appendEntry(conversation, { role: "system", kind: "error", text: reason });
+        }
+
+        conversation.status = "failed";
+        conversation.finishReason = "limit";
+        conversation.waitingFor = "";
+        conversation.leaseUntil = "";
+        conversation.currentQuestionId = "";
+        conversation.lastError = reason;
+
+        await this.write(stored);
+        log.error("conversation ran out of entries and was stopped", {
+            conversationId: stored.thingId,
+            assistant: conversation.assistantKey,
+            entries: held,
+            maxEntries: MAX_ENTRIES,
+        });
     }
 
     private async write(stored: Stored<Conversation>): Promise<void> {

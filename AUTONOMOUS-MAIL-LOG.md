@@ -579,7 +579,7 @@ CORS.
 
 ## Fifth pass — the container, and Gmail for real
 
-### B-29 — a Conversation that reaches 100 Entries can never be advanced again, and retries for ever · REPRODUCED · OPEN
+### B-29 — a Conversation that reaches 100 Entries can never be advanced again, and retries for ever · REPRODUCED · FIXED
 
 Found by watching the rebuilt Runtime's own logs, not by any test.
 
@@ -603,16 +603,32 @@ written down and reasoned about, and `Entries` is the one that actually binds. N
 second, and the error surfaces as an A12 validation message about row numbers rather than as
 *"this Conversation is full"*.
 
-**Left open, deliberately.** The fix is a design decision rather than a patch, and there are at least
-three defensible answers — cap Entries and end the Conversation cleanly when it is reached; raise the
-model's repeatability; or stop appending every intermediate Entry. Choosing between them decides what a
-Transcript promises, and doing that unattended, at the end of a long session, in the loop that drives
-every Assistant, is how a wedged Conversation becomes a wedged system. It is pre-existing and not
-caused by the letterbox.
+**Fixed, and deliberately the smallest of the three options.** The others — raising the Model's
+repeatability, or appending fewer Entries per Turn — both change what a Transcript *is*, and neither is
+a decision to take unattended. This one changes only what happens at the boundary.
 
-**Recommendation:** whatever else, the Loop Driver should refuse to append past the model's limit and
-end the Conversation with a reason, so that the failure is *"it filled up"* rather than an infinite
-retry against a validation error. `ADR-0015` says nothing ends silently, and this ends nothing at all.
+`isFull()` is a pure predicate over the Conversation, checked **before a Turn starts** rather than
+discovered when a write is refused, and `ENTRY_HEADROOM = 5` rows are kept back so that a Turn which
+starts can finish without overrunning. When it trips, the Conversation ends as `failed` with
+`finishReason: "limit"` and a `lastError` saying it filled up — because ADR-0015 asks that nothing end
+silently, and an infinite retry against a validation error ends nothing at all.
+
+**The epitaph is appended only when there is a row for it.** A Conversation already at 100 — one that
+filled up before the guard existed — cannot take another row, and trying is precisely the write that
+fails. Those end with the reason in `lastError` alone. Recovering the stuck ones matters more than
+recording the ending twice.
+
+**Verified on the live stack**, which is the only place it could be: the wedged Conversation
+(`db637140-…`, 100 entries, retrying every seven seconds since before this session) was ended once by
+the rebuilt Runtime —
+
+```
+ERROR conversation ran out of entries and was stopped
+      {"conversationId":"db637140-…","assistant":"accountant","entries":100,"maxEntries":100}
+```
+
+— and the sixty seconds after that contain **no** `advancing a conversation threw` and **no**
+`zuGrosseKontextnummer`. Three tests pin the boundary from both sides and the already-full recovery.
 
 ### What the letterbox now does, verified in the deployed container
 
