@@ -151,6 +151,13 @@ export class Watcher {
      */
     private answeredCursor: string | undefined;
 
+    /**
+     * The sweep cursor for scan 5 (result delivery), the twin of {@link answeredCursor}. Result
+     * delivery needs it more than the answered scan does: its rows are machine-generated and some
+     * can never be delivered, so an unordered window let them shadow deliverable ones for ever.
+     */
+    private resultDeliveryCursor: string | undefined;
+
     /** Per Assistant: the slot its schedule is held at, and whether that has been reported. */
     private readonly stalledSlots = new Map<
         string,
@@ -876,116 +883,179 @@ export class Watcher {
     // ---------------------------------------------------------------- scan 5: result delivery
 
     private async scanResultDelivery(handled: Set<string>): Promise<number> {
-        // `done` OR `failed`: a child that gave up still owes its caller an answer. Without this a
-        // parent waits on `assistant` forever with nothing anywhere saying why.
-        const finished = await this.deps.things.search<Conversation>(
-            SPECS.Conversation_DM,
-            and(
-                or(
-                    eq(fieldPath(SPECS.Conversation_DM, "status"), "done"),
-                    eq(fieldPath(SPECS.Conversation_DM, "status"), "failed"),
-                ),
-                setButNot(
-                    fieldPath(SPECS.Conversation_DM, "parentConversationId"),
-                    fieldPath(SPECS.Conversation_DM, "resultDeliveredAt"),
-                ),
-            ),
-            100,
-        );
-
+        const spec = SPECS.Conversation_DM;
         let delivered = 0;
-        for (const child of finished) {
-            const parentId = child.data.parentConversationId;
-            if (!parentId) continue;
-            try {
-                const parent = await this.deps.things.get<Conversation>(
-                    SPECS.Conversation_DM,
-                    `Conversation_DM/${parentId}`,
-                );
+        // Ordered oldest-first and swept with a cursor across passes, exactly as {@link scanAnswered}
+        // — and for a sharper reason. This set is machine-generated (a fan-out fills it) and it holds
+        // rows that can never leave it: a child whose parent was deleted by hand throws below, is
+        // logged "will retry", and is never stamped delivered. An unordered 100-cap let a hundred
+        // such stuck rows shadow every deliverable child queued behind them, so a parent waited on
+        // `assistant` for ever with one warn line as the only trace. The cursor walks past the stuck
+        // rows to the deliverable ones instead of returning the same arbitrary window every pass.
+        let cursor = this.resultDeliveryCursor;
+        /** Every finished child this pass has already looked at — see {@link scanAnswered}. */
+        const examined = new Set<string>();
 
-                // A caller that has already finished is told in the log, not in its transcript.
-                // Appending would rewrite a Conversation that is done — and as `role:"user"`,
-                // `kind:"answer"`, which is what `buildMessages` turns into a user message, so it
-                // corrupts the record for any later reader including a real provider. The result is
-                // not lost: it lives on the child, which the UI shows.
-                //
-                // Scoped to *terminal* callers deliberately. A parent that is `running`, or waiting
-                // on something else, may still legitimately be owed the answer — a `wait` caller
-                // whose lease expired and which escalated, for one — and declining there would lose
-                // the result for good once `resultDeliveredAt` is stamped.
-                if (parent.data.status === "done" || parent.data.status === "failed") {
-                    log.info("a child finished for a caller that had already moved on", {
-                        child: child.thingId,
-                        parentId,
-                        childStatus: child.data.status,
+        for (let page = 0; page < ANSWERED_SCAN_MAX_PAGES; page += 1) {
+            // `done` OR `failed`: a child that gave up still owes its caller an answer. Without this a
+            // parent waits on `assistant` forever with nothing anywhere saying why.
+            const finished = await this.deps.things.search<Conversation>(
+                spec,
+                and(
+                    or(
+                        eq(fieldPath(spec, "status"), "done"),
+                        eq(fieldPath(spec, "status"), "failed"),
+                    ),
+                    setButNot(
+                        fieldPath(spec, "parentConversationId"),
+                        fieldPath(spec, "resultDeliveredAt"),
+                    ),
+                    ...(cursor === undefined
+                        ? []
+                        : [
+                              {
+                                  operator: "date_range",
+                                  field: fieldPath(spec, "createdAt"),
+                                  from: cursor,
+                              } as Constraint,
+                          ]),
+                ),
+                PAGE_SIZE,
+                byCreatedAt(spec, "ASC"),
+            );
+
+            /** The newest `createdAt` this page contained: where the next page picks up. */
+            let newest = cursor;
+            /** Rows in this page the pass had not already examined — its progress. */
+            let fresh = 0;
+
+            for (const child of finished) {
+                const createdAt = child.data.createdAt ?? "";
+                if (createdAt && (newest === undefined || createdAt > newest)) newest = createdAt;
+                if (examined.has(child.docRef)) continue;
+                examined.add(child.docRef);
+                fresh += 1;
+
+                const parentId = child.data.parentConversationId;
+                if (!parentId) continue;
+                try {
+                    const parent = await this.deps.things.get<Conversation>(
+                        SPECS.Conversation_DM,
+                        `Conversation_DM/${parentId}`,
+                    );
+
+                    // A caller that has already finished is told in the log, not in its transcript.
+                    // Appending would rewrite a Conversation that is done — and as `role:"user"`,
+                    // `kind:"answer"`, which is what `buildMessages` turns into a user message, so it
+                    // corrupts the record for any later reader including a real provider. The result is
+                    // not lost: it lives on the child, which the UI shows.
+                    //
+                    // Scoped to *terminal* callers deliberately. A parent that is `running`, or waiting
+                    // on something else, may still legitimately be owed the answer — a `wait` caller
+                    // whose lease expired and which escalated, for one — and declining there would lose
+                    // the result for good once `resultDeliveredAt` is stamped.
+                    if (parent.data.status === "done" || parent.data.status === "failed") {
+                        log.info("a child finished for a caller that had already moved on", {
+                            child: child.thingId,
+                            parentId,
+                            childStatus: child.data.status,
+                        });
+                        child.data.resultDeliveredAt = nowIso();
+                        await this.deps.things.update(
+                            SPECS.Conversation_DM,
+                            child.docRef,
+                            child.data as Record<string, unknown>,
+                        );
+                        delivered += 1;
+                        continue;
+                    }
+
+                    const failed = child.data.status === "failed";
+                    appendEntry(parent.data, {
+                        role: "user",
+                        kind: "answer",
+                        text: failed
+                            ? [
+                                  `The **${child.data.assistantKey}** assistant you called did not finish.`,
+                                  ``,
+                                  child.data.lastError ?? "(no reason recorded)",
+                                  ``,
+                                  `Decide what to do without it.`,
+                              ].join("\n")
+                            : [
+                                  `The **${child.data.assistantKey}** assistant you called has finished.`,
+                                  ``,
+                                  child.data.result ?? "(no result)",
+                              ].join("\n"),
                     });
+
+                    const parentWasWaiting =
+                        parent.data.status === "waiting" && parent.data.waitingFor === "assistant";
+                    if (parentWasWaiting) {
+                        parent.data.status = "running";
+                        parent.data.waitingFor = "";
+                        parent.data.wakeAt = "";
+                    }
+                    await this.deps.things.update(
+                        SPECS.Conversation_DM,
+                        parent.docRef,
+                        parent.data as Record<string, unknown>,
+                    );
+
+                    // Stamped only after the parent write succeeded. Stamping unconditionally would
+                    // mark a failed delivery as delivered, and the scan would never retry it — the
+                    // parent then waits on `assistant` forever with one warn line as the only trace.
                     child.data.resultDeliveredAt = nowIso();
                     await this.deps.things.update(
                         SPECS.Conversation_DM,
                         child.docRef,
                         child.data as Record<string, unknown>,
                     );
+
+                    // A result arriving for a Conversation that has already moved on is a log line,
+                    // never a resurrection.
+                    if (parentWasWaiting) {
+                        handled.add(parent.docRef);
+                        await this.runTurn(parent.docRef);
+                    }
                     delivered += 1;
-                    continue;
+                } catch (error) {
+                    log.warn("could not deliver a result to the parent conversation; will retry", {
+                        child: child.thingId,
+                        parentId,
+                        error: describeError(error),
+                    });
                 }
-
-                const failed = child.data.status === "failed";
-                appendEntry(parent.data, {
-                    role: "user",
-                    kind: "answer",
-                    text: failed
-                        ? [
-                              `The **${child.data.assistantKey}** assistant you called did not finish.`,
-                              ``,
-                              child.data.lastError ?? "(no reason recorded)",
-                              ``,
-                              `Decide what to do without it.`,
-                          ].join("\n")
-                        : [
-                              `The **${child.data.assistantKey}** assistant you called has finished.`,
-                              ``,
-                              child.data.result ?? "(no result)",
-                          ].join("\n"),
-                });
-
-                const parentWasWaiting =
-                    parent.data.status === "waiting" && parent.data.waitingFor === "assistant";
-                if (parentWasWaiting) {
-                    parent.data.status = "running";
-                    parent.data.waitingFor = "";
-                    parent.data.wakeAt = "";
-                }
-                await this.deps.things.update(
-                    SPECS.Conversation_DM,
-                    parent.docRef,
-                    parent.data as Record<string, unknown>,
-                );
-
-                // Stamped only after the parent write succeeded. Stamping unconditionally would
-                // mark a failed delivery as delivered, and the scan would never retry it — the
-                // parent then waits on `assistant` forever with one warn line as the only trace.
-                child.data.resultDeliveredAt = nowIso();
-                await this.deps.things.update(
-                    SPECS.Conversation_DM,
-                    child.docRef,
-                    child.data as Record<string, unknown>,
-                );
-
-                // A result arriving for a Conversation that has already moved on is a log line,
-                // never a resurrection.
-                if (parentWasWaiting) {
-                    handled.add(parent.docRef);
-                    await this.runTurn(parent.docRef);
-                }
-                delivered += 1;
-            } catch (error) {
-                log.warn("could not deliver a result to the parent conversation; will retry", {
-                    child: child.thingId,
-                    parentId,
-                    error: describeError(error),
-                });
             }
+
+            // A short page is the end of the sweep; the next pass starts from the beginning. See
+            // scanAnswered for why the cursor is allowed to go backwards only here.
+            if (finished.length < PAGE_SIZE) {
+                this.resultDeliveryCursor = undefined;
+                return delivered;
+            }
+            if (fresh === 0) {
+                // A full page of rows all already examined: more than PAGE_SIZE finished children
+                // share one createdAt second. Step one second past the group to keep the sweep
+                // moving, said out loud — an operator seeing this has undelivered results in the tail.
+                const tied = parseIso(newest);
+                log.warn(
+                    `more than ${PAGE_SIZE} finished child Conversations share one createdAt second, ` +
+                        `so some cannot be reached by this scan; stepping past them`,
+                    { createdAt: newest, examined: examined.size },
+                );
+                if (tied === undefined) {
+                    this.resultDeliveryCursor = undefined;
+                    return delivered;
+                }
+                cursor = nowIso(new Date(tied + 1_000));
+                continue;
+            }
+            cursor = newest;
         }
+
+        // Out of pages, not out of children. Remember where the sweep got to.
+        this.resultDeliveryCursor = cursor;
         return delivered;
     }
 

@@ -506,6 +506,48 @@ describe("result delivery (scan 5)", () => {
         const settledChild = await harness.conversation(child.docRef);
         expect(settledChild.data.resultDeliveredAt).toBeTruthy();
     });
+
+    it("reaches a deliverable child even when 100+ undeliverable ones sit ahead of it", async () => {
+        // BUG-01: scan 5 read one unordered window of 100. A child whose parent was deleted throws
+        // on delivery, is never stamped, and stays in the set for ever — so a hundred of them could
+        // fill the window and shadow every deliverable child queued behind. The cursor sweep (the
+        // twin of scanAnswered) walks past the stuck rows. Here: 100 orphans, then one deliverable
+        // child that is newest, so an ordered sweep meets it only on a later page.
+        const harness = buildHarness([]);
+        const t0 = Date.now() - 3_600_000;
+        await seedState(harness, nowIso(new Date(t0)));
+
+        // A terminal parent, so delivery takes the "already moved on" branch and needs no model.
+        const parent = await harness.things.create(SPECS.Conversation_DM, {
+            assistantKey: "receptionist",
+            status: "done",
+            createdAt: nowIso(new Date(t0)),
+            idempotencyKey: "real-parent",
+        });
+        for (let i = 0; i < 100; i += 1) {
+            await harness.things.create(SPECS.Conversation_DM, {
+                assistantKey: "accountant",
+                status: "done",
+                result: "orphan",
+                parentConversationId: `does-not-exist-${i}`,
+                createdAt: nowIso(new Date(t0 + i * 1_000)),
+                idempotencyKey: `orphan-${i}`,
+            });
+        }
+        const child = await harness.things.create(SPECS.Conversation_DM, {
+            assistantKey: "accountant",
+            status: "done",
+            result: "the answer",
+            parentConversationId: parent.thingId,
+            createdAt: nowIso(new Date(t0 + 200_000)),
+            idempotencyKey: "deliverable",
+        });
+
+        await harness.watcher.scan();
+
+        const settled = await harness.conversation(child.docRef);
+        expect(settled.data.resultDeliveredAt, "the deliverable child was reached past the stuck rows").toBeTruthy();
+    });
 });
 
 describe("the RuntimeState the scan writes back", () => {
