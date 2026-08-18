@@ -1,6 +1,21 @@
+import { $createParagraphNode, $createTextNode, $getRoot } from "lexical";
 import { describe, expect, it } from "vitest";
 
-import { roundTrip } from "../markdownTestUtils";
+import { $createAdmonitionNode } from "../../../../components/markdown-editor/nodes/AdmonitionNode";
+import { $nodesToMarkdown } from "../../../../components/markdown-editor/markdown/markdownConversion";
+
+import { createTestEditor, roundTrip } from "../markdownTestUtils";
+
+/** Build a node graph on a headless editor and serialize it to markdown. */
+function serialize(build: () => void): string {
+    const editor = createTestEditor();
+    editor.update(build, { discrete: true });
+    let markdown = "";
+    editor.getEditorState().read(() => {
+        markdown = $nodesToMarkdown();
+    });
+    return markdown;
+}
 
 describe("admonition directive round-trip", () => {
     it.each(["info", "warning", "note", "tip", "panel"])("round-trips a %s panel", (type) => {
@@ -64,5 +79,31 @@ describe("admonition directive round-trip", () => {
         // No closing `:::` → not a directive; the lines survive as plain text.
         expect(roundTrip(md)).toContain("No closing fence here.");
         expect(roundTrip(md)).toContain(':::admonition{type="info"}');
+    });
+
+    it("does not wrap a body that itself contains a ::: fence (would truncate on re-import)", () => {
+        // BUG-16: a bare ::: line in the body (or a nested panel) made the export produce
+        // :::admonition{}\n:::\n:::, which the non-nesting parser closed at the first inner fence —
+        // truncating the body and spilling the real close as stray text. The guard serializes the
+        // body un-wrapped: the panel is lost, the content is not.
+        const md = serialize(() => {
+            const root = $getRoot();
+            root.clear();
+            const admonition = $createAdmonitionNode("info");
+            const body = $createParagraphNode();
+            body.append($createTextNode("A line, then a fence:"));
+            admonition.append(body);
+            const fence = $createParagraphNode();
+            fence.append($createTextNode(":::"));
+            admonition.append(fence);
+            root.append(admonition);
+        });
+
+        // The content survives...
+        expect(md).toContain("A line, then a fence:");
+        // ...without a panel wrapper that would truncate on the next read...
+        expect(md).not.toContain(":::admonition");
+        // ...and what we produced is stable on re-import.
+        expect(roundTrip(md)).toBe(md);
     });
 });

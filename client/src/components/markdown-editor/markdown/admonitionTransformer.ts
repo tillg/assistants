@@ -14,6 +14,12 @@ import { CONTAINER_DIRECTIVE_END, parseDirectiveAttributes, serializeDirectiveAt
 // Name-specific so any other `:::name` survives as plain text (spec 009).
 const ADMONITION_START = /^:::admonition(?:\{([^}]*)\})?\s*$/;
 
+// A body line that is itself a `:::` container fence — a nested panel, or a bare `:::` the User
+// typed. Our home-grown matcher does not nest `:::`, so wrapping such a body would truncate it on
+// re-import at the first inner fence and spill the real closing `:::` into the document. The
+// alignment transformer guards the same way.
+const CONTAINS_DIRECTIVE_FENCE = /^:::/m;
+
 /**
  * Admonition panel container directive (`:::admonition{type="…"}\n<body>\n:::`,
  * spec 009). Built as a Lexical `MultilineElementTransformer` (no remark
@@ -33,6 +39,11 @@ export function createAdmonitionTransformer(getTransformers: () => Transformer[]
             // Preserve-newlines mode mirrors the editor's main conversion so blank
             // lines inside the body round-trip (see markdownConversion.ts).
             const body = $convertToMarkdownString(getTransformers(), node, true);
+            if (CONTAINS_DIRECTIVE_FENCE.test(body)) {
+                // Serialize the body un-wrapped (the panel is lost, the content is not), rather than
+                // emit a container our own parser would truncate on the next read.
+                return null;
+            }
             return `:::admonition{${attrs}}\n${body}\n:::`;
         },
         regExpStart: ADMONITION_START,
