@@ -504,7 +504,7 @@ running Conversations moving. There is no backoff state and no circuit breaker; 
 minute away, which *is* the backoff.
 
 Four Gmail labels, which IMAP sees as folders, hold the whole state machine: `assistant` — the only
-folder ever read — and `assistant/processed`, `assistant/failed` and `assistant/rejected`. Nothing is
+folder ever read — and `assistants/processed`, `assistants/failed` and `assistants/rejected`. Nothing is
 deleted and nothing is marked read. A read flag would have only two states, and a message that was
 fetched, allowed and then failed needs a third: it must not stay unread, because unread means *retry
 every minute for ever*, and it must not be marked done, because nothing was created. Rejected mail
@@ -580,10 +580,10 @@ MAIL_HOST='imap.gmail.com'         # empty ⇒ scan 0 never runs; said once at s
 MAIL_PORT='993'                    # implicit TLS; there is no flag that disables verification
 MAIL_USER='…@gmail.com'            # the Receptionist's own account, never the User's
 MAIL_PASSWORD='…'                  # a Google App Password, which requires 2FA on that account
-MAIL_FOLDER_INCOMING='assistant'
-MAIL_FOLDER_PROCESSED='assistant/processed'
-MAIL_FOLDER_FAILED='assistant/failed'
-MAIL_FOLDER_REJECTED='assistant/rejected'
+MAIL_FOLDER_INCOMING='assistants'
+MAIL_FOLDER_PROCESSED='assistants/processed'
+MAIL_FOLDER_FAILED='assistants/failed'
+MAIL_FOLDER_REJECTED='assistants/rejected'
 MAIL_ALLOWED_SENDERS=''            # comma-separated. EMPTY MEANS NOBODY
 MAIL_POLL_INTERVAL_MS='60000'
 MAIL_MAX_PER_POLL='20'

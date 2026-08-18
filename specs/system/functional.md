@@ -301,7 +301,7 @@ sequenceDiagram
     RT->>TS: already a Document with this ExternalRef?
     RT->>RT: read the PDF's text layer — free, on arrival
     RT->>TS: upload the attachment, create the Document (Source: email)
-    RT->>MB: only now, move the message to assistant/processed
+    RT->>MB: only now, move the message to assistants/processed
     RT->>R: scan 1 — a Document materialised, birth a Conversation
     R->>R: classify from the covering note and the extracted text
     Note over R: from here, the doctor's-invoice slice, unchanged
@@ -312,8 +312,8 @@ Receptionist cannot tell that this one was not typed — which is the property t
 tested against (ADR-0024).
 
 Three things can happen instead, and each is visible in Gmail rather than in a log. A sender who is
-not on the allowlist lands in `assistant/rejected` with nothing read and nothing created. A message
-whose Documents could not all be created lands in `assistant/failed`, having created the ones that
+not on the allowlist lands in `assistants/rejected` with nothing read and nothing created. A message
+whose Documents could not all be created lands in `assistants/failed`, having created the ones that
 did land, so moving it back re-runs only what is missing. And a scanned attachment with no text layer
 arrives with an empty `extractedText`, at which point the Receptionist decides whether it is worth
 `document.readScan` — a bill, yes; an advertising leaflet, no — and falls through to asking the User

@@ -46,10 +46,10 @@ The Runtime gains an **Email Connector** and a mailbox to poll.
 | | |
 |---|---|
 | **The Mailbox** | one **Gmail** account, the Receptionist's own — `receptionist@…` — reached over IMAP with an App Password. Configured in `.env` like every other credential |
-| **The poll** | a fifth scan in the Trigger Watcher, on its own interval (default 60s). It logs in, reads `assistant`, and logs out. Nothing is held open between polls |
+| **The poll** | a fifth scan in the Trigger Watcher, on its own interval (default 60s). It logs in, reads `assistants`, and logs out. Nothing is held open between polls |
 | **The state** | **four folders** — `incoming`, `processed`, `failed`, `rejected` — which are Gmail labels seen through IMAP. Every message ends in one of them, so what happened to a mail is visible in Gmail without reading a log |
 | **The translation** | one message → one or more `Document` Things. Body text into `ExtractedText`, the binary into the attachment group, `Source: email`, `ExternalRef` the Message-ID, `Title` the subject |
-| **The gate** | a **sender allowlist**. Mail from an address not on it is moved to `assistant/rejected` and never becomes a Thing |
+| **The gate** | a **sender allowlist**. Mail from an address not on it is moved to `assistants/rejected` and never becomes a Thing |
 | **The Operation** | `email.receive` joins the catalogue as a Connector Operation, so the User can read it, describe it and switch it off like any other ([ADR-0019](../../../docs/adr/0019-an-operation-is-a-thing.md)) |
 
 The Receptionist then does exactly what it does today, because from where it stands nothing has
@@ -146,7 +146,7 @@ comes into being today involves the User typing. A public address does not, and 
 real: an LLM Turn costs money, and a Conversation born per spam mail costs it repeatedly. Hence the
 allowlist — **default-deny, addresses named in config** — plus a size cap, a per-poll cap, and
 `maxBirthsPerHour`, which already exists and already bounds the damage downstream. Anything not
-allowed is moved to `assistant/rejected`, where the User can see it; it is not deleted and not
+allowed is moved to `assistants/rejected`, where the User can see it; it is not deleted and not
 silently dropped.
 
 ## Expected outcome

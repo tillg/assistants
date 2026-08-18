@@ -862,7 +862,13 @@ describe("runMailIngest", () => {
     });
 
     /** The covering note is the most useful sentence in the message. Nothing may overwrite it. */
-    it("keeps the mail body when the message has both body text and a readable PDF", async () => {
+    it("keeps the mail body AND appends what the PDF says, under a heading naming the file", async () => {
+        // This test previously asserted `not.toContain("Rechnungsnummer")` — that the invoice's own
+        // text must be absent whenever the mail had a covering note. That was the specification it
+        // was written to, and the specification was wrong: almost every forward has a covering note,
+        // so the invoice was never read in practice. Measured on a real forwarded builder's invoice,
+        // the Document arrived with "Begin forwarded message: From: Andreas Herescu…" and not one
+        // figure from the invoice, which is the whole purpose of the exercise.
         const mailbox = new FakeMailbox();
         mailbox.put(
             INCOMING,
@@ -874,8 +880,27 @@ describe("runMailIngest", () => {
         await ingest(mailbox);
 
         const [document] = await documents();
-        expect(document?.data.extractedText).toContain("Die Zahnarztrechnung, ist schon bezahlt.");
-        expect(document?.data.extractedText).not.toContain("Rechnungsnummer");
+        const text = String(document?.data.extractedText ?? "");
+        // The forwarder's words first, because that is what a human opening the mail reads first.
+        expect(text).toContain("Die Zahnarztrechnung, ist schon bezahlt.");
+        // Then the document itself.
+        expect(text).toContain("Rechnungsnummer");
+        // Named, because a message with three PDFs would otherwise leave the model guessing which
+        // text belonged to which file.
+        expect(text).toContain("--- born-digital-invoice.pdf ---");
+        expect(text.indexOf("Die Zahnarztrechnung")).toBeLessThan(text.indexOf("Rechnungsnummer"));
+    });
+
+    it("appends the PDF's text with no leading blank when the mail has no body at all", async () => {
+        const mailbox = new FakeMailbox();
+        mailbox.put(INCOMING, withPdf(75, "born-digital-invoice.pdf", { body: "" }));
+
+        await ingest(mailbox);
+
+        const [document] = await documents();
+        const text = String(document?.data.extractedText ?? "");
+        expect(text.startsWith("--- born-digital-invoice.pdf ---")).toBe(true);
+        expect(text).toContain("Rechnungsnummer");
     });
 
     it("creates the Document anyway when the text-layer reader throws", async () => {

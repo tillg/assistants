@@ -206,13 +206,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
             port: number("MAIL_PORT", 993),
             user: optional("MAIL_USER", ""),
             password: optional("MAIL_PASSWORD", ""),
-            // Gmail nests labels with `/`, and the household's label is `assistant`. These are
+            // Gmail nests labels with `/`, and the household's label is `assistants`, after the system itself. These are
             // configuration rather than constants because the same ingest should work against a
             // provider that spells its folders differently.
-            folderIncoming: optional("MAIL_FOLDER_INCOMING", "assistant"),
-            folderProcessed: optional("MAIL_FOLDER_PROCESSED", "assistant/processed"),
-            folderFailed: optional("MAIL_FOLDER_FAILED", "assistant/failed"),
-            folderRejected: optional("MAIL_FOLDER_REJECTED", "assistant/rejected"),
+            folderIncoming: optional("MAIL_FOLDER_INCOMING", "assistants"),
+            folderProcessed: optional("MAIL_FOLDER_PROCESSED", "assistants/processed"),
+            folderFailed: optional("MAIL_FOLDER_FAILED", "assistants/failed"),
+            folderRejected: optional("MAIL_FOLDER_REJECTED", "assistants/rejected"),
             allowedSenders: list("MAIL_ALLOWED_SENDERS").map((entry) => entry.toLowerCase()),
             // A minute. `SCAN_INTERVAL_MS` is two seconds, and an IMAP login every two seconds is
             // abusive enough that several providers rate-limit or lock the account for it.

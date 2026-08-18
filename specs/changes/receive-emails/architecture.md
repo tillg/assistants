@@ -78,8 +78,8 @@ sequenceDiagram
     participant R as Receptionist
 
     W->>M: due?
-    M->>E: fetchFolder(assistant, max: MAIL_MAX_PER_POLL)
-    E->>MB: login, SELECT assistant, SEARCH ALL
+    M->>E: fetchFolder(assistants, max: MAIL_MAX_PER_POLL)
+    E->>MB: login, SELECT assistants, SEARCH ALL
     MB-->>E: uids
     E->>MB: FETCH (headers, bodystructure, body)
     MB-->>E: raw messages
@@ -89,7 +89,7 @@ sequenceDiagram
     loop each message
         M->>M: sender on the allowlist?
         alt no
-            M->>MB: MOVE → assistant/rejected
+            M->>MB: MOVE → assistants/rejected
         else yes
             loop each Document the message becomes
                 M->>TS: QUERY Document where ExternalRef = <id>#<part>
@@ -103,9 +103,9 @@ sequenceDiagram
                 end
             end
             alt every Document landed
-                M->>MB: MOVE → assistant/processed
+                M->>MB: MOVE → assistants/processed
             else something threw
-                M->>MB: MOVE → assistant/failed
+                M->>MB: MOVE → assistants/failed
             end
         end
     end
@@ -141,10 +141,10 @@ ever*. Nor may it be marked done, because nothing was created. It needs a third 
 
 | Folder | Means | Who looks |
 |---|---|---|
-| `assistant` | not yet handled. **The only folder the ingest reads** | the ingest, every poll |
-| `assistant/processed` | every Document landed | nobody, until something is being debugged |
-| `assistant/failed` | tried, threw, gave up | **the User** — this is a real inbox for a human |
-| `assistant/rejected` | sender not on the allowlist. Nothing was read, nothing created | the User, occasionally; otherwise it is a spam box |
+| `assistants` | not yet handled. **The only folder the ingest reads** | the ingest, every poll |
+| `assistants/processed` | every Document landed | nobody, until something is being debugged |
+| `assistants/failed` | tried, threw, gave up | **the User** — this is a real inbox for a human |
+| `assistants/rejected` | sender not on the allowlist. Nothing was read, nothing created | the User, occasionally; otherwise it is a spam box |
 
 **Everything leaves `incoming`, including spam.** The obvious design leaves disallowed mail sitting
 unread where it landed — but the poll takes at most `MAIL_MAX_PER_POLL` messages, so accumulated
@@ -160,12 +160,12 @@ are real Things with real `ExternalRef`s, and a retry after the User moves the m
 them and create only what is missing.
 
 **Folders rather than Gmail labels, even though the account is Gmail.** Gmail exposes every label as
-an IMAP folder, so `assistant` is one string that means a label to Gmail and a folder to
+an IMAP folder, so `assistants` is one string that means a label to Gmail and a folder to
 everyone else. The state machine is therefore Gmail's own, reached through a protocol that is not
 Gmail's — which is what keeps the Connector swappable if the household ever leaves.
 
 **The `/` is a Gmail assumption, and it is worth knowing which kind.** Gmail's hierarchy delimiter is
-`/`, so `assistant/processed` is a sub-label of `assistant`. Other servers differ — GreenMail, which
+`/`, so `assistants/processed` is a sub-label of `assistants`. Other servers differ — GreenMail, which
 the integration tier runs against, uses `.`, so there the same four names are four *sibling*
 mailboxes that happen to contain a slash rather than a parent and three children. Both work, and
 they work for the same reason: **neither the connector nor the ingest ever asks about hierarchy.**
@@ -270,10 +270,10 @@ MAIL_HOST='imap.gmail.com'         # empty ⇒ the scan never runs; logged once 
 MAIL_PORT='993'
 MAIL_USER='receptionist@…'         # the Receptionist's own Gmail account, not the User's
 MAIL_PASSWORD='CHANGE_ME'          # a Google App Password. Requires 2FA on that account
-MAIL_FOLDER_INCOMING='assistant'
-MAIL_FOLDER_PROCESSED='assistant/processed'
-MAIL_FOLDER_FAILED='assistant/failed'
-MAIL_FOLDER_REJECTED='assistant/rejected'
+MAIL_FOLDER_INCOMING='assistants'
+MAIL_FOLDER_PROCESSED='assistants/processed'
+MAIL_FOLDER_FAILED='assistants/failed'
+MAIL_FOLDER_REJECTED='assistants/rejected'
 MAIL_ALLOWED_SENDERS=''            # comma-separated. EMPTY MEANS NOBODY.
 MAIL_POLL_INTERVAL_MS='60000'
 MAIL_MAX_PER_POLL='20'

@@ -624,33 +624,31 @@ async function ingestDocument(
 }
 
 /**
- * The Document's text, with a PDF's own text layer read in when there is nothing else.
+ * The text a Document arrives with: the covering note **and** what the PDF says.
  *
- * The Receptionist is woken by a Document, and a Document with no text is one it cannot classify —
- * so without this, the first thing a forwarded invoice costs is a Turn spent discovering that it has
- * nothing to read. The text layer is already inside the bytes we just uploaded; pulling it out here
- * is what makes the Document classifiable at the moment it materialises.
+ * Both, joined — not one or the other. An earlier version read the attachment only when the mail
+ * body was empty, on the reasoning that a forward's covering note is context the Receptionist wants
+ * and must not be overwritten. The first half of that is right and the conclusion was wrong: almost
+ * every forward *has* a covering note, so in practice the invoice was never read at all. Measured on
+ * a real forwarded builder's invoice — three attachments, a 568-character note — the Document
+ * arrived carrying "Begin forwarded message: From: Andreas Herescu…" and not one figure from the
+ * invoice itself. The Receptionist could not have extracted an amount from it, which is the entire
+ * purpose of the exercise.
  *
- * Three rules, all of them about what arrival is allowed to be:
+ * So the note is kept, the attachment's text is appended under a heading that names the file, and
+ * the Receptionist gets what a human opening that mail would have: the forwarder's words first, then
+ * the document. The heading matters — with three PDFs in one message, prose that ran together would
+ * leave the model guessing which text belonged to which file.
  *
- *   - **The mail body always wins.** *"Die Zahnarztrechnung für Anna, ist schon bezahlt"* is the
- *     covering note, and it is the most useful sentence in the whole message. The text layer fills a
- *     Document that would otherwise be empty; it never replaces what the User wrote.
- *   - **Nothing here may fail the message.** Not a `not-a-pdf`, not a `no-text-layer`, and not a
- *     throw from the reader either. A Document with no text is exactly the state the reading ladder
- *     already handles further along; a message in `failed` because a PDF was encrypted is a message
- *     a human now has to look at for nothing.
- *   - **Arrival may translate; arrival may not spend.** No vision, no OCR, nothing that costs money
- *     — the text layer is the free rung of the ladder, and the free rung is the only one the post
- *     may take on its own.
- *   - **Arrival may not take the loop with it.** The decode is bounded at {@link ARRIVAL_MAX_PAGES}
- *     pages — a bound on *work*, distinct from {@link MAX_EXTRACTED_TEXT_LENGTH}'s bound on
- *     *payload* — and a read that was cut short says so in the text it returns.
+ * Non-PDF attachments are left alone; nothing here can read them. Anything the reader declines —
+ * no text layer, not a PDF after all, a throw — leaves the body exactly as it was, because a
+ * Document with only its covering note is still the state the ladder is built to handle.
+ *
+ * **Arrival may translate; arrival may not spend.** Nothing in here calls a model.
  */
 async function withTextLayer(document: IncomingDocument): Promise<string> {
     const attachment = document.attachment;
     if (!attachment || attachment.mimeType !== PDF_MEDIA_TYPE) return document.extractedText;
-    if (document.extractedText.trim() !== "") return document.extractedText;
 
     try {
         const outcome = await readTextLayer(attachment.bytes, SPARSE_TEXT_CHARS, ARRIVAL_MAX_PAGES);
@@ -665,9 +663,10 @@ async function withTextLayer(document: IncomingDocument): Promise<string> {
                 sparse: outcome.sparse,
                 truncated: outcome.truncated,
             });
-            return outcome.truncated
+            const read = outcome.truncated
                 ? `${outcome.text}${pageTruncationNote(outcome.pagesRead, outcome.pages)}`
                 : outcome.text;
+            return combineBodyAndAttachment(document.extractedText, attachment.filename, read);
         }
         log.debug("a forwarded PDF has no text layer to read on arrival", {
             filename: attachment.filename,
@@ -693,6 +692,21 @@ async function withTextLayer(document: IncomingDocument): Promise<string> {
  * because truncation would drop the `#<part>` suffix and two invoices in one mail would collide into
  * one Document. The digest is deterministic, so a retry computes the same reference and skips.
  */
+/**
+ * The covering note, then the attachment's own text under a heading that names it.
+ *
+ * Either part may be empty — a mail with no body, or a PDF that yielded nothing — and the join has
+ * to read correctly in all four combinations, so blanks are dropped rather than producing a stray
+ * heading over nothing.
+ */
+function combineBodyAndAttachment(body: string, filename: string, attachmentText: string): string {
+    const note = body.trim();
+    const read = attachmentText.trim();
+    if (read === "") return body;
+    const heading = `--- ${filename} ---`;
+    return note === "" ? `${heading}\n${read}` : `${note}\n\n${heading}\n${read}`;
+}
+
 function storableRef(externalRef: string): string {
     if (externalRef.length <= MAX_SEARCHABLE_LENGTH) return externalRef;
     const digest = createHash("sha256").update(externalRef).digest("hex").slice(0, 40);

@@ -88,10 +88,10 @@ The step that makes the system work end to end.
 
 - [ ] Tests first, against the harness and the IMAP server from step 2:
   - a message from an allowed sender becomes a Document with `Source: email` and the right
-    `ExternalRef`, and the message ends up in `assistant/processed`
-  - a message from a **disallowed** sender creates nothing and lands in `assistant/rejected`
-  - a message whose ingest **throws** lands in `assistant/failed` — and the next poll does not see
-    it again, because it is no longer in `assistant`
+    `ExternalRef`, and the message ends up in `assistants/processed`
+  - a message from a **disallowed** sender creates nothing and lands in `assistants/rejected`
+  - a message whose ingest **throws** lands in `assistants/failed` — and the next poll does not see
+    it again, because it is no longer in `assistants`
   - **polling twice creates one Document** — the idempotency test
   - a message whose Documents were created but which was not moved (simulate by moving it back)
     creates nothing on the next poll and is moved to `processed`
