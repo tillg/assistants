@@ -111,6 +111,20 @@ Written to `specs/test-cases-e2e.md` (20 cases). Live results so far (driven via
   running containers and smoke-test the browser-observable ones live. (The unit/integration suites are
   the real verification for the non-visible fixes — scan ordering, reconcile, markdown round-trips.)
 
+## Operational notes (raised jointly with the peer session)
+
+- **The Rancher disk exhaustion was a consequence of how we worked, not a pre-existing fault.** Two
+  agents rebuilt the runtime/frontend images five or six times tonight against one shared Rancher
+  daemon; the disk filled and the *frontend* crash-looped on "No space left on device" — a container
+  neither of us was editing. Reclaimed 21.7 GB the sanctioned way (dangling images + build cache only,
+  no `-a`, no volumes). Lesson: coordinate/limit image rebuilds when sharing one daemon.
+- **`firefly-bootstrap` exiting 1 is benign.** It is a one-shot init container; once Firefly is already
+  bootstrapped it exits non-zero, which looks like a failure in `docker ps` for ever. `firefly` itself
+  stays healthy. Not a bug — writing it down so nobody re-diagnoses it.
+- Peer confirmed post-redeploy: `advance.ts` B-29 machinery intact (`MAX_ENTRIES`/`isFull()`/…, 10 refs),
+  their three B-29 tests pass inside my 65, full runtime suite 430/1, and the live Gmail letterbox
+  survived the redeploy (still configured, no read errors; empty polls log nothing).
+
 ## For the user to review
 
 - **Bug 18** wants a live check on a fresh Firefly (`just demo-reset`) — destructive, so I left it.
