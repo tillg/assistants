@@ -140,6 +140,16 @@ export const RESOURCE_KEYS = {
         }
     },
 
+    conversation: {
+        about: "",
+        scheduledFor: "",
+        calledBy: "",
+        waitingForYou: "",
+        turn: "",
+        recorded: "",
+        answer: ""
+    },
+
     error: {
         security: {
             notAuthorized: {

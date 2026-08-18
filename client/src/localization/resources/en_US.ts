@@ -121,6 +121,16 @@ export const en_US: LocalizationKeyTreeType = {
         }
     },
 
+    conversation: {
+        about: "about",
+        scheduledFor: "scheduled for",
+        calledBy: "called by",
+        waitingForYou: "waiting for you",
+        turn: "turn",
+        recorded: "recorded",
+        answer: "Answer"
+    },
+
     error: {
         security: {
             notAuthorized: {

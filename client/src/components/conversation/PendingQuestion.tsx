@@ -6,6 +6,7 @@ import { openForeignForm } from "../../sagas/openForeignForm";
 import { MarkdownRichTextEditor } from "../markdown-editor";
 import { ICONS } from "../icons";
 
+import { transcriptStrings } from "./localize";
 import { readOpenQuestion } from "./question";
 import { useThingById } from "./useThingById";
 
@@ -132,7 +133,7 @@ export function PendingQuestion({ questionId }: PendingQuestionProps) {
                                 })
                             )
                         }>
-                        Answer
+                        {transcriptStrings().answer}
                     </Answer>
                 </div>
             </Body>

@@ -54,6 +54,27 @@ describe("TranscriptHeader", () => {
         expect(screen.getByTestId("transcript-state")).toHaveTextContent("turn 5/20");
     });
 
+    it("renders its own visible strings in the User's language", () => {
+        // BUG-14: the transcript's words were literals and stayed English when the User switched to
+        // German. They now come from the resource bundle, off the locale the LocaleSelect writes.
+        localStorage.setItem("locale", "de");
+        try {
+            renderHeader(
+                conversation({
+                    Status: "waiting",
+                    WaitingFor: "user",
+                    CurrentQuestionId: "x",
+                    ParentConversationId: "5b7b9db7"
+                })
+            );
+            expect(screen.getByTestId("transcript-state")).toHaveTextContent("wartet auf Sie");
+            expect(screen.getByTestId("transcript-state")).toHaveTextContent("Runde 5/20");
+            expect(screen.getByTestId("transcript-header")).toHaveTextContent("aufgerufen von");
+        } finally {
+            localStorage.removeItem("locale");
+        }
+    });
+
     it("shows the marker when the Conversation is waiting on the User", () => {
         renderHeader(conversation({ Status: "waiting", WaitingFor: "user", CurrentQuestionId: "45e95914" }));
 

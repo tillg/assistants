@@ -8,6 +8,7 @@ import { ICONS } from "../icons";
 
 import { formatRecordedCost, recordedCost } from "./cost";
 import type { TranscriptEntry } from "./entries";
+import { transcriptStrings } from "./localize";
 import { subjectDescriptor } from "./subject";
 
 /**
@@ -127,6 +128,7 @@ export function TranscriptHeader({ document, entries }: TranscriptHeaderProps) {
     const dispatch = useDispatch();
     const head = readConversation(document);
     const subject = subjectDescriptor(head.subjectModel, head.subjectThingId);
+    const t = transcriptStrings();
 
     return (
         <Band data-role="transcript-header">
@@ -153,16 +155,16 @@ export function TranscriptHeader({ document, entries }: TranscriptHeaderProps) {
                                 })
                             )
                         }>
-                        {`about ${subject.module} ${shortId(head.subjectThingId)}`}
+                        {`${t.about} ${subject.module} ${shortId(head.subjectThingId)}`}
                     </Link>
                 )}
                 {subject === undefined && head.subjectThingId !== "" && (
                     // A `subjectModel` with no navigable module: text, rather than a link into a scene
                     // that does not exist and would render an activity nobody can see.
-                    <span>{`about ${head.subjectModel} ${shortId(head.subjectThingId)}`}</span>
+                    <span>{`${t.about} ${head.subjectModel} ${shortId(head.subjectThingId)}`}</span>
                 )}
                 {head.subjectThingId === "" && head.scheduledFor !== "" && (
-                    <span>{`scheduled for ${instantLabel(head.scheduledFor)}`}</span>
+                    <span>{`${t.scheduledFor} ${instantLabel(head.scheduledFor)}`}</span>
                 )}
                 {head.parentConversationId !== "" && (
                     <Link
@@ -178,7 +180,7 @@ export function TranscriptHeader({ document, entries }: TranscriptHeaderProps) {
                                 })
                             )
                         }>
-                        {`called by ${shortId(head.parentConversationId)}`}
+                        {`${t.calledBy} ${shortId(head.parentConversationId)}`}
                     </Link>
                 )}
             </Slot>
@@ -189,14 +191,14 @@ export function TranscriptHeader({ document, entries }: TranscriptHeaderProps) {
                         {/* The glyph repeats the words beside it, so a reader who is read to hears
                             "stop sign waiting for you" unless it is hidden — as every other glyph is. */}
                         <span aria-hidden>{`${ICONS.blocked} `}</span>
-                        waiting for you
+                        {t.waitingForYou}
                     </Blocked>
                 )}
                 {head.finishReason !== "" && <span>{head.finishReason}</span>}
-                <span>{`turn ${head.turnCount}/${head.maxTurns}`}</span>
+                <span>{`${t.turn} ${head.turnCount}/${head.maxTurns}`}</span>
             </Slot>
 
-            <Cost data-role="transcript-cost">{`${formatRecordedCost(recordedCost(entries))} recorded`}</Cost>
+            <Cost data-role="transcript-cost">{`${formatRecordedCost(recordedCost(entries))} ${t.recorded}`}</Cost>
         </Band>
     );
 }
