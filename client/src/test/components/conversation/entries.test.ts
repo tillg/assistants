@@ -235,6 +235,21 @@ describe("clusterEntries", () => {
         ]);
     });
 
+    it("does not let a call that died claim a later same-tool call's result", () => {
+        // The first call produced no result (in flight, or it failed) and the assistant called the
+        // same tool again, which returned. Matching purely by name let the dead first intent claim
+        // the second call's result: the first Receipt showed call #1's args beside call #2's result,
+        // and the successful call rendered as "no result".
+        const first = entry(1, "2026-08-13T10:00:00", { kind: "tool-intent", toolName: "email.fetch" });
+        const second = entry(2, "2026-08-13T10:00:01", { kind: "tool-intent", toolName: "email.fetch" });
+        const secondResult = entry(3, "2026-08-13T10:00:02", { kind: "tool-result", toolName: "email.fetch" });
+
+        expect(clusterEntries([first, second, secondResult])[0]?.items).toEqual([
+            { type: "receipt", intent: first },
+            { type: "receipt", intent: second, result: secondResult }
+        ]);
+    });
+
     it("does not make a Receipt of the Assistant asking a question", () => {
         const intent = entry(1, "2026-08-13T10:00:00", { kind: "tool-intent", toolName: "ui.askUser" });
         const result = entry(2, "2026-08-13T10:00:01", { kind: "tool-result", toolName: "ui.askUser" });

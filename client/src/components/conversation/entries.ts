@@ -131,11 +131,19 @@ function pairIntoReceipts(entries: readonly TranscriptEntry[]): TranscriptItem[]
             return;
         }
         if (entry.kind === "tool-intent" && entry.toolName !== ASK_USER) {
-            const result = entries
-                .slice(index + 1)
-                .find(
-                    (later) => later.kind === "tool-result" && later.toolName === entry.toolName && !claimed.has(later)
-                );
+            // Pair with this call's OWN result, not a later call's. Stop the forward search at the
+            // next tool-intent of the same tool: a same-tool call appearing before any result means
+            // this intent died without one (in flight, or it failed). Matching purely by name let a
+            // dead first call claim the second call's result — the first Receipt then showed call #1's
+            // arguments beside call #2's result, and the successful call rendered as "no result".
+            let result: TranscriptEntry | undefined;
+            for (const later of entries.slice(index + 1)) {
+                if (later.kind === "tool-intent" && later.toolName === entry.toolName) break;
+                if (later.kind === "tool-result" && later.toolName === entry.toolName && !claimed.has(later)) {
+                    result = later;
+                    break;
+                }
+            }
             if (result !== undefined) {
                 claimed.add(result);
             }
