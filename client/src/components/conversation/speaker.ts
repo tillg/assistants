@@ -1,5 +1,5 @@
 /**
- * domain.md's Speaker table, as code.
+ * functional.md's Speaker table, as code — `### Watching an Assistant work`.
  *
  * Who an Entry is *from* is derived from its `kind`, never from its `role`: `prompt` and `answer` are
  * both `role: user` and only one of them is the human, so reading `role` would put the Runtime's
@@ -21,7 +21,7 @@ export interface SpeakerRole {
     readonly collapsed: boolean;
     /** `timeout` and `error` are the only Entries reporting that something went wrong. */
     readonly warning: boolean;
-    /** The words of a meta line — the kind verbatim, unless domain.md gives it better ones. */
+    /** The words of a meta line — the kind verbatim, unless functional.md's Speaker table gives it better ones. */
     readonly label?: string;
 }
 

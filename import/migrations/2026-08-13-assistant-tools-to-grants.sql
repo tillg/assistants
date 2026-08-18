@@ -3,7 +3,7 @@
 --
 -- Why this file exists, when the change that needed it said it would not:
 --
--- `specs/changes/operations-as-things/architecture.md` predicted that stored Assistant documents
+-- The change that introduced grants predicted that stored Assistant documents
 -- would simply "read as grant-less until bootstrap re-seeds them" — a recoverable state, costing
 -- nothing in this repo because every grant list comes from an `AssistantSeed`. That is wrong, and
 -- the way it is wrong is worth knowing: A12 does not ignore a group it cannot find. It **fails the

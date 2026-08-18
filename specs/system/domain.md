@@ -50,12 +50,21 @@ The terms below are the ones the models, the code and the documents all share. D
 | **Mailbox** | The Gmail account the Receptionist receives at. Not a Thing — its Authority is the mail provider |
 | **Message** | One email as it exists at the provider. Not a Thing either; a foreign representation, translated and discarded |
 | **Text Layer** | The text a PDF already carries. A property of the bytes, and the fact that decides whether reading it is free |
+| **Sparse Text Layer** | A Text Layer short enough to be suspect — under `SPARSE_TEXT_CHARS` (100). A *report*, never a verdict: below that many characters the text is either a scanner's leavings or a genuinely short document, length cannot tell the two apart, so every character comes back with a flag beside it and the Receptionist decides. Only genuinely empty is `no-text-layer` |
 | **Connector** | The translator between one External System's representation and Things |
 | **Manual Connector** | A Connector that fulfils its Operation by asking the User to do it by hand |
 | **Runtime** | Watches Triggers, births Conversations, drives the loop. Not an External System |
 | **Trigger Watcher** / **Loop Driver** | The Runtime's two halves: find work; take one Conversation one Turn forward |
 | **ThingStore** / **UserInterface** | The two Internal Systems — they speak Things natively, so they need no Connector |
 | **Bookkeeping** | The External System holding the books, and the Authority for all of them |
+| **Booking** | One split of one transaction: a date, a description, an amount, and the two accounts it moved between. Called a booking rather than a transaction because a transaction *group* can hold several, and "the last ten transactions" has to mean ten lines a human recognises |
+| **Bank Account** | An account the household's own money sits in — Firefly's `asset` type. Firefly calls many things an account: the expense and revenue accounts that give double entry its other side, the payables and receivables carrying Open Items, its own internal books. Only this kind has a balance a human reads as *what we have* |
+| **External Call** | A client asking, through the server, for one named Operation to be executed and its result returned. Synchronous, read-only, and stateless in the strict sense: no Thing, no cache, and when it is over the system holds nothing it did not hold before |
+| **Tile** | One cell of the Dashboard: an icon, a name, a headline, an optional body, a destination. A view in App Model terms, so each has its own error boundary — one Tile that cannot read leaves the others standing |
+| **in flight** | Work the system is carrying: Conversations that are `running` or `waiting`, counted together. Not *running* — most of it is waiting, and waiting is free per Turn but not free per scan |
+| **Blocked** | A Conversation waiting on the **User** specifically, as against waiting on a tool or on another Assistant. Derived from `waitingFor` and never stored — it is what the 🛑 in the Conversations overview marks, and what the User is scanning that list for. *Avoid* stuck, pending, paused (the global switch) and suspended (any wait) |
+| **Icon vocabulary** (`ICONS`) | 👦🏼 human · 🤖 Assistant · 🛠️ tool · 🛑 blocked. Whenever the system has to say *who* or *stuck*, it says it with one of these, and each **means the same thing wherever it appears** — the 🤖 beside an Assistant on the Dashboard is the 🤖 beside its words in a Transcript. Machinery has no icon, which is the point of it |
+| **Place labels** (`PLACE_ICONS`) | 🗣 conversations · 📄 documents · 💰 bookkeeping · 💳 transactions · 🏦 accounts. A different job: these label a **destination** and **mean nothing outside the Dashboard**, which is why they are a separate constant from `ICONS` rather than more entries in it. No Assistants label exists — every Assistant is the 🤖 `ICONS` already has, not a fifth robot |
 
 Three distinctions are load-bearing and easy to lose:
 
@@ -172,7 +181,9 @@ invoice.
 the Runtime calls Assistants. It has no domain opinions.
 
 **Bookkeeping (Firefly III)** — the Authority for accounts, transactions, balances and budgets.
-The User works in it directly, and Assistants reach it only through its Connector.
+The User works in it directly, Assistants reach it only through its Connector, and since
+[ADR-0023](../../docs/adr/0023-the-runtime-is-the-door-outward.md) the client reads it as well — per
+visit, through the Runtime, the one component that can reach it — storing nothing on the way.
 
 **Manual Connectors** — `document.requestText`, `email.send`, `email.fetch`, `bank.sendMoney`.
 Each fulfils its Operation by raising an Open Question of kind `perform` and waiting for the User
@@ -261,6 +272,16 @@ is extraction and happens on arrival; having a vision model read a scan is recog
 page, and happens only where something has looked at the covering note and decided it is worth it.
 **Arrival may translate; arrival may not spend.**
 
+**A `Party` is never derived from `From:`, and the reason is not caution but arithmetic.** A Message
+carries a sender and a `Party` is *anyone the household deals with*, so the temptation is plain: the
+dentist's address is right there on the mail, create the Party. But the mail the letterbox sees is
+overwhelmingly a mail the User **forwarded**, which means the address on it is the User's own. A
+translation step that created a Party from the sender would create a Party for the household in its
+own address book on every single ingest, and would do it silently, at the one point in the system
+where no human is present to notice. Who the Document is *from* lives in the body — including the
+quoted original underneath the forward — and reading a body to work out who wrote it is judgement, so
+it belongs to the Receptionist and to nothing on the arrival path.
+
 Two fields that were modelled from the beginning and written by nothing finally have a writer, and
 both are load-bearing rather than decorative:
 
@@ -295,6 +316,17 @@ is what `Invoice` does **not** have:
 
 Assistants must not cache foreign facts as Thing fields.
 
+**Routed, not copied.** The same rule holds when the reader is a screen rather than an Assistant. A
+foreign fact may pass *through* this system on its way to the User's browser; it may not stop here.
+The route may hold a credential; it may not hold an answer. That is why there is no
+`BookkeepingSnapshot` — no Model, no field, no cache and nothing kept between two visits to the
+Dashboard, even though a stored balance would obviously render faster and would obviously survive the
+Runtime being down. **The refusal is on data minimisation over and above ADR-0006**: a copy of the
+household's balances inside the ThingStore would be a second place their money is legible, with its
+own backups and its own staleness, bought to save a round trip. What the Dashboard shows instead is a
+number it has just been told, stamped with the instant it was told, discarded with the component that
+showed it.
+
 ### One writer per document, at any instant
 
 A12 has no version, no ETag and no compare-and-swap anywhere, so two writers of one document
@@ -328,6 +360,22 @@ model as well as the log: *not granted*, *switched off*, *no longer implemented*
 schema that will not parse. Saying *"that is not one of your tools"* to a model whose Assistant
 plainly still grants the Operation is a false premise to re-plan around, which is why the four
 reasons exist.
+
+**The set of actors who may cause an Operation to run has widened, and the conjunction is what makes
+that safe.** Until ADR-0023 the only route into an Implementation was an Assistant through the loop;
+now the User's browser is a second, by way of an **External Call**. It reaches a deliberately narrow
+set, and the narrowing is again an `and` of independent conditions rather than a single flag: the
+Operation must be on the deployment's **allowlist**, its Implementation must declare
+**`clientReadable`**, it must be **`mutating = false`**, its seed must **not require an approval**,
+and it must be **`Enabled`** in the catalogue — the first four in
+[`runtime/src/inbound/gate.ts`](../../runtime/src/inbound/gate.ts), which is pure and tested before
+any transport exists, and the fifth read off the Operation Thing by the inbox around it. The
+allowlist is not redundant with `mutating = false`: *changes nothing* is not *safe for a browser to
+invoke at will*, and an Operation that touches an LLM is non-mutating and costs money every time it
+is called. Approval plays no part on this route because there is nothing to approve — a call that
+changes nothing has no arguments a User could be asked to authorise, which is exactly why
+`requiresApproval` appears here as a *refusal* rather than as a question. **Opening a read route does
+not open a write one.**
 
 ### Every Operation is read-only or idempotent under a caller-supplied key
 
@@ -415,6 +463,20 @@ this forces.
 - **`RuntimeState.paused`** as a global kill switch, and a births-per-hour cap.
 - **`Assistant.enabled = false`** stops continuations as well as births.
 
+**And the bound that is missing: nothing bounds the standing population of Conversations in flight.**
+Every item above bounds a *rate* or an *individual* — `maxBirthsPerHour` caps how fast Conversations
+may be created, `maxTurns` caps how far one may go — and none of them caps how many may sit `waiting`
+at once, or for how long. A Conversation that cannot make progress does not fail and close; it stays
+in flight and is re-read by the scan every two seconds, for ever. Measured on this machine with a
+model that could not emit a structured tool call, so that no Conversation could complete: 406 in
+flight, then 415, then 436 over about an hour, each one costing a query every two seconds to keep
+saying it is stuck. The instructive part is *where* the cost lands — `server cpu=83.96%
+mem=1.782GiB` against `runtime cpu=6.47%` — because **the scan is a read amplifier: it is the
+ThingStore's server that a backlog crushes, not the Runtime that carries it.** The visible symptom is
+not a bounds failure at all but tests and Tiles that were passing at midnight failing by one in the
+morning with no commit in between, which is why this is written down here rather than left to be
+rediscovered as flake.
+
 ## Known departures
 
 Recorded rather than hidden:
@@ -457,6 +519,17 @@ Recorded rather than hidden:
   not read, because its entire content is the safety configuration constraining the reader.
   `Assistant_DM`, `Conversation_DM`, `OpenQuestion_DM` and `RuntimeState_DM` stay readable, as they
   have been all along. Narrowing that further is a separate change with its own blast radius.
+- **The idempotency contract is a convention, not an enforced one.** `registry.ts`'s own header says
+  that `mutating: true` without a key argument "is a programming error and throws at registration"
+  ([`runtime/src/operations/registry.ts:11-13`](../../runtime/src/operations/registry.ts)), and
+  `register()` checks only that the name is not already taken — there is no inspection of the
+  parameter schema for a key at all. The rule as restated in
+  [architecture.md](architecture.md#idempotency-and-recovery) and under *Every Operation is read-only
+  or idempotent under a caller-supplied key* below therefore reads as a guard where it is at present
+  a promise. It survived because nothing in the catalogue violates it: every mutating Implementation
+  shipped keyed, so the missing check has never had anything to catch. The intended repair is to
+  implement the check and make the comment true, not to soften the comment — the sentence is the one
+  that separates a bug from a lost €184.30, and it should be the code that says it.
 - **Batching is a correctness property of a Skill's prose**, which is not where anyone looks for one.
   A scheduled Skill that asks about three findings one at a time stalls its own schedule on the
   first, because of the skip rule. The failure mode is quiet in exactly the wrong way: with nothing

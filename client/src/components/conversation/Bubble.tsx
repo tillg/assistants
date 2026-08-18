@@ -10,7 +10,7 @@ import { speakerFor, type Shape, type Side } from "./speaker";
  * One Entry, rendered as itself.
  *
  * Its Speaker decides its side, its colour and its icon; its Kind decides its shape. Both come from
- * `speaker.ts`, which is domain.md's table as code — nothing here re-derives who said something, and in
+ * `speaker.ts`, which is functional.md's Speaker table as code — nothing here re-derives who said something, and in
  * particular nothing reads `role`: `prompt` and `answer` are both `role: user` and only one of them is
  * the human.
  *

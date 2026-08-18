@@ -233,7 +233,7 @@ account now, reached over **IMAP** with a Google App Password, and the household
 it. The Runtime polls it as **scan 0** of the existing watcher loop, on its own clock —
 `MAIL_POLL_INTERVAL_MS`, default 60 seconds, because an IMAP login per two-second scan is abusive to
 a mail provider and household post is not latency-sensitive. Four Gmail labels, which IMAP sees as
-folders, are the whole of the state machine: `assistant` is the only one read, and a message ends in
+folders, are the whole of the state machine: `assistants` is the only one read, and a message ends in
 `assistants/processed`, `assistants/failed` or `assistants/rejected` according to what happened to it.
 Nothing is ever deleted and nothing is ever marked read, so every outcome is visible to a human in
 Gmail without reading a log — and *"not for us"* and *"we broke"* never share a box.

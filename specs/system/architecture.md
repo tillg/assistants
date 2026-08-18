@@ -32,7 +32,7 @@ flowchart LR
     SRV --> PG
     FF --> PG
     KC --> PG
-    FE -->|"/api, /cs, /actuator"| SRV
+    FE -->|"/api, /api/actuator"| SRV
     RT -->|JSON-RPC| SRV
     RT -->|REST| FF
     RT --> LLM
@@ -83,16 +83,51 @@ The Runtime does have an inbox, and it carries no pending work. `runtime/src/inb
 outward** — every Connector and every foreign credential lives there — and the Dashboard's
 bookkeeping Tiles need a fact whose Authority is Firefly rather than the store.
 
-Four checks, `and`ed: the Operation is on a deployment allowlist, its Implementation declares
-`clientReadable`, its Implementation is `mutating: false`, and its Operation Thing is not switched
-off. The first and last are also checked by the server before it forwards, so a mistake in one
-process is not the only thing standing between a browser and the books; the checks that carry the
-guarantee are the ones in code, in the process that would do the executing. `Mutating` is
-deliberately *not* read from the Thing — an editable flag may not carry a safety decision, which is
-the same refusal `registry.ts` already makes for crash recovery.
+**Five checks, `and`ed**: the Operation is on a deployment allowlist, its Implementation declares
+`clientReadable`, its Implementation is `mutating: false`, its Implementation's seed does not require
+an approval, and its Operation Thing is not switched off. The first four are `inbound/gate.ts`, which
+is pure — no I/O, no HTTP, no store — so it is tested alone before any transport exists; the fifth is
+`inbound/server.ts`, because it is the one field the Thing is genuinely the Authority for and reading
+it needs the store. The approval check is belt-and-braces with `mutating` and the only place the door
+can see that an Operation *shipped* wanting one, since `requiresApproval` is not on
+`OperationImplementation` and the door does not resolve against the catalogue.
+
+The server checks **its own allowlist and nothing else** before it forwards. That is the whole of the
+outer gate, and the arrangement is deliberate: `Enabled` was moved out of the server and into the
+Runtime, so the server narrows *which names* reach this door and the process that would do the
+executing decides everything else. `Mutating` is deliberately *not* read from the Thing — an editable
+flag may not carry a safety decision, which is the same refusal `registry.ts` already makes for crash
+recovery.
+
+Two directions in the `Enabled` read are uncomfortable and both are the right way round. **A store
+failure counts as not enabled**: this is a check that grants access, so *"I could not find out"* must
+not mean *"go ahead"*, and the cost — an unreachable store greys two Tiles — is honest anyway. And
+**two Things carrying one key is a catalogue the door refuses**: the search asks for two precisely so
+it can notice the second one, where reading `[0]` would have opened or shut the door according to
+whichever row the store happened to list first, which is nobody's decision.
 
 Nothing on that path stores an answer: no Thing, no cache, no copy in the server. Foreign data is
 routed, not copied.
+
+The configuration surface is split across the two processes on purpose, and **the door is shut unless
+a port is asked for**: `INBOUND_PORT` defaults to `0`, which is no listener at all, and compose sets
+`8090` through `RUNTIME_INBOUND_PORT`. `INBOUND_SECRET` becomes *required* the moment a port is set —
+the Runtime refuses to start with the door open and no secret — and the Runtime's own allowlist sits
+beside them. On the server the matching three are `assistants.runtime.url`,
+`assistants.runtime.shared-secret` and `assistants.runtime.allowed-operations`, which ships with
+exactly `bookkeeping.listAccounts,bookkeeping.listTransactions` (overridable from `.env` as
+`CLIENT_CALLABLE_OPERATIONS`), plus `EXTERNAL_OPERATIONS` in
+`mgmtp.a12.dataservices.jsonRpc.allowedOperations` — without which A12's own JSON-RPC layer never
+dispatches `EXTERNAL_CALL` in the first place. The server's timeout is 10 s, clamped to 1–30 s,
+because a ten-minute timeout is not a timeout. **No host port is published**: `runtime` has no
+`ports:` and gains none, and container-to-container traffic on the compose network needs neither
+`ports` nor `expose`.
+
+The refusals are deliberately opaque. Every Runtime refusal answers one indistinguishable
+`not-allowed` — unknown, disallowed, mutating, approval-guarded and switched off are one outward
+answer — and the server collapses any non-2xx into `not-available`. A browser probing the route
+therefore learns nothing about which Operations exist, which is what keeps the catalogue from being
+enumerable by a caller who was never entitled to read it.
 
 ## Technology stack
 
@@ -227,7 +262,7 @@ declares it at the `^2.15.4` widgets-core asks for and `npm ls recharts` must re
 
 The transcript is the second piece, and the Dashboard the third. `Conversation.entries[]` renders as a
 message thread rather than as an inline repeat, and the Dashboard places four model-less views in a
-platform layout; between them they need five client seams the markdown editor did not — all five of
+platform layout; between them they need six client seams the markdown editor did not — all six of
 them platform seams, nothing forked and no engine replaced:
 
 | Seam | What it is | Where |
@@ -237,6 +272,7 @@ them platform seams, nothing forked and no engine replaced:
 | **Cross-module navigation** | `openForeignForm` — cancel every top-level activity and honour the veto, push a master activity for `masterModule`, then push the detail with `initiatingActivityId`. A saga rather than a click handler, because the teardown is an asynchronous handshake whose answer may be *no*. The teardown is not optional: an activity leaves the map only on cancel, commit or `resetState`, and a leaked one breaks the master-detail layout and vetoes module removal at logout. `openModule` is the same recipe without the detail push, and it **owns** the shared teardown that both sagas use | `client/src/sagas/openModule.ts`, `client/src/sagas/openForeignForm.ts` |
 | **A region layout, chosen by name** | The Dashboard's scene clears `CONTENT` to `layout: { name: "Dashboard", settings: { rows: […] } }`. `DefaultLayoutProvider` resolves that name with **no registration** — it is a built-in beside `MasterDetail`, `Stack` and `Null` — and fills each leaf column with `views[i++]`, each inside its own error boundary. **Slot pairing is positional**: the order of the `VIEW_ADD` directives *is* the layout, so `dashboardViewMap.tsx` lists the six Tiles in exactly the order the directives declare them — positional **across rows as well as within one**, which is what the second row made worth stating. The Tiles are views with **no model at all** (`Directive.Add.models` is optional), so each is a plain React component that fetches its own numbers | `import/models/AssistantsAppModel_AM.json`, `client/src/components/dashboard/dashboardViewMap.tsx` |
 | **A count by query** | `useThingCounts(queries)` — N `QUERY` requests in **one** `Dispatcher.rpc` call, of which the only field read is `fullSize`; `entries` is discarded, so no count can become a second copy of a Thing (ADR-0022). Read-only, fails soft, never polls. `paging.pageSize: 0` is rejected by the store, so it asks for 1 and throws the document away. `useAssistants` is its sibling and the one hook that touches a document body — three fields lifted per Assistant, the rest discarded | `client/src/components/dashboard/useThingCounts.ts`, `useAssistants.ts` |
+| **A call outside the store** | `useExternalCall(operation, args)` — one read of a fact whose Authority is Firefly, run through the Runtime's door and forgotten. It carries `useThingCounts`' four invariants and a fifth: **not the Authority** — no arithmetic on what comes back except `money.ts`' per-currency total, computed for display and discarded with the component. The platform constraint is recorded nowhere else: `Dispatcher.rpc` is typed to A12's built-in requests and its own `.d.ts` warns that anything else *"will lead to compile and runtime errors"* — the dispatcher looks the method up in a table of response type guards and `EXTERNAL_CALL` is not in it — so this uses the untyped escape hatch, `JsonRpc2Request.build()` over the configured `ServerConnector`, exactly as mgm's own Workflows client does. Authentication, the base URL and the headers still come from the connector; only the typing of this one method is ours. It has a deadline of its own (15 s), because *fails soft* is only true if every failure arrives — a `fetch` that never settles throws nothing and rejects nothing | `client/src/components/dashboard/useExternalCall.ts`, `money.ts` |
 
 The first three need the same composition, and it is worth stating once because no Thing carries it: an
 activity descriptor's `instance`, and a document read, both want a **docRef** — `<Model>/<ThingID>` —
@@ -257,6 +293,33 @@ There is no custom client code beyond these three pieces. The User answers an Op
 the ordinary A12 instance form and saving it (D-005) — reached now through its Conversation rather
 than from a menu, or through the Dashboard's conversations Tile, which counts the ones waiting.
 
+**Secondary text is `mutedText`, never `theme.colors.text.secondaryColor`.** That token is
+`rgb(226, 230, 233)` in this theme — a divider colour wearing a text colour's name — and against a
+Tile's white surface it measures about **1.25:1**, where WCAG AA asks 4.5:1 for body text. It is a
+trap rather than a mistake: five Tiles reached for it independently, on the strength of its name, and
+all five were wrong; the Transactions Tile's dates and account routes and every Tile's `as of 14:32`
+footer were very nearly invisible. The house rule is `mutedText` in
+`client/src/components/dashboard/DashboardTile.tsx` — the full-strength text colour at
+`opacity: 0.72`, which over white lands near `#6c6c6c` and about **5.3:1**. Opacity rather than a
+second hard-coded grey, deliberately: it blends toward whatever is actually behind the text, so the
+rule survives a dark theme without a second definition that has to be kept in step. The Dashboard
+was converted; **the transcript components were not**, and they still use `secondaryColor` as a text
+colour in nine places across five files — `TranscriptHeader.tsx:92` and `:99`,
+`PendingQuestion.tsx:72`, `Receipt.tsx:50` and `:61`, `Bubble.tsx:61` and `:92`,
+`QuestionContext.tsx:33` and `ConversationTranscript.tsx:49`. That is an open defect, recorded here
+rather than left to be rediscovered by the next person who wonders why a Receipt's label is hard to
+read.
+
+**Newer client components carry English literals rather than localisation keys, and that is
+deliberate.** The application's localisation is slated for removal wholesale — the `locales` and the
+per-element `label` arrays across the nine `_DM`/`_FM`/`_OM` models, `client/src/localization`
+entire, `supportedLocales`, `getDateTimeResource`, the language switcher in the application header,
+and `e2e/tests/base/5-localization.spec.ts`, which exists for nothing else — so registering German
+keys for the Transcript and the Dashboard now would be work done in order to be undone. Dates and
+numbers are formatted by `date-fns` and `Intl` from the browser locale, which is not localisation of
+the application's own strings and is unaffected either way. Without this stated, a reader finds
+untranslated English sitting beside fully bilingual models and no reason given.
+
 **If a Thing is ever reached outside the web application — a messenger, a push notification, mail —
 it hooks `raiseQuestion` and nothing else.** Every Open Question in the system passes through that
 one function: `ui.askUser`, every Manual Connector, every escalation, and every approval refusal.
@@ -269,7 +332,7 @@ than in the change that declined to build it.
 
 ### Runtime (`runtime/`)
 
-Two halves, roughly 6,900 lines of TypeScript.
+Two halves, roughly 12,000 lines of TypeScript across 31 files.
 
 ```mermaid
 flowchart TB
@@ -503,7 +566,7 @@ unreachable or refusing the password must not take scans 1–7 with it — those
 running Conversations moving. There is no backoff state and no circuit breaker; the next poll is a
 minute away, which *is* the backoff.
 
-Four Gmail labels, which IMAP sees as folders, hold the whole state machine: `assistant` — the only
+Four Gmail labels, which IMAP sees as folders, hold the whole state machine: `assistants` — the only
 folder ever read — and `assistants/processed`, `assistants/failed` and `assistants/rejected`. Nothing is
 deleted and nothing is marked read. A read flag would have only two states, and a message that was
 fetched, allowed and then failed needs a third: it must not stay unread, because unread means *retry
@@ -529,6 +592,42 @@ visible rather than inferred. One Document is created per attachment, because th
 as `extractedText`, and a mail with no attachments becomes one body-only Document. `Source` is set to
 `email`, which is the first non-`manual` value the system produces.
 
+What a message *becomes* is the Connector's own set of rules, and they are small enough to state
+whole. They live in `parseMessage`, which takes bytes and returns an `IncomingMessage` with no
+network, no store and no side effects — which is what makes every one of them testable against an
+`.eml` fixture.
+
+- **The body is `text/plain` where the sender provided it, otherwise the `text/html` stripped to
+  text.** `extractedText` is prose an LLM pays tokens to read, and markup is noise it pays for while
+  nothing downstream renders it. The stripper is deliberately not a renderer: what matters is that the
+  words survive, that block boundaries become line breaks rather than running two sentences together,
+  and that no `script` or `style` content reaches the model.
+- **A part becomes an attachment only if it has a filename or an explicit
+  `Content-Disposition: attachment`**, so an inline signature image is not mistaken for an invoice.
+- **`Title` is the subject** — or the filename when the subject is empty, or `(no subject)` when
+  neither exists. As soon as one message becomes several Documents the filename joins the subject,
+  because three Documents sharing one title are indistinguishable in an overview however different
+  their contents are. Only the *title* ever collided; the `ExternalRef`s never did.
+- **`receivedAt` is the `Date` header, falling back to the server's INTERNALDATE**, because a missing
+  or unparseable `Date` happens and dropping the mail over it would be absurd.
+- **A message with no `Message-ID` gets one synthesised**, since the alternative is dropping the mail.
+  It is not merely `<uid>@<host>`: an IMAP UID is unique within one `(mailbox, UIDVALIDITY)`
+  generation and nowhere else, so the ref carries the folder and the `UIDVALIDITY` too —
+  `<uid.N.vV.folder@host>`. Delete and recreate the `assistants` label and the server starts handing
+  out UID 1 again; without the generation in the ref, the next `Message-ID`-less message computes an
+  `ExternalRef` an older message already holds, and the ingest, doing exactly what it is meant to do,
+  files a brand-new invoice away as a duplicate. Everything the value derives from is constant for a
+  given message across polls — never a clock, never a counter — because a ref that *changes* between
+  polls defeats idempotency just as thoroughly as one that collides.
+- **A part over `MAIL_MAX_ATTACHMENT_BYTES` (25 MB) is skipped loudly**: it is named, with its size, in
+  the body text of the Document that is created anyway. A silently missing attachment is the one
+  failure the User cannot see.
+
+That `email.receive`'s `reconcile` is answerable at all, and cheap, is a consequence of `ExternalRef`
+being a **real key** rather than an opaque hash: reconciliation is one query — *has a Document with
+this `ExternalRef` landed?* — against the store that is already the Authority. That is the whole of
+why the field earns its place.
+
 `email.receive` is registered as a Connector Implementation on the `Email` System so the User can
 read it, describe it and switch it off like any other Operation (ADR-0019) — the ingest reads
 `Enabled` off the Thing each poll, so switching it off stops the letterbox without a restart. It is
@@ -547,9 +646,24 @@ would mean constructing an `OperationContext` with a fabricated conversation id 
 key — the same refusal `inbound/server.ts` already makes. The reader never discards what it extracts:
 below `SPARSE_TEXT_CHARS` (100) it returns the text *and* flags it `sparse`, because a scanner
 watermark and a one-line payment reminder are the same length and no threshold can tell them apart —
-the Receptionist reads the characters and decides, which is where this system keeps judgement. (It
-was a hard gate at first, calibrated against two fixtures, and it binned 84-character invoices;
-[read-the-attachment](../changes/read-the-attachment/architecture.md) records what that cost.)
+the Receptionist reads the characters and decides, which is where this system keeps judgement.
+
+It shipped as a hard gate first — under the threshold the reader returned `no-text-layer` and **threw
+the text away** — and that was wrong in a way worth recording, because the number looked defensible.
+It had been calibrated against exactly two fixtures: a 21-character scanner watermark and a
+576-character born-digital utility invoice, with a multi-page statement measuring 535. Those straddle
+100 and they are not a population. Against ordinary born-digital post the gate misfires constantly: a
+short dentist's invoice extracts to **84** characters, a one-line payment reminder to **44**, a
+parking receipt to **49**. All three are free, exact and complete; all three were reported as scans;
+and the seed description then sent each of them to `document.readScan`, so the household paid a model
+that can invent an amount to recover a number the file had already stated exactly. On the arrival path
+the same documents became Documents with an empty `extractedText` whenever the forward carried no
+covering note. Both directions are harmful and one boolean can only express one of them, which is why
+the reader now returns the text *and* the flag. **`SPARSE_TEXT_CHARS` is a label, not a gate**:
+nothing is withheld on the strength of it, so being slightly wrong about it costs a hint rather than a
+document — and that is precisely why lowering the number would have been no fix at all. It would only
+have moved the misclassification onto shorter post.
+
 `no-text-layer` is reserved for a document with no characters at all, and comes back as a *value*,
 not an error: it is the expected outcome on a scan and it is what tells the Receptionist to try the
 next rung. An optional `maxPages` bounds decode time for the ingest, which reads inside the scan
@@ -567,6 +681,28 @@ would be an injection surface pointed at a model about to write a field the Rece
 `readScan` returns its `usage` and the Loop Driver folds it into the Turn's, so a Turn's recorded cost
 stays the cost of everything that Turn spent.
 
+Three things about that rung are worth having here, because none of them is inferable from the code's
+shape:
+
+- **How the PDF travels, and where the caps come from.** It goes as a base64 `document` content block
+  on the Anthropic Messages API, with **no beta header**. The API's own limits are 32 MB and 600 pages
+  per request — 100 pages on the 200K-context models — so `VISION_MAX_BYTES` is 16 MB to sit under 32
+  MB with base64's overhead, and `VISION_MAX_PAGES` is 10 because a household invoice is one to four
+  pages and ten is already generous. The page count is taken from the *free* reader, which returns it
+  even when it finds no text, so nothing is ever sent uncapped, and a file `pdfjs` cannot open has no
+  page count — which is exactly what the cap exists to refuse. Nothing rasterises anything, and that
+  is what keeps poppler, a canvas and Tesseract out of the image.
+- **It ships with no required approval, deliberately.** An approval per scanned invoice is two
+  questions for every piece of post the household forwards. ADR-0018 already lets the User add one on
+  the Operation Thing, so shipping with one would pre-empt a decision the ADR says is theirs. The two
+  caps and the `Enabled` switch are the bounds instead.
+- **Its failure modes, and which rung each falls to.** An encrypted or corrupt PDF returns
+  `not-a-pdf`, and the ladder falls through to `document.requestText` — a human. A vision API that is
+  down or rate-limited is an `error` outcome, which the loop's existing retry and escalation already
+  handle and which needs nothing of its own. And a sparse read that genuinely *was* noise is re-read
+  with `replace: true`, since that noise is now the Document's text and there is otherwise nothing to
+  overwrite it.
+
 Neither Operation overwrites a non-empty `extractedText` without an explicit `replace`, because one of
 that field's writers is a human who transcribed it by hand. And the ingest never calls `readScan`:
 **arrival may translate; arrival may not spend.**
@@ -577,7 +713,8 @@ that field's writers is a human who transcribed it by hand. And the ingest never
 
 ```
 MAIL_HOST='imap.gmail.com'         # empty ⇒ scan 0 never runs; said once at startup
-MAIL_PORT='993'                    # implicit TLS; there is no flag that disables verification
+MAIL_PORT='993'                    # implicit TLS; nothing here disables certificate verification
+MAIL_SECURE='true'                 # exactly `false` buys plaintext — never TLS-without-verification
 MAIL_USER='…@gmail.com'            # the Receptionist's own account, never the User's
 MAIL_PASSWORD='…'                  # a Google App Password, which requires 2FA on that account
 MAIL_FOLDER_INCOMING='assistants'
@@ -598,6 +735,19 @@ the moment something fails is the worst possible time to find out. The account i
 own and not the User's precisely because an App Password grants the whole account and cannot be
 scoped — that no folder but the incoming one is ever read is a property of the code, not of the
 credential.
+
+That TLS comment is true of production and needs one qualification, because there *is* a way to turn
+the transport off. `MailboxOptions.secure` defaults to `true`, and `MAIL_SECURE` sets it — where
+exactly the word `false` switches it off, so a typo (`no`, `0`, `False`) leaves TLS on, because the
+failure mode of guessing wrong here is a password crossing a network in the clear. The only places that
+pass `false` are the integration tier and the end-to-end tier, both against a throwaway GreenMail:
+GreenMail's IMAPS certificate is
+self-signed with no SAN and a CN of *"GreenMail selfsigned Test Certificate"*, so no amount of CA
+trust makes hostname verification pass, and nothing was ever going to make it pass. `secure: false`
+was chosen over threading a `tls: { rejectUnauthorized: false }` passthrough through the Connector
+precisely because the second one is the option that ends up in a production config with verification
+quietly off while the config still *reads* as encrypted. Plaintext against a throwaway container is
+visibly plaintext; a disabled check is invisible.
 
 The vision model is named in `llm.json` rather than in `.env`, beside `active`, because it is a
 profile like any other and the file is already the one place a model is chosen (D-057):
@@ -790,6 +940,30 @@ Two configuration facts had to change for any of it to work, and both were found
 forwarded invoice, and the server's `attachment.allowedMimeTypes` listed only `image/png` and
 `image/jpeg`, which is a rejection of every PDF — the whole point of the exercise.
 
+Two facts about the **download** side are recorded here because they were measured against the running
+stack and they constrain any future attempt to *preview* an attachment in the web application.
+
+**The download route cannot be framed, and it is not the same origin.** `/cs/download/{id}` serves
+`Content-Disposition: attachment` unconditionally — `?disposition=inline&inline=true` is ignored, an
+iframe pointed at a fresh URL stayed blank and Chrome downloaded the file instead. It is worth being
+precise about *what* blocks it: there is **no `X-Frame-Options` and no CSP** on the response, so
+framing is not the obstacle; the disposition header is. And the fetch-plus-blob workaround fails for a
+second, independent reason — `/cs` is a **different origin** from the frontend, because nginx proxies
+`/api` and `/api/actuator` and nothing else, so `fetch(location)` from `http://localhost:8081` answers
+*"No 'Access-Control-Allow-Origin' header is present"*. Both routes are therefore closed, and an
+inline preview needs either a same-origin authenticated route of our own or a proxied `/cs`.
+
+**The download URL is a single-use ticket, not a handle.** The durable handle is `attachment_id` on the
+Document's attachment group, which is reusable without limit; the URL is a one-shot redemption of it,
+and it is spent even by a `HEAD`. Measured against one unchanging `attachment_id` and docRef: two
+`LOAD_ATTACHMENT_URL` calls mint two different URLs, each fetches the full 175,362 bytes with a `200`,
+and replaying a spent one answers 404. So nothing needs storing and the cost of a preview is one extra
+JSON-RPC call. The ticket is **unauthenticated by design** — the authentication happened at the mint
+step, against the User's own token — and being single-use is the whole reason that is safe: a permanent
+unauthenticated URL for a household invoice would leak for ever, through browser history, a `Referer`
+header or a shared screenshot. The only rules that follow are *mint your own*, never reuse a ticket,
+and never spend the one the Download menu item is about to use.
+
 Extraction is described under [the Runtime](#reading-an-attachment): `document.extractText` on
 arrival and on demand, `document.readScan` where a `vision` profile is configured, and
 `document.requestText` — still a Manual Connector — as the floor.
@@ -872,10 +1046,21 @@ because an Assistant is the User's to write — and so, now, is an Operation.
 ### Secrets
 
 Every credential lives in one gitignored file, `.env` at the root (D-023). `just setup` writes it
-from the committed `.env.example`, generating the machine credentials — the four database
-passwords, Firefly's app key and cron token, oauth2-proxy's client and cookie secrets — so no two
-clones share one. It refuses to overwrite an existing `.env`, because the database passwords are
-baked into the Postgres volume the first time it starts.
+from the committed `.env.example`, replacing every `CHANGE_ME_GENERATED` with fresh randomness — **ten
+machine credentials**: the four database passwords and the Postgres superuser's, Firefly's app key and
+cron token, oauth2-proxy's client and cookie secrets, and `RUNTIME_INBOUND_SECRET` — so no two clones
+share one. Three of them are not free-form: Laravel wants `base64:` followed by exactly 32 bytes for
+Firefly's app key, Firefly rejects a cron token that is not exactly 32 characters, and oauth2-proxy
+accepts a cookie secret of 16, 24 or 32 bytes and nothing else. `setup-env.mjs` prints the count and
+the names, so the number above is checkable rather than quoted. It refuses to overwrite an existing
+`.env`, because the database passwords are baked into the Postgres volume the first time it starts.
+
+`RUNTIME_INBOUND_SECRET` is the newest of the ten and the one that is easiest to misread. It is
+compared with `timingSafeEqual`, guarded by a length check because `timingSafeEqual` throws on a
+length mismatch. It is **not the User's authentication** — that already happened at the server, against
+Keycloak — it is what stops any *other* container on the compose network calling the door outward. The
+server reads it as `assistants.runtime.shared-secret` and the Runtime as `INBOUND_SECRET`, from the one
+variable, so the two ends cannot drift apart.
 
 The four *login* passwords are deliberately not generated: they are the development defaults the
 README quotes, and they are safe only because of the `127.0.0.1` binding.
@@ -953,14 +1138,24 @@ Two loaders, deliberately distinct:
 |---|---|---|
 | **Model validation** | `import/validate-models.mjs` + Gradle `convertModels` | Every `_DM`/`_FM`/`_OM` is well-formed; **both directions** — an `elementRef` with no field fails, and a field no form model references warns, with an allow-list for the deliberately machine-owned ones. Also that every `indexed` field the watcher uses exists |
 | **Runtime unit** | vitest | The loop driver against `ScriptedProvider`: birth, one Turn, dispatching a call, grant resolution and the four ways it can drop one, suspension on `askUser`, continuation on answer, `wakeAt` timeout, lease recovery **without re-execution**, one Invoice → exactly one Accountant Conversation, `maxTurns` → Open Question, late child result, self-call rejection |
-| **Integration** | vitest against the live stack | The A12 client's CRUD and query, search-then-create idempotency, the Thing repository, every watcher query, the Firefly connector. Skipped rather than failed when the stack is down |
+| **Integration** | vitest against the live stack | The A12 client's CRUD and query, search-then-create idempotency, the Thing repository, every watcher query, the Firefly connector. Also the two refusals the ADR-0019 security argument rests on, asserted as **two identities running the same call**: the `runtime` identity answers `-32059` on `ADD_DOCUMENT` and `MODIFY_DOCUMENT` against `Operation_DM` where `human` succeeds, and the Runtime can still *read* the catalogue it may not write — which is the difference between the mitigation being designed and the mitigation being true. And **GreenMail** in a throwaway container as the IMAP rig, a real server rather than a mock, precisely so `imapflow` is exercised against a stateful protocol. Skipped rather than failed when the stack is down |
 | **Client** | vitest | The markdown editor's suite and the client's own |
 | **End-to-end** | Playwright, the `scripted` profile | Login as four users, every module opened, Party CRUD, a prompt round-tripped through the markdown editor, localisation, the favicon, the whole invoice slice, and surviving a restart |
+| **Soak** | Playwright, its own project | A dozen Things made and unmade through the application, with the Dashboard asked to keep up: the counting Tiles read the store being written to and the money Tiles read Firefly through the Runtime, so both seams are exercised against a store genuinely moving underneath them. Its own project because running it beside seven other workers starves the application rather than testing it, and chained after **`base`** rather than after the flow tier — behind `flow-restart` it never ran at all here, since the flow specs drive the live Assistants and an Assistant cannot act when the configured model emits its tool calls as prose. A soak test that silently does not run is worse than one that fails. Nothing is asserted exactly: the Runtime is scanning throughout, so only monotonic and structural claims are made |
 | **Live LLM** (opt-in) | Playwright | The same specs against a real model. Refuses to run while `llm.json` is on `scripted` |
 
 The scripted provider is not a mock of a collaborator we own — it is a *recorded* substitute for a
 paid, non-deterministic third party, and it is the only way the loop's branching (pending tool
 call → suspend → resume) can be asserted at all.
+
+One hazard the suite leaves behind is worth knowing before you debug the wrong thing.
+`e2e/tests/base/8-operations-catalogue.spec.ts` proves the kill switch works by switching
+`bookkeeping.listAccounts` **off and back on again** through the UI. A run that dies between the two
+leaves it off — in the store, where a rerun of the tests will not restore it — and the consequence is
+some distance from the cause: the Accountant can then no longer finish the invoice slice, and the
+Runtime logs a wall of *"a granted Operation was dropped"* warnings, one per Turn, saying nothing about
+a test. **If the flow tier starts failing for no visible reason, open the Operations catalogue before
+opening the code.**
 
 `just check` is the fast loop with no Docker: typecheck the Runtime; typecheck, lint and
 format-check the client and `e2e`; validate the models; and verify the documentation claims
@@ -977,3 +1172,9 @@ format-check the client and `e2e`; validate the models; and verify the documenta
 | A `consumedAt` stamp on the answered Open Question | A second Runtime write to a document the User may be editing. Consumption moved to the Conversation instead |
 | A separate `Answer` Model | A12 navigation is scene-based with no way to open a create-form pre-filled from the row you came from; it would force the User to copy a ThingID by hand |
 | The Runtime as A12 server code | Fuses the application's lifecycle to the platform's, and gives the LLM-driven half privileged access |
+| The catalogue as the Authority for an Operation's `parameters` — a User-editable schema | Tempting, because it would make the Model complete. The schema is a contract with `execute`, which reads *named* arguments: an edited one makes the model call `execute` with arguments it does not read, which surfaces as an Operation that mysteriously does nothing. The field is carried read-only so the catalogue is complete for reading, and nobody asked for editable schemas |
+| An async `OperationRegistry`, or a second `droppedFor()` beside `grantedTo()` | Both spread the catalogue read across a Turn, so the schemas offered and the Operations executed can come from different reads — the exact failure the per-Turn snapshot exists to prevent, one level down. The async version also makes four call sites `await` and buys nothing a snapshot parameter does not |
+| Bootstrap deleting Operation Things whose Implementation has gone | `just dev` runs bootstrap, so a bootstrap that deletes is a delete on every ordinary start-up — and it would take the User's `notes` with it. They stay instead: unoffered, and reported as *unimplemented* by name. Only the User deletes (D-007) |
+| Our own SMTP server, receiving delivery directly | A public MX record, TLS certificates, SPF/DKIM/DMARC, spam filtering, an open port on the household's network, and a backscatter surface. IMAP against a provider that already solves all of it is a configuration line |
+| An inbound webhook from a mail provider | Inbound HTTP into the Runtime from the **public internet**, plus a provider account and a signature scheme, against D-005 and ADR-0011: the Runtime polls and receives no webhooks. ADR-0023's door is a compose-internal read route published to no host port, and is explicitly not a precedent for this |
+| A watched folder on disk, with `.eml` or PDFs dropped into a volume | Solves a different problem: it needs the User at the machine, and the whole point is forwarding from a phone. Worth having *later* as a scanner drop, and it would reuse the ingest wholesale |

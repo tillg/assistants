@@ -77,7 +77,7 @@ answering a question the User has on arriving and each a door to the module that
 | 🤖 **Assistants** | how many there are, each by name, dimmed when disabled | Assistants |
 | 💰 **Bookkeeping** | nothing — it is a grey **button**, not a summary: a control with a label and a destination, no headline, no body, no footer | Firefly III, in a new tab |
 | 💳 **Transactions** | the last ten **Bookings** in the last ninety days, newest first — date, description, the two accounts, the amount | Firefly III, in a new tab |
-| 🏦 **Accounts** | every **Bank Account** by name with its balance, and one total per currency — never a total across them | Firefly III, in a new tab |
+| 🏦 **Accounts** | every account the household *owns* by name with its balance, and one total per currency — never a total across them | Firefly III, in a new tab |
 
 **The Dashboard counts; it does not keep** (ADR-0022). Every number on it is a `fullSize` the ThingStore
 returned for a query issued moments earlier — no count is stored on a Thing, cached, polled or
@@ -93,6 +93,26 @@ The browser still holds no Firefly credential and never will, which is why the �
 button rather than a summary: opening the books is a different act from reading a number out of them.
 Stop the Runtime and those two Tiles grey out while the other four render — the honest answer to
 *"what do the books say?"* when the only component that can ask is down.
+
+That last sentence presents the failure as binary, and it is not. **Those two Tiles are
+load-sensitive, and a Runtime that is merely busy is indistinguishable from one that is down.** The
+call goes browser → server → Runtime → Firefly, and the Runtime is a single replica whose event loop
+is simultaneously driving the scan loop; under load the server's ten-second timeout is what expires
+first, and the Tile greys out with exactly the wording a stopped Runtime produces. Measured:
+`10-dashboard.spec.ts`'s *"shows the last bookings, and no more than ten"* fails inside the full suite
+at eight workers and passes three runs of three when it runs alone. The behaviour is arguably correct —
+a busy door is a slow door — but the rendering is not: a read that is still in progress deserves a
+*"still reading"* state, and what it gets is the one that means *"cannot read"*.
+
+**The 🏦 Tile is titled *Accounts*, not *Bank accounts*, and the wider title is the accurate one.** It
+asks its Operation for `type: "asset"`, and an asset is not only a bank: *Receivable from insurer* is
+typed `asset` in the books and genuinely is one the household holds. Widening the heading was chosen
+over the two alternatives — a heading reading *Bank accounts* over rows that are plainly not banks, or
+hiding the rows that are not, which quietly drops money the household is owed. The type is an argument
+to the Operation rather than a filter in the component, so Firefly's own vocabulary stays on the
+Connector's side of the system; and a `type` the Connector does not recognise returns **nothing, never
+everything**, because the inverse failure would list expense accounts under a heading reading
+*Accounts* and total them as though they were owned.
 
 The **createdOn curve** can run behind the Documents headline, because `Document.createdAt` is the
 Runtime's field and a Document created in the web application carries none until the next scan stamps
@@ -220,6 +240,24 @@ What to expect from one, because none of it is obvious:
 - The **Runtime** module shows the singleton: the watermark, the pause flag, the births-per-hour
   counter, the heartbeat and the last error.
 
+**Who a bubble is *from* is read off the Entry's `kind`, never off its `role`.** `prompt` and `answer`
+are both `role: user` and only one of them is the human, so a transcript that trusted `role` would put
+the Runtime's briefing in the User's colour — a lie about who said it, and one no reader could catch
+from the screen. The whole mapping, one row per kind:
+
+| Entry `kind` | Read as | Where, and how |
+|---|---|---|
+| `assistant` | the Assistant | left, prose |
+| `answer` | the User | right, in the accent colour |
+| `tool-intent` and its `tool-result` | a tool | the pair collapses into one **Receipt**, left, closed by default |
+| `tool-intent` for `ui.askUser` | the Assistant | left — an Assistant asking is speech rather than a tool call, and the words are in the call's arguments |
+| `system`, `prompt`, `note`, `approval-request` | **Machinery** | centred grey meta lines; `system` and `prompt` collapsed, being long and read once, and `approval-request` given words of its own (*🛑 approval requested*) rather than its kind |
+| `timeout`, `error` | **Machinery** | the same meta line, warning-coloured — the only two kinds that report that something went wrong |
+
+A kind this table does not list degrades to a meta line naming the kind verbatim. That matters more
+than it looks: a new Entry kind must arrive as *something* rather than vanish, because an Entry the
+Runtime wrote and the transcript silently dropped is the one failure a reader has no way of noticing.
+
 ### Stopping it
 
 - `just pause` sets `RuntimeState.paused` and the watcher does nothing at all until `just resume`.
@@ -295,8 +333,8 @@ sequenceDiagram
     participant TS as ThingStore
     participant R as Receptionist
 
-    U->>MB: forwards the dentist's mail to the assistant label
-    RT->>MB: scan 0 — SELECT assistant (once a minute)
+    U->>MB: forwards the dentist's mail to the assistants label
+    RT->>MB: scan 0 — SELECT assistants (once a minute)
     RT->>RT: sender on the allowlist?
     RT->>TS: already a Document with this ExternalRef?
     RT->>RT: read the PDF's text layer — free, on arrival
@@ -380,7 +418,7 @@ is stale, and `just ps` shows it.
 Nothing is emailed, nothing is paid, and nothing leaves the machine except calls to the configured
 LLM API and the poll of the Receptionist's Mailbox. *Emailed* is worth being precise about now that
 mail arrives on its own: the letterbox is inward only, `email.send` is still a Manual Connector, and
-the one thing the system ever says to a mail server is *what is in the `assistant` folder?* Mail the
+the one thing the system ever says to a mail server is *what is in the `assistants` folder?* Mail the
 system receives can be ignored; mail the system sends cannot be recalled.
 
 ## States and transitions
@@ -501,7 +539,13 @@ This is one running vertical slice, not a finished system.
   **unavailable in the shipped configuration**, because `llm.json.example` names no `vision` profile.
   Neither overwrites a non-empty `extractedText` without an explicit `replace`. `document.requestText`
   remains the floor: where reading is unavailable, refused or unusable, a human is asked to transcribe
-  as they always were. Local OCR is not implemented.
+  as they always were. Local OCR was **rejected rather than deferred**: Tesseract is a native
+  dependency and a much larger image, in exchange for output that is worse on a German invoice's layout
+  than a vision model reading the same page — more engineering for less quality. Images that are not
+  PDFs, on the other hand — a JPEG, a PNG, a HEIC photographed with a phone — are deliberately
+  deferred, being a second attachment path with its own size limits and its own failure modes, and
+  `readScan` is written so that adding one is a media-type branch rather than a rewrite. DOCX, XLSX and
+  `.msg` are not what arrives through a letterbox, and are worth revisiting on the day one does.
 - **`bookkeeping.createAccount` is granted to no Assistant.** The chart of accounts is a
   structural decision the User makes.
 - **No compaction, forking or steering** of Conversations. `maxTurns` (default 20) is the only
@@ -515,14 +559,53 @@ This is one running vertical slice, not a finished system.
 
 - **Parties have no proper Authority.** The ThingStore holds them provisionally, pending an
   address book Connector (ADR-0013).
+- **A Conversation that reaches a hundred Entries can never be written again, and retries for ever.**
+  `Conversation_DM` caps the `Entries` group at 100 rows, which is a Model limit rather than a
+  Runtime one, so the hundred-and-first append is refused by the store's own validation
+  (`zuGrosseZeile`, `zuGrosseKontextnummer`) and the write is rolled back. The loop treats that as a
+  transient failure and comes back on the next scan, roughly every five seconds, for ever — observed
+  on 2026-08-18 against `Conversation_DM/db637140-3ec3-45f7-a04f-0cf7b7dfc6b6`, which was still
+  spinning when it was found. The reason it cannot escalate out of the state is the state itself:
+  ADR-0015's promise that nothing ends silently is kept by *writing an Entry*, and writing an Entry
+  is the thing that is failing — so the one Conversation that most needs to record its own death is
+  the one that cannot. `just pause` stops it; nothing in the system does. A repair has to bound the
+  transcript rather than the retry, because the retry is correct for every other cause of a failed
+  write.
 - **A schedule stalls on an unanswered question.** A slot is skipped entirely while the previous one
   is unfinished (ADR-0016), so one question nobody answers holds every later firing. That is
   deliberate — two live Conversations for one recurring errand would be two questions the User cannot
   tell apart — and it is a log warning rather than a second question about the first. The fix is to
   answer it.
-- **Nothing aggregates what a Conversation cost.** A Turn carries what the model charged for it and
-  the transcript is where you read it. No dashboard, no billing, no second store — and the sum is a
-  lower bound, because a Turn that errored records nothing.
+- **Nothing *stores* what a Conversation cost.** A Turn carries what the model charged for it and the
+  transcript is where you read it; the thread's header adds those figures up for display and keeps
+  nothing — no field on the Conversation, no dashboard, no billing, no second store — so the total is
+  recomputed from the Entries every time the form is opened. It renders with a **≥**, because a Turn
+  that errored records nothing, which makes every total a lower bound.
+- **Past a hundred waiting Conversations, an answer can go unnoticed for ever.** The scan that
+  consumes answers reads *at most a hundred* waiting Conversations per pass —
+  `search(Conversation_DM, status = waiting and waitingFor in (user, tool) and currentQuestionId
+  set, 100)` — and then simply iterates what it got. There is no paging and no ordering that
+  favours the recently-answered, and unlike the arrival scan there is no watermark to carry the
+  remainder forward: a full page silently hides everything behind it. So with more than a hundred
+  questions outstanding, a Conversation outside that window keeps `waitingFor = user` after its
+  question has been answered, and nothing ever comes back for it. Observed on 2026-08-18 with 501
+  waiting Conversations: the Accountant sat on `currentQuestionId` pointing at a question that had
+  been answered ten minutes earlier, and the end-to-end invoice slice timed out waiting for the
+  approval that could no longer be raised. It is the same failure the scan's own comment says it
+  was widened to prevent — *"terminal and silent, with the heartbeat still green"* — reintroduced
+  at scale by the cap rather than by the filter. This is the sharp consequence of the unbounded
+  standing population recorded above: not merely a slow system, but one that stops answering the
+  User while every health check stays green. **Fixed on 2026-08-18** — the scan now sweeps in
+  `createdAt` order behind a rotating cursor, three pages per pass, so a Conversation is reached
+  within a bounded number of passes however many others wait. Two things it did not fix are worth
+  knowing. **Scan 5, result delivery, has the same cap and is more exposed**: a finished child stays
+  in the set until it has been delivered, so unlike the answered scan it cannot self-clear, and past
+  a hundred undelivered children a newly finished one can be hidden from its parent indefinitely.
+  Scans 3, 4 and 6 share the shape but not the consequence — a recovered lease drops out of scan 4's
+  set and scan 6 churns rather than loses. And **`ThingRepository.search` cannot ask for a page
+  number** (`pageNumber: 0`, hardcoded), which is why the sweep steps by second rather than by offset
+  and why more than three hundred Conversations born inside one second still cannot be enumerated;
+  that case now warns rather than stalling for ever.
 - **An answered question does not leave the pending view.** `OpenQuestionPending_QeM` filters on
   `answeredAt` being unset, and nothing stamps that field — while the Runtime's `isAnswered` counts
   *any* filled answer field, so the Conversation does continue. The row simply stays in the inbox
@@ -548,9 +631,54 @@ This is one running vertical slice, not a finished system.
   scan and reports itself unhealthy rather than falling back to what the code knows. That is the
   intended behaviour — a second answer to *"what can this Assistant do"* is exactly what the
   catalogue exists to remove — and the remedy is in the log.
+- **The end-to-end cleanup deletes by `Title` prefix, and since the letterbox `Title` is an email
+  subject.** `e2e/tests/base/0-clean.setup.ts` removes every `Document_DM` and `Party_DM` Thing whose
+  name field starts with `E2E`, and it runs as a setup dependency of essentially every end-to-end run.
+  Before ADR-0024 that field only ever held what a test had typed; now it holds whatever the household
+  forwarded, so a genuine invoice whose subject happens to begin *E2E* is deleted, silently, by the
+  next test run — untrusted input meeting a delete, which is the shape of the problem rather than its
+  likelihood. The recommendation, not yet a patch, is to scope the cleanup by something a forwarded
+  mail cannot produce rather than to constrain what the household is allowed to forward. `Source` alone
+  will not serve: the mail tier's own Documents are written by the same ingest and carry `Source:
+  email` like any other, which is precisely why `e2e/utils/mailbox.ts` stamps a per-run token into the
+  subject — that token, not the bare prefix, is the discriminator the cleanup should be reading.
+- **Whether the paid reading rung earns its keep has never been measured.** `llm.json` names no
+  `vision` profile, so `document.readScan`, the Anthropic `document`-block request shape and the
+  fold-in of its usage into a Turn's recorded cost have only ever run against the null reader and the
+  unit tests — never against a paid provider, never against a real piece of post, and the cost the
+  Runtime writes down has never been reconciled with a provider's own reported usage. The split the
+  design was argued from — of ten real pieces of household post, how many needed no reading at all,
+  how many were settled free by `extractText`, how many justified `readScan`, and how many still
+  reached a human — was never taken. That the rung is unavailable as shipped is stated above and is
+  deliberate; what is missing is that its *economic* premise is unverified, which is a different
+  admission from *unimplemented*.
+- **Forwarding the same invoice twice creates a second set of Documents.** The duplicate check is a
+  query on `Document.ExternalRef` — `<message-id>#<part>` — and Gmail mints a fresh `Message-ID` for
+  every forward, so the second forward of one dentist's bill is, to the ingest, a message it has never
+  seen. Catching it would mean comparing content rather than identifiers, which is judgement rather
+  than a key, and judgement belongs to the Receptionist. The check itself was always described; what
+  was never written down is what it does not cover.
+- **Two implementations of "what is a liability" disagree.** `bookkeeping.listOpenItems` counts an
+  account typed `debt` as an open item (`runtime/src/connectors/firefly.ts:552`), while the type filter
+  behind `bookkeeping.listAccounts` reconciles only Firefly's `liabilit` prefix, so a caller asking for
+  `liability` never sees a `debt` account (`runtime/src/operations/implementations.ts:829`). It is
+  theoretical on this Firefly instance, which answers only `asset`, `expense`, `revenue` and
+  `liabilities`. It is recorded anyway, because one concept implemented twice — each half right about a
+  different side of Firefly's read and write vocabularies — is exactly the shape BUG-02 had: a list
+  that reported nothing outstanding while thousands were owed.
 
 **Operational limits**
 
+- **One transcript spec depends on how much the Assistant happened to say.**
+  `9-conversation-transcript.spec.ts`'s pinned-header test scrolls the Transcript to its end and
+  then asserts the last Bubble is in the viewport, which only means anything when the thread is
+  long enough to scroll. Transcript lengths in a live store range from two Entries to thirteen
+  depending on how many tool calls the Assistant made, and at the short end the assertion fails
+  while the two assertions that actually establish the pinning — `overflow-y: auto` on the
+  Transcript and `position: sticky` on the header — both pass. It is intermittent rather than
+  broken, and it was already failing this way before the answered-scan fix, so it is a fragile
+  assertion rather than a regression. The repair is to give the spec a thread of a known length
+  instead of whatever the fixture produced, not to loosen the assertion.
 - **Exactly one Runtime replica.** Not a deployment convenience — A12 has no compare-and-swap, so
   two replicas would both claim an expired lease and silently lose one writer's work.
 - **Latency is one scan interval**, about two seconds.
@@ -558,9 +686,24 @@ This is one running vertical slice, not a finished system.
 - **`just clean` and `just demo-reset` take the books with them.** Firefly has no bulk delete and
   its data lives in a named volume, so a full teardown is the only reset symmetric across two
   Authorities.
-- **The end-to-end suite writes to whatever stack it is pointed at**, creating and deleting Things.
-  Point it at a development stack only. `cd e2e && npx playwright test --list` is the authority on
-  what it runs.
+- **The end-to-end suite writes to whatever stack it is pointed at**, creating and deleting Things —
+  and since the letterbox, deleting them by a `Title` prefix that the household's own forwarded post
+  can carry, so a stack that has ever received real mail is not a stack to point it at. Point it at a
+  development stack only. `cd e2e && npx playwright test --list` is the authority on what it runs.
+- **Nothing bounds the standing population of in-flight Conversations.** The births-per-hour cap bounds
+  how fast Conversations may be *created*; nothing caps how many may sit `running` or `waiting` at
+  once, nor for how long. Measured against a model that could not emit a structured tool call, the
+  backlog went 406 → 415 → 436 in flight over about an hour — none of them able to complete, and every
+  one of them re-read on every two-second scan. What buckles under that is the **server**, not the
+  Runtime, because the scan is a read amplifier: 83.96% cpu and 1.782 GiB on the server against the
+  Runtime's 6.47%. So a runaway here does not look like a runaway Runtime, which is where a reader
+  would go looking for it.
+- **On this machine no Conversation can finish at all, because `llm.json` is on `local_qwen`.** That
+  profile emits tool calls as prose rather than as structured calls, and the Runtime says so in as many
+  words — *"The model emitted a tool call as text rather than as a structured call, so nothing was
+  invoked"* — so every Turn spends a turn and invokes nothing, six agent-dependent end-to-end specs
+  cannot pass, and the backlog above only grows. The remedy is one line and a restart: `"active":
+  "scripted"` in `llm.json`, then `just restart runtime`.
 
 **Security posture**
 

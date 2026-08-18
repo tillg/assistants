@@ -69,8 +69,8 @@ describe("Bubble", () => {
     });
 
     /**
-     * domain.md marks `system` and `prompt` *collapsed meta line*, and proposal.md asks that the system
-     * prompt stop competing with the dialogue. Rendering them expanded is the whole of that failure, and
+     * functional.md's Speaker table marks `system` and `prompt` *collapsed*, so that the system
+     * prompt stops competing with the dialogue. Rendering them expanded is the whole of that failure, and
      * the fixture carries no `system` Entry, so nothing else here would have caught it.
      */
     it("puts the system prompt away behind its label, since it is long and read once", () => {

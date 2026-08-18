@@ -4,7 +4,7 @@ import { readEntries } from "../../../components/conversation/entries";
 import { speakerFor } from "../../../components/conversation/speaker";
 import fixture from "../../fixtures/conversation.json";
 
-/** One case per row of domain.md's Speaker table; that table is the whole of the Transcript's semantics. */
+/** One case per row of functional.md's Speaker table; that table is the whole of the Transcript's semantics. */
 describe("speakerFor", () => {
     it("puts the Assistant's prose on the left", () => {
         expect(speakerFor("assistant")).toEqual({

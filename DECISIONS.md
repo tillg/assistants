@@ -138,6 +138,20 @@ a second authority for pending work, and a live process holding state.
 **Reversal cost**: Medium — the polling loop is small, but the "answer by editing the Thing"
 convention shows up in the form models.
 
+**Narrowed 2026-08-18, on the first half of one sentence only** (see
+[D-069](#d-069--the-door-outward-one-inbound-route-on-the-runtime-and-an-allowlist-checked-twice)):
+the Runtime **does** now expose an interface to the UserInterface. It is one read-only route —
+`POST /operations/<key>` on the compose network, behind a shared secret — which executes a named,
+allowlisted, non-mutating Operation and returns its result, so that the Dashboard can ask *"what do the
+books say?"* of the one component holding Firefly's credential. Everything else in this entry stands
+unchanged, including the half of that sentence that says the Runtime **receives no webhooks**: the three
+scan clauses above are still the only way work reaches the loop, the User still answers by editing the
+Conversation Thing, the store is still the only Authority for pending work, and the new route cannot
+wake a Conversation, answer a question or write anything at all. The alternative recorded above was *a
+REST API plus custom buttons* — a second authority for pending work — and that is still refused; what
+was built instead carries no pending work and holds no state between requests. Left as written rather
+than corrected in place, because the reasoning is what dates the sentence.
+
 ---
 
 ## D-006 — Artefact registries are pinned in the repository, not inherited from the machine
@@ -2203,3 +2217,128 @@ in `config.ts` at all — it is `llm.json`'s `vision` profile, for the reason
 [D-057](#d-057--named-llm-profiles-in-one-file-with-the-keys-named-after-them) gives, and no such
 profile ships, so vision reading is unavailable by default and the ladder falls through to asking a
 human. Only the two caps, `VISION_MAX_PAGES` and `VISION_MAX_BYTES`, are environment variables.
+
+**Corrected 2026-08-18 — the threshold stopped being a gate.** What is decided above is still the
+decision: two Operations, never one, and a hundred characters is still where the boundary sits. What
+is no longer true is the sentence that says the reader *"counts as no text layer and returns
+`{ reason: "no-text-layer" }"`* below it. That was a hard gate, and it threw away the very characters
+the Receptionist needed in order to disagree with it. The constant is now `SPARSE_TEXT_CHARS`
+(`runtime/src/readers/textLayer.ts:56`) and it **flags rather than withholds**: a sparse read comes
+back with every character it found and a `sparse: true` beside it, and `no-text-layer` is reserved
+for a document that is genuinely empty once trimmed — nothing to judge, so nothing to hand over. The
+reason the change is not merely cosmetic is the measurement that provoked it: a short dentist's
+invoice extracts to 84 characters, a one-line payment reminder to 44, a parking receipt to 49. All
+three are free, exact and complete, and all three sit *below* 100 — so under the old gate all three
+were reported as scans and sent to a model that can invent an amount, which is precisely the harmful
+error direction the caveat above names. Lowering the number would have been no fix at all; it only
+moves the misclassification onto shorter post. The threshold is a **label, not a gate**, and the
+Receptionist is the one that decides.
+
+## D-069 — The door outward: one inbound route on the Runtime, and an allowlist checked twice
+
+*2026-08-18, during `bookkeeping-on-the-dashboard`. Recorded as ADR-0023; what is here is the shape as
+built and the configuration it costs.*
+
+**Decided**: the Runtime opens **one** inbound HTTP surface — `POST /operations/<key>`, plus an
+unauthenticated `GET /healthz` that executes nothing — which runs a named Operation and returns its
+result. `runtime/src/inbound/server.ts`, `node:http` and no framework — one route and a JSON body is
+standard library, and adding Express to a process whose job is a scan loop would be a dependency, a
+lockfile change and a supply-chain surface for nothing. The shared secret arrives as
+`X-Runtime-Secret` and is compared with `timingSafeEqual`, which is why the comparison checks the
+lengths first — `timingSafeEqual` throws on a mismatch rather than
+answering `false`. The decision to allow a call is a separate, pure function in
+`runtime/src/inbound/gate.ts`: four checks, `and`ed, no I/O, so that it can be tested before any
+transport exists — the Operation is on the deployment allowlist, its Implementation declares
+`clientReadable`, its Implementation is not `mutating`, and its seed does not require an approval. A
+fifth condition, the User's `Enabled` switch on the Operation Thing, is read in the handler because it
+needs the store, and it **fails closed**: a store that cannot be read counts as not enabled, because a
+check whose job is to grant access must never read *"I could not find out"* as *"go ahead"*.
+
+**Why the statuses are split the way they are**: 401 for a wrong or missing secret, answered before the
+body is parsed and before the gate is consulted at all, so an unauthenticated caller learns nothing
+about which Operations exist; 403 `not-allowed` for every refusal the gate makes — unknown, disallowed,
+mutating, approval-guarded, switched off and even an undecodable `%zz` in the name are one outward
+answer; 400 for a body that will not parse and 413 for one over 64 kB, which are the caller's mistakes
+and are told so; 502 when the Operation itself threw, because *"Firefly is down"* and *"you may not ask
+that"* must never be the same line in a log; and 500 only for a handler that threw, caught so that it
+cannot take the listener — and with it the scan loop's process — down with it.
+
+**The allowlist is enforced twice, on two sides, and the outer one is deliberately the weaker.** The
+browser does not reach this route: it calls an `EXTERNAL_CALL` JSON-RPC operation on the A12 server
+(`server/app/src/main/java/com/grtnr/assistants/server/bookkeeping/ExternalCallOperation.java`), which
+authenticates the User against Keycloak, checks the operation name against its **own** independent list
+from `assistants.runtime.allowed-operations`, and forwards. It takes an Operation key and arguments —
+never a path and never a method — so there is no request a caller can compose that it would pass through
+unread, and it relays no non-2xx body, so a caller cannot learn which of the two gates refused it.
+Duplicating the list is not redundancy worth removing: the refusal that matters has to happen in the
+process that would do the executing, and the server's copy exists so that a name the deployment does not
+offer never crosses the network at all.
+
+**Alternative**: `EXTERNAL_CALL` as a plain REST controller of its own. `@RemoteOperation` lands on
+`/api/v2/rpc`, which the client already speaks through the same `ServerConnector`, with the same
+authentication and batching and no second surface to secure — at the price of two conventions that are
+invisible until they bite: the method must literally be named `rpc`, and `EXTERNAL_OPERATIONS` must
+appear in `mgmtp.a12.dataservices.jsonRpc.allowedOperations`. `@PreAuthorize` is not decoration either;
+A12 walks every mapped endpoint at startup and refuses to boot with one that declares no policy.
+
+**What it costs in configuration**: three environment variables on the Runtime — `INBOUND_PORT`
+(default `0`, and `0` means no listener at all, so a deployment that does not want the door open does
+not have to know the setting exists), `INBOUND_SECRET` (required as soon as a port is set) and
+`CLIENT_CALLABLE_OPERATIONS` — and three properties on the server, `assistants.runtime.url`,
+`assistants.runtime.shared-secret` and `assistants.runtime.allowed-operations`. Compose sets the port to
+`8090` and ships the allowlist as exactly `bookkeeping.listAccounts,bookkeeping.listTransactions` on
+both sides. **No new published port**: the `runtime` service still has no `ports:` block, because
+container-to-container traffic on this network needs neither `ports` nor `expose`, and the boundary that
+faces the world stays Keycloak at the server. The listener is closed explicitly on SIGTERM, with
+`closeAllConnections()` first — an open keep-alive socket would otherwise hold the shutdown signal for as
+long as a client cared to.
+
+**Reversal cost**: Low, and asymmetric in the right direction. Shutting the door is unsetting
+`INBOUND_PORT`; narrowing it is editing one comma-separated list in two places. Widening it is the
+expensive direction, and is a decision taken per Operation — see
+[D-070](#d-070--clientreadable-is-a-property-of-the-implementation-never-of-the-operation-thing).
+
+## D-070 — `clientReadable` is a property of the Implementation, never of the Operation Thing
+
+*2026-08-18, during `bookkeeping-on-the-dashboard`.*
+
+**Decided**: `OperationImplementation` gains an optional `clientReadable?: true`
+(`runtime/src/operations/registry.ts:110`) meaning *safe to execute for a browser with no Conversation
+behind it*. Two obligations come with setting it and neither can be checked by the compiler: the
+Implementation's `mutating` must be `false`, and its `execute` **may not read its `OperationContext`** —
+there is no Conversation, no Assistant and no idempotency key when the caller is a browser, so an
+Operation that needs any of them is not client-readable however harmless it looks. The inbox passes no
+context at all rather than inventing one, because a fabricated conversation id would end up inside an
+idempotency key.
+
+**Why it lives in code and not on the Thing**: ADR-0019 made
+the Operation a Thing the User owns, and `registry.ts` had already refused to trust that Thing for
+`mutating`, for a reason that is stated there — `reconcile()` treats a non-mutating Operation as safe to
+consider repeated, so a `mutating: false` edited onto a booking would make crash recovery report the
+booking as harmless, which is ADR-0012's failure
+delivered by the safety mechanism. The same argument holds with more force where the caller is a browser.
+So the split is: `Enabled` is the User's decision and is read from the Thing; `Mutating` and
+`clientReadable` are claims about code and are read from code, next to the author who knows whether they
+hold.
+
+**Three Operations carry it** — `bookkeeping.listAccounts` (`implementations.ts:793`, which takes no
+arguments at all), `bookkeeping.listTransactions` (`:966`, which reads only its `args`, a date window
+the Tile supplies) and `bookkeeping.getBalance` (`:1025`). `bookkeeping.postTransaction` deliberately
+does not, and `document.extractText` says why in one line at `:1360` — *"Never `clientReadable`: it
+writes."*
+
+**The flag and the allowlist are two controls, and `getBalance` is the proof.** It is marked in code and
+is **absent** from `CLIENT_CALLABLE_OPERATIONS`, so the code says *safe* and the configuration does not
+say *offered*, and it is not callable. That gap is on purpose: `mutating: false` means *changes nothing*,
+not *safe for a browser to invoke at will* — an LLM-touching Operation is non-mutating and costs money
+every time it is called — and the Dashboard answers the same question with `listAccounts` in one call
+anyway.
+
+**Alternative**: infer client-readability from `mutating: false` alone and drop the flag. Rejected
+because it makes every future non-mutating Operation callable from a browser on the day it is written,
+which inverts the default: the author of a cheap read would have to remember to opt *out*, and the one
+who forgets is the one who added the expensive one.
+
+**Reversal cost**: Low as a mechanism — one optional property and one line in `gate.ts` — but each
+individual grant is a judgement that has to be made again, which is the point of it being three
+characters of code rather than a rule.
