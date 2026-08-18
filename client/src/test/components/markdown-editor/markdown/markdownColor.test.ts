@@ -44,7 +44,11 @@ describe("COLOR transformer", () => {
         // Color composes with inline marks — the bracket content carries the format markers.
         ':color[**bold**]{value="#9c36b5"}',
         ':color[_italic_]{value="red"}',
-        ':color[~~struck~~]{value="#f00"}'
+        ':color[~~struck~~]{value="#f00"}',
+        // BUG-15: a `]` (or `\`) inside the colored text is escaped, so the directive is not ended
+        // early and left in the document as visible raw markup.
+        ':color[a\\]b]{value="#ff0000"}',
+        ':color[c\\\\d]{value="red"}'
     ])("round-trips %j", (markdown) => {
         expect(roundTrip(markdown)).toBe(markdown);
     });

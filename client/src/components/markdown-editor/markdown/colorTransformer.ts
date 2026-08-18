@@ -16,8 +16,18 @@ export { isValidColor, isValidHexColor } from "../../color-picker/colors";
 // leaves the run as plain text (spec 009 degrade-for-free), so the value space
 // need not be baked into the regex. The `:color[` start is name-specific, so
 // prose like `16:00` is never mis-parsed.
-const COLOR_DIRECTIVE = /:color\[([^\]]*)\]\{value="([^"]+)"\}/;
-const COLOR_DIRECTIVE_AT_END = /:color\[([^\]]*)\]\{value="([^"]+)"\}$/;
+// The bracketed text may itself contain `]` (and `\`), so the capture is escape-aware: it matches
+// either an escaped pair (`\` + any) or any character that is neither `]` nor `\`. Export escapes
+// those two characters and `replace` unescapes them, mirroring the table transformer's `\|`. Without
+// this a colored `a]b` serialized to `:color[a]b]{…}`, whose `]` after `a` ended the capture early,
+// the match then failed, and the raw directive was left in the document as visible plain text.
+const COLOR_DIRECTIVE = /:color\[((?:\\.|[^\]\\])*)\]\{value="([^"]+)"\}/;
+const COLOR_DIRECTIVE_AT_END = /:color\[((?:\\.|[^\]\\])*)\]\{value="([^"]+)"\}$/;
+
+/** Escape the two characters the bracketed text must not contain raw. */
+const escapeColorText = (text: string): string => text.replace(/\\/g, "\\\\").replace(/\]/g, "\\]");
+/** Reverse {@link escapeColorText}: `\\` → `\`, `\]` → `]`. */
+const unescapeColorText = (text: string): string => text.replace(/\\([\\\]])/g, "$1");
 
 /**
  * The color of a text run, read from its inline `style` (`color: …`), or null when
@@ -59,7 +69,7 @@ export const COLOR: TextMatchTransformer = {
             return null;
         }
         const attrs = serializeDirectiveAttributes([["value", color]]);
-        return `:color[${exportFormat(node, node.getTextContent())}]{${attrs}}`;
+        return `:color[${exportFormat(node, escapeColorText(node.getTextContent()))}]{${attrs}}`;
     },
     importRegExp: COLOR_DIRECTIVE,
     regExp: COLOR_DIRECTIVE_AT_END,
@@ -73,7 +83,7 @@ export const COLOR: TextMatchTransformer = {
             // Not a color we can represent — leave the matched text as plain text.
             return;
         }
-        const colored = $createTextNode(text).setStyle(`color: ${color};`);
+        const colored = $createTextNode(unescapeColorText(text)).setStyle(`color: ${color};`);
         // TODO: remove when A12-19022 is fixed
         if ($isInlineStyleTextNode(colored)) {
             colored.setUnmergeable();
