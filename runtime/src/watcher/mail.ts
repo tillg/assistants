@@ -606,7 +606,7 @@ async function ingestDocument(
         title: capped(document.title, MAX_FIELD_LENGTH),
         // A Document with no `ReceivedAt` sorts nowhere and reads as if it never arrived. The
         // Connector always provides one; this is the belt for the day it cannot.
-        receivedAt: document.receivedAt || isoStamp(deps.now?.() ?? new Date()),
+        receivedAt: storableInstant(document.receivedAt, deps.now?.() ?? new Date()),
         source: "email",
         // The attachment is what the Document *is* when there is one; without one it is the body,
         // which is prose.
@@ -732,4 +732,29 @@ function capped(value: string, maxLength: number): string {
 /** A12 `DateTimeType` is `yyyy-MM-dd'T'HH:mm:ss` — no milliseconds, no zone suffix. */
 function isoStamp(date: Date): string {
     return date.toISOString().replace(/\.\d{3}Z$/, "");
+}
+
+/**
+ * The instant a Document records, in the only spelling the store accepts.
+ *
+ * `Document_DM`'s `ReceivedAt` is a `DateTimeType` formatted `yyyy-MM-dd'T'HH:mm:ss` — **no
+ * milliseconds and no zone suffix.** The Connector reports an ordinary ISO 8601 instant, which has
+ * both, so passing it through unchanged is refused by the store with *"the given value is not valid
+ * for type date representation"* and the message goes to the failed folder.
+ *
+ * That is exactly what happened on the first real email this system ever saw, and nothing caught it
+ * earlier: every unit test writes through an in-memory store that does not validate the format, so
+ * a suite of 383 tests was green over a Document that no A12 server would have accepted. The
+ * normalisation existed — it was simply applied only to the fallback, and never to the value that
+ * is used in practice.
+ *
+ * An unparseable instant falls back rather than throwing: a Document with no `ReceivedAt` sorts
+ * nowhere and reads as if it never arrived, and the arrival time of the poll is a better answer
+ * than losing the mail over a malformed `Date:` header.
+ */
+function storableInstant(value: string, fallback: Date): string {
+    const parsed = value === "" ? undefined : new Date(value);
+    return parsed !== undefined && !Number.isNaN(parsed.getTime())
+        ? isoStamp(parsed)
+        : isoStamp(fallback);
 }

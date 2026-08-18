@@ -576,7 +576,15 @@ describe("runMailIngest", () => {
         expect(document?.data.title).toBe("Fwd: Zahnarztrechnung");
         expect(document?.data.mediaType).toBe("application/pdf");
         expect(document?.data.extractedText).toContain("Zahnarztrechnung");
-        expect(document?.data.receivedAt).toBe("2026-01-13T17:02:11.000Z");
+        // `yyyy-MM-dd'T'HH:mm:ss` — no milliseconds, no zone. That is what `Document_DM`'s
+        // `DateTimeType` declares, and an A12 server refuses anything else outright.
+        //
+        // This assertion previously read `"2026-01-13T17:02:11.000Z"`, which is what the code
+        // produced and what no store would accept: the in-memory store these tests write through
+        // does not validate the format, so a green suite sat on top of a Document that could never
+        // have been created for real. It was found by ingesting an actual forwarded invoice.
+        expect(document?.data.receivedAt).toBe("2026-01-13T17:02:11");
+        expect(document?.data.receivedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
 
         expect(mailbox.uids(INCOMING)).toEqual([]);
         expect(mailbox.uids(PROCESSED)).toEqual([7]);
