@@ -195,6 +195,32 @@ describe("the catalogue a Turn loads", () => {
         expect(reads).toBe(1);
     });
 
+    it("puts the Turn's prose on the first tool-intent only, not on every call", async () => {
+        // BUG-07: `text: response.text` was written on every intent, so buildMessages replayed the
+        // same narration once per call — wasted prompt tokens next Turn, and the User saw it twice.
+        const harness = buildHarness([
+            {
+                turn: 0,
+                text: "Let me look up both.",
+                toolCalls: [
+                    { name: "thingstore__search", arguments: { model: "Party_DM" } },
+                    { name: "thingstore__search", arguments: { model: "Invoice_DM" } },
+                ],
+            },
+            { turn: 1, text: "done.", finishReason: "answered" },
+        ]);
+        const assistant = await harness.seedAssistant({ grants: [{ operationKey: "thingstore.search" }] });
+        const docRef = await harness.birth({ assistant });
+
+        await harness.driver.advance(docRef);
+
+        const conversation = await harness.conversation(docRef);
+        const intents = (conversation.data.entries ?? []).filter((entry) => entry.kind === "tool-intent");
+        expect(intents).toHaveLength(2);
+        expect(intents[0]!.text).toBe("Let me look up both.");
+        expect(intents[1]!.text ?? "").toBe("");
+    });
+
     it("resolves the grants once per Turn, so one bad grant is one warning", async () => {
         // `grantedTo` logs every drop, and it used to be called three times in a Turn — once for the
         // schemas, once for the belt check, once by reconciliation — so a single mistyped grant put

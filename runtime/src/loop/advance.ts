@@ -654,7 +654,11 @@ export class LoopDriver {
             const intent = appendEntry(conversation, {
                 role: "assistant",
                 kind: "tool-intent",
-                text: response.text,
+                // The Turn's prose belongs on the first intent only, exactly as its usage does
+                // (`costEntry` below). Copied onto every intent, `buildMessages` replays the same
+                // narration once per call — wasted prompt tokens next Turn, and the User sees the
+                // sentence twice.
+                text: costEntry ? "" : response.text,
                 toolName: operation,
                 toolArgs: JSON.stringify(call.arguments),
                 idempotencyKey,
