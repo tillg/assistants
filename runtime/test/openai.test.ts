@@ -167,6 +167,29 @@ describe("the OpenAI-compatible provider", () => {
         await expect(provider.complete(REQUEST)).rejects.toBeInstanceOf(TransientLlmError);
     });
 
+    it("reads the <tool_call>{json}</tool_call> dialect the detector already admits", async () => {
+        // BUG-09: MALFORMED_TOOL_CALL matched `<tool_call>`, but recovery only read the `<function=>`
+        // dialect — so a trivially-parseable JSON call burned every retry and then escalated.
+        const provider = new OpenAiProvider(
+            "http://gateway/v1",
+            "key",
+            gateway({
+                message: {
+                    content: 'Let me read it. <tool_call>{"name":"thingstore__get","arguments":{"model":"Party_DM"}}</tool_call>',
+                },
+                finish_reason: "stop",
+            }),
+        );
+
+        const response = await provider.complete(REQUEST);
+        expect(response.finishReason).toBe("wants-tools");
+        expect(response.toolCalls).toHaveLength(1);
+        expect(response.toolCalls[0]!.name).toBe("thingstore__get");
+        expect(response.toolCalls[0]!.arguments["model"]).toBe("Party_DM");
+        // The JSON body is not left behind as prose.
+        expect(response.text).not.toContain("thingstore__get");
+    });
+
     it("escalates an abnormal finish_reason instead of recording an empty answer", async () => {
         // BUG-08: content_filter (and any present-but-abnormal reason) means the content did not
         // complete. Mapping it to "answered" recorded a Conversation that produced nothing as

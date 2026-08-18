@@ -259,6 +259,14 @@ const MARKUP_CALL = /<function=([A-Za-z0-9_.-]+)>([\s\S]*?)<\/function>/g;
 const MARKUP_PARAMETER = /<parameter=([A-Za-z0-9_.-]+)>([\s\S]*?)<\/parameter>/g;
 
 /**
+ * The other dialect the same family emits: `<tool_call>{"name":…,"arguments":{…}}</tool_call>`. The
+ * `MALFORMED_TOOL_CALL` detector admits it (via its `<tool_call>` alternative), so without a reader
+ * for it a detectable-but-unrecoverable response burned every retry and then escalated a call whose
+ * JSON was trivially parseable.
+ */
+const MARKUP_JSON_CALL = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g;
+
+/**
  * The tool calls hidden in markup the gateway did not parse.
  *
  * Deliberately **not** gated on the model's name. What is being read here is a shape, not a
@@ -290,6 +298,29 @@ function toolCallsFromMarkup(text: string, tools: ToolSchema[]): LlmToolCall[] {
         calls.push({ id: `markup_${calls.length}_${createHash("sha1").update(`${name}${body}`).digest("hex").slice(0, 8)}`, name: name!, arguments: args });
     }
 
+    // The JSON-in-tag dialect. Only a body that parses to an object naming a tool this request
+    // offered is read — the same shape-not-vendor guard as above. A `<tool_call>` wrapping a
+    // `<function=…>` (which MARKUP_CALL already read) does not parse as JSON, so it is skipped here
+    // rather than double-counted.
+    for (const [, body] of text.matchAll(MARKUP_JSON_CALL)) {
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(body!.trim());
+        } catch {
+            continue;
+        }
+        if (!parsed || typeof parsed !== "object") continue;
+        const name = (parsed as { name?: unknown }).name;
+        if (typeof name !== "string" || !offered.has(name)) continue;
+        const rawArgs = (parsed as { arguments?: unknown }).arguments;
+        const args = rawArgs && typeof rawArgs === "object" ? (rawArgs as Record<string, unknown>) : {};
+        calls.push({
+            id: `markup_${calls.length}_${createHash("sha1").update(body!).digest("hex").slice(0, 8)}`,
+            name,
+            arguments: args,
+        });
+    }
+
     return calls;
 }
 
@@ -297,6 +328,7 @@ function toolCallsFromMarkup(text: string, tools: ToolSchema[]): LlmToolCall[] {
 function withoutMarkup(text: string): string {
     return text
         .replace(MARKUP_CALL, "")
+        .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "")
         .replace(/<\/?tool_call>/g, "")
         .trim();
 }
