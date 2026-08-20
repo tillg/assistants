@@ -65,6 +65,35 @@ import { DEFAULT_TRANSLATIONS, supportedLocales, getDateTimeResource } from "./l
 import { withKeycloak } from "./uaa/withKeycloak";
 import { withUaa } from "./uaa/withUaa";
 
+/**
+ * The Form Engine view configuration — the `formModelMap`/`widgetMap` the platform spreads onto the
+ * `FormEngine` view as props: the Markdown editor and the custom screen elements get their renderers
+ * from here.
+ */
+const formEngineViewConfig = {
+    // The Markdown editor is selected per control by the `widget: markdown-editor` annotation.
+    // Widget props carry no annotations, so the bridge publishes the `Control`'s model element
+    // into a React context that `MarkdownTextArea` reads.
+    // `RelationshipFormModelMap` is spread because that is what `CRUDViews.FormEngineView` used
+    // internally before this app took the map over; without it CDD-bound controls, custom screen
+    // elements and detached repeats lose their relationship-aware renderers.
+    formModelMap: {
+        ...DefaultFormModelMap,
+        ...RelationshipFormModelMap,
+        Control: { component: createModelElementBridge(RelationshipFormModelMap.Control.component) },
+        // A `CustomScreenElement` is `Annotated` itself, so no bridge is needed: the
+        // dispatcher reads the `widget` annotation straight off its own model element.
+        // Overriding the relationship map's entry wholesale is correct here — it falls
+        // through to a platform placeholder when there is no CDD binding, and this
+        // application has no CDM models.
+        CustomScreenElement: { component: CustomScreenElements }
+    },
+    widgetMap: {
+        ...DefaultFormEngineWidgetMap,
+        TextAreaStateless: MarkdownTextArea
+    }
+};
+
 function assertFullyConfigured(
     config: A12ApplicationConfig
 ): asserts config is A12ApplicationConfig<ApplicationFactories.Config> {
@@ -87,30 +116,10 @@ export function setup() {
                 attachmentLoader: platformAttachmentLoader
             },
             // Spread onto the `FormEngine` view as props (see `withConfiguredFormEngine`), which is why that
-            // view is `CustomizableRelationshipFormEngine` rather than `CRUDViews.FormEngineView`.
-            viewConfig: {
-                // The Markdown editor is selected per control by the `widget: markdown-editor` annotation.
-                // Widget props carry no annotations, so the bridge publishes the `Control`'s model element
-                // into a React context that `MarkdownTextArea` reads.
-                // `RelationshipFormModelMap` is spread because that is what `CRUDViews.FormEngineView` used
-                // internally before this app took the map over; without it CDD-bound controls, custom screen
-                // elements and detached repeats lose their relationship-aware renderers.
-                formModelMap: {
-                    ...DefaultFormModelMap,
-                    ...RelationshipFormModelMap,
-                    Control: { component: createModelElementBridge(RelationshipFormModelMap.Control.component) },
-                    // A `CustomScreenElement` is `Annotated` itself, so no bridge is needed: the
-                    // dispatcher reads the `widget` annotation straight off its own model element.
-                    // Overriding the relationship map's entry wholesale is correct here — it falls
-                    // through to a platform placeholder when there is no CDD binding, and this
-                    // application has no CDM models.
-                    CustomScreenElement: { component: CustomScreenElements }
-                },
-                widgetMap: {
-                    ...DefaultFormEngineWidgetMap,
-                    TextAreaStateless: MarkdownTextArea
-                }
-            }
+            // view is `CustomizableRelationshipFormEngine` rather than `CRUDViews.FormEngineView`. The same
+            // object is exported as {@link formEngineViewConfig} so the Thing popup can mount a FormEngine
+            // by hand with identical maps.
+            viewConfig: formEngineViewConfig
         },
         localization: {
             supportedLocales,

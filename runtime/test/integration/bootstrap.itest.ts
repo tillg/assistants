@@ -13,9 +13,11 @@
  *      RuntimeState alone — exactly what `just bootstrap` does before every `just dev`. A prompt
  *      hand-edited in the web application is overwritten either way; nothing new is destroyed here.
  *   2. The seed-divergence cases need an Operation whose stored fields can be pushed around, so they
- *      use `bookkeeping.createAccount` — the one Implementation granted to **no** Assistant (see
- *      ACCOUNTANT's grants), so switching it off for the length of a test cannot strand a Turn. Each
- *      case restores what it changed, and a final pristine run heals anything a failure left behind.
+ *      use `bank.sendMoney` — a built-in Manual Connector granted to **no** Assistant and not used by
+ *      the watcher, so switching it off for the length of a test cannot strand a Turn or a mail scan.
+ *      (`bookkeeping.createAccount` played this role until ADR-0025 made it dynamic and removed it
+ *      from `buildOperations`.) Each case restores what it changed, and a final pristine run heals
+ *      anything a failure left behind.
  *
  * Bootstrap runs as the **User** (D-007a): the `runtime` role has no `ASSISTANT_WRITE`, and
  * `Operation_DM` is User-owned too, so seeding as the Runtime would answer -32059.
@@ -30,7 +32,7 @@ import type { Operation, Stored } from "../../src/domain/types.js";
 import { newFirefly, newJanitor, newThings, THING_STORE_UP } from "./support/live.js";
 
 /** The Operation the divergence cases push around. Granted to nobody, so nothing depends on it. */
-const VICTIM = "bookkeeping.createAccount";
+const VICTIM = "bank.sendMoney";
 
 describe.skipIf(!THING_STORE_UP)("bootstrap against the live ThingStore", () => {
     let things: ThingRepository;
@@ -144,11 +146,11 @@ describe.skipIf(!THING_STORE_UP)("bootstrap against the live ThingStore", () => 
         const result = await bootstrap(things, implementations);
 
         expect((await stored(VICTIM)).data.description).toBe(edited);
-        expect(result.divergedDescriptions).toContain(`Create an account (${VICTIM})`);
+        expect(result.divergedDescriptions).toContain(`${seedOf(VICTIM).name} (${VICTIM})`);
 
         await restoreVictim();
         expect((await bootstrap(things, implementations)).divergedDescriptions).not.toContain(
-            `Create an account (${VICTIM})`,
+            `${seedOf(VICTIM).name} (${VICTIM})`,
         );
     });
 
@@ -159,7 +161,7 @@ describe.skipIf(!THING_STORE_UP)("bootstrap against the live ThingStore", () => 
         await things.update(SPECS.Operation_DM, before.docRef, {
             enabled: false,
             requiresApproval: true,
-            name: "Create an account (renamed by hand)",
+            name: "Renamed by hand (integration suite)",
             notes: "Switched off by the integration suite.",
         });
 
@@ -168,7 +170,7 @@ describe.skipIf(!THING_STORE_UP)("bootstrap against the live ThingStore", () => 
         const after = await stored(VICTIM);
         expect(after.data.enabled).toBe(false);
         expect(after.data.requiresApproval).toBe(true);
-        expect(after.data.name).toBe("Create an account (renamed by hand)");
+        expect(after.data.name).toBe("Renamed by hand (integration suite)");
         expect(after.data.notes).toBe("Switched off by the integration suite.");
         // …while the mechanical half was still re-applied underneath the decision.
         expect(after.data.system).toBe(seedOf(VICTIM).system);

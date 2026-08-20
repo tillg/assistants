@@ -53,7 +53,7 @@ const Icon = styled.span`
 const Options = styled.ul`
     margin: 0.25rem 0 0;
     padding-left: 1.25rem;
-    font-size: 0.9em;
+    font-size: ${({ theme }) => theme.typography.fontSize.smallFontSize};
 `;
 
 const Answer = styled.button`
@@ -67,11 +67,15 @@ const Answer = styled.button`
     cursor: pointer;
 `;
 
-/** The line that stands where something the screen could not read would have been. */
+/**
+ * The line that stands where something the screen could not read would have been. A plain element, not
+ * the Typography widget: its `data-role` is the test and selector handle, and the widget stamps its own
+ * `data-role` over any it is given.
+ */
 export const Message = styled.div`
     margin: 0.35rem 0;
     color: ${({ theme }) => theme.colors.text.secondaryColor};
-    font-size: 0.85em;
+    font-size: ${({ theme }) => theme.typography.fontSize.smallFontSize};
     font-style: italic;
     text-align: center;
 `;

@@ -20,6 +20,10 @@ services:
     environment:
       NGINX_ASSISTANTS_SERVER_BASE_URL: http://server:8080/api
       NGINX_ASSISTANTS_SERVER_ACTUATOR_URL: http://server:8080/actuator
+      # The content store's download endpoint, proxied same-origin so the attachment preview can
+      # `fetch` the bytes past CORS and the `Content-Disposition: attachment` header — see
+      # client/nginx.conf.template. Served by the same process as /api.
+      NGINX_ASSISTANTS_SERVER_CONTENTSTORE_URL: http://server:8080/cs
     ports:
       - 127.0.0.1:8081:8081
     depends_on:

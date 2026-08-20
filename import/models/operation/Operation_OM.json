@@ -90,6 +90,40 @@
         "preferredSorting": "ASC"
       },
       {
+        "id": "col_implementation",
+        "label": [
+          {
+            "locale": "en",
+            "text": "Implementation"
+          },
+          {
+            "locale": "de",
+            "text": "Implementierung"
+          }
+        ],
+        "width": 2,
+        "elementRef": "f_implementation",
+        "sortable": true,
+        "preferredSorting": "ASC"
+      },
+      {
+        "id": "col_egress",
+        "label": [
+          {
+            "locale": "en",
+            "text": "Egress"
+          },
+          {
+            "locale": "de",
+            "text": "Egress"
+          }
+        ],
+        "width": 2,
+        "elementRef": "f_egress",
+        "sortable": true,
+        "preferredSorting": "ASC"
+      },
+      {
         "id": "col_enabled",
         "label": [
           {

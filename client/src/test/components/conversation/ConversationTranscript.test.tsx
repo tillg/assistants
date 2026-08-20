@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 
 import { LoggerFactory } from "@com.mgmtp.a12.utils/utils-logging";
+import { resetThingByIdCache } from "../../../components/conversation/useThingById";
 
 import { ConversationTranscript } from "../../../components/conversation/ConversationTranscript";
 import fixture from "../../fixtures/conversation.json";
@@ -47,6 +48,7 @@ function renderTranscript(document: object) {
 
 describe("ConversationTranscript", () => {
     beforeEach(() => {
+        resetThingByIdCache();
         vi.spyOn(LoggerFactory.getLogger("PT/useThingById"), "warn").mockImplementation(() => {});
     });
 
@@ -192,7 +194,11 @@ describe("ConversationTranscript", () => {
         expect(screen.getAllByTestId("transcript-bubble")).toHaveLength(6);
         expect(screen.queryByTestId("pending-question")).toBeNull();
         expect(screen.queryByTestId("transcript-message")).toBeNull();
-        expect(server.asked).toHaveLength(0);
+        // Nothing pending, so the OpenQuestion is never read. The header may read other Things to name
+        // them — the badge's Assistant QUERY, the *called by* Thing link's parent Conversation — but the
+        // pending question, which is what "nothing pending" is about, is not fetched.
+        const questionReads = server.asked.filter((request) => request.params.docRef?.startsWith("OpenQuestion_DM/"));
+        expect(questionReads).toHaveLength(0);
     });
 
     it("leaves the thread standing when the pending question cannot be read", async () => {
@@ -217,6 +223,7 @@ describe("ConversationTranscript", () => {
 
         await waitFor(() => expect(screen.getAllByTestId("transcript-bubble")).toHaveLength(2));
         expect(screen.queryByTestId("pending-question")).toBeNull();
-        expect(server.asked).toHaveLength(0);
+        // The pending question is never read here; the header's badge Name QUERY is not that read.
+        expect(server.asked.filter((request) => request.method === "GET_DOCUMENT")).toHaveLength(0);
     });
 });

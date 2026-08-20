@@ -7,6 +7,8 @@ import { ConnectorLocator } from "@com.mgmtp.a12.utils/utils-connector";
 import type { RestRequestPayload, ServerConnector } from "@com.mgmtp.a12.utils/utils-connector";
 import { getBaseTheme } from "@com.mgmtp.a12.widgets/widgets-core";
 
+import { ThingPopupHost } from "../../../components/ThingPopup";
+
 /**
  * The two providers the Transcript's components need to render: the A12 widget theme, because every
  * colour comes from it, and a store, because a navigation is a dispatch. Neither is stubbed out with a
@@ -24,7 +26,9 @@ import { getBaseTheme } from "@com.mgmtp.a12.widgets/widgets-core";
 export function recordingStore(): { readonly actions: unknown[]; readonly store: Store } {
     const actions: unknown[] = [];
     const store = {
-        getState: () => ({}),
+        // A minimal `activities` slice so the Thing popup's `loadingStateById` selector resolves (to
+        // "missing") instead of throwing "Slice activities does not exist" when a popup mounts in a test.
+        getState: () => ({ activities: {} }),
         dispatch: (action: unknown) => {
             actions.push(action);
             return action;
@@ -81,7 +85,9 @@ export function serveDocuments(documents: Readonly<Record<string, object>>): { r
 }
 
 /**
- * Wraps a component in the theme and the store it is rendered under in the application.
+ * Wraps a component in the theme, the store, and the Thing-popup host it is rendered under in the
+ * application. The popup host is here for the same reason the theme is: the Transcript's components need
+ * it — a `ThingLink` calls `useThingPopup`, which throws without a host — so the harness provides one.
  *
  * The fallback store is built once and kept, not evaluated in the JSX: a fresh store on every render
  * would make `Provider` re-subscribe on each one and would throw away what the last render recorded,
@@ -91,7 +97,9 @@ export function Frame({ store, children }: PropsWithChildren<{ readonly store?: 
     const [fallback] = useState(() => recordingStore().store);
     return (
         <Provider store={store ?? fallback}>
-            <ThemeProvider theme={getBaseTheme()}>{children}</ThemeProvider>
+            <ThemeProvider theme={getBaseTheme()}>
+                <ThingPopupHost>{children}</ThingPopupHost>
+            </ThemeProvider>
         </Provider>
     );
 }

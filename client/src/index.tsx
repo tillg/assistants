@@ -36,6 +36,7 @@ import { createRoot } from "react-dom/client";
 import { setup } from "./appsetup";
 import { StyledPage } from "./app/page";
 import { ServerUnavailableNotification } from "./components/ServerUnavailableNotification";
+import { ThingPopupHost } from "./components/ThingPopup";
 
 const HEALTH_PATH = "/api/actuator/health/dataservicesInitializationFinished";
 const SERVER_STATUS_UP = "UP";
@@ -89,7 +90,11 @@ if (mountPoint) {
 
     root.render(
         <Provider store={store}>
-            <StyledPage>{available ? Component : <ServerUnavailableNotification />}</StyledPage>
+            <StyledPage>
+                {/* One popup host over the whole app: any ThingLink deep in a form opens its Thing here,
+                    as a read-only summary, without leaving the screen it was opened from. */}
+                <ThingPopupHost>{available ? Component : <ServerUnavailableNotification />}</ThingPopupHost>
+            </StyledPage>
         </Provider>
     );
 }

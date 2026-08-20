@@ -799,23 +799,41 @@ An Operation is split in two (ADR-0019). The **Implementation** is code — `exe
 `reconcile` and `describeCall(args)`, plus `mutating`, which is a claim about what `execute` does
 and is never read back from data. The **Operation** is a Thing: its key, its System, its kind, the
 prose the model reads, its parameter schema, whether it requires an approval and whether it is
-switched on. The two are joined by the Operation's key, which is why the catalogue can describe an
-Operation and cannot invent one. The product of the join — an Operation resolved for one Assistant,
-with its Implementation bound in — is a **Granted Operation**, and that is the shape `advance()`
-consumes.
+switched on. The two are joined by the Operation's key. The product of the join — an Operation
+resolved for one Assistant, with its Implementation bound in — is a **Granted Operation**, and that
+is the shape `advance()` consumes.
+
+Since [ADR-0025](../../docs/adr/0025-a-dynamic-operation-carries-its-implementation.md) that split has
+two shapes, named by a field on the Thing, `implementation` (unset reads as `built-in`):
+
+- A **built-in** Operation's Implementation is compiled into the Runtime, exactly as above. Its
+  `mutating` and `clientReadable` are read from code and the Thing's copies are ignored.
+- A **dynamic** Operation's Implementation is *on the Thing*: `source` (TypeScript, up to 64 KB),
+  `language`, `egress` and `timeoutMs`. It is run by the **Operation Host** (below) rather than
+  compiled in, and for it `mutating` and `clientReadable` are read from the Thing — the trust anchor
+  is the store's write authority, which no Assistant holds, not code review. The seven `bookkeeping.*`
+  Operations are the dynamic ones.
+
+The registry's join is therefore two-source: compiled code for a built-in, stored source for a
+dynamic one. A key that resolves to **both** is refused as `ambiguous` rather than ranked — a
+half-migrated catalogue must not run — and a dynamic key whose source does not compile is dropped as
+`uncompilable`. So the catalogue can still describe a built-in Operation without inventing one; for a
+dynamic Operation, the Thing *does* carry what makes it exist, and it is safe only because writing
+`Operation_DM` is a right no Assistant has.
 
 **There is no table of Operations here any more, on purpose.** The one that used to open with
 *"Seventeen Operations"* was a hand-maintained copy of a list that lives somewhere else, and it was
 true on the day it was written. The catalogue is the answer now: open **Operations** in the web
-application, or read `runtime/src/operations/implementations.ts` for the twenty Implementations
-that seed it. What a User wants from it — what does this Operation do, which System does it touch,
-does it need my approval, is it on — is now an overview and a form rather than four questions for
-whoever last read the source.
+application, read `runtime/src/operations/implementations.ts` for the built-in Implementations that
+seed it, or `import/operations/bookkeeping/` for the seven dynamic ones' source. What a User wants
+from it — what does this Operation do, which System does it touch, does it need my approval, is it
+on, and for a dynamic Operation *what code does it run* — is now an overview and a form rather than
+questions for whoever last read the source.
 
 The registry resolves the Assistant's `grants[]` against a **catalogue snapshot taken once per
 Turn**, and returns both halves of its answer: the Granted Operations, and the grants it dropped
 with the reason for each — `absent`, `disabled`, `unimplemented`, `unparseable`, `self-call`,
-`bare-call`. The schemas offered to the LLM are derived from the same call, so the advertised set
+`bare-call`, and (ADR-0025) `ambiguous`, `uncompilable` and `unconfigured-egress`. The schemas offered to the LLM are derived from the same call, so the advertised set
 and the executable set cannot drift, and an Operation that is not offered is invisible rather than
 merely refused. The dropped half is what lets the belt check at execution tell a model *why* — that
 the Operation is switched off, or no longer implemented, rather than that it was never one of its
@@ -842,6 +860,49 @@ catalogue, so it is worth having here:
 
 `bookkeeping.createAccount` exists and is granted to nobody, which is exactly the granularity
 ADR-0010 argued for: the chart of accounts is a structural decision the User should be making.
+
+#### The Operation Host
+
+The half of the Runtime that runs a **dynamic** Operation's source (ADR-0025), in four files under
+`runtime/src/operations/dynamic/`:
+
+- **`compile.ts`** strips the TypeScript with `module.stripTypeScriptTypes` — it strips, it does not
+  type-check, the same way a stored system prompt is checked by running it — refuses `import`,
+  `export` and `require` (the sandbox has no module system) naming the token, and caches by
+  `sha256(source)`, so a Turn that calls one Operation four times compiles once.
+- **`worker.ts`** is the worker-thread entry: it builds the sandbox, runs the source, and posts back
+  one result plus the cache mutations the source made.
+- **`sandbox.ts`** is the curated global object: `vm.runInNewContext` with `host`, `console` (routed
+  to the structured logger with the Operation's key), the standard intrinsics and `URL`/`TextEncoder`
+  and friends — and *not* `process`, `require`, `fetch`, `Buffer`, `setTimeout` or `WebAssembly`.
+- **`http.ts`** is the injected client, the Source's one outward capability: `host.http.request({
+  method, path, query, body })`, where the path is joined onto the egress base URL and re-encoded, an
+  absolute URL is refused, the credential is attached by the host and never enters the sandbox, and an
+  HTTP status is a value the Source interprets, never a throw.
+
+**Why a worker *and* a vm context, when a worker or a vm alone is simpler**: a vm gives curated globals
+and a synchronous-loop timeout but no memory ceiling, and an `await` escapes its timer; a worker gives
+`terminate()` and `resourceLimits` but the full Node surface. Together they keep an honest mistake — a
+loop, a runaway allocation, an accidental `fs` — from taking down the scan loop. Neither, nor both,
+stops an attacker who can already write the store; that boundary is the store's write authority, and
+the sandbox is containment, not a security boundary (D-073).
+
+Also on `host`: `host.cache`, a host-side per-egress key/value store with a TTL
+(`DYNAMIC_OPERATION_CACHE_TTL_MS`, default five minutes) — where the chart of accounts lives now that
+`FireflyConnector`'s instance field is gone, invalidated by `createAccount`'s `host.cache.delete`;
+`host.pending(...)` and `host.error(...)` for the Result Contract; and `host.context`, holding only the
+`idempotencyKey` (absent, and read as empty, on a client-readable call through the inbound door).
+
+**The egress table** is built in `config.ts` from `EGRESS_<NAME>_URL` / `_TOKEN` / `_TOKEN_FILE`, so
+adding the bank later is two environment variables and no code. Source names an egress and never its
+URL or credential:
+
+| Egress | Configured from | Reached by |
+|---|---|---|
+| `bookkeeping` | `EGRESS_BOOKKEEPING_URL`/`_TOKEN`, defaulting to `FIREFLY_URL`/`FIREFLY_TOKEN` | all seven `bookkeeping.*` |
+
+Other bounds live beside it: `DYNAMIC_OPERATION_TIMEOUT_MS` (a ceiling a Thing's `timeoutMs` may lower,
+never raise), `DYNAMIC_OPERATION_MAX_BODY_BYTES`, and `DYNAMIC_OPERATION_MEMORY_MB`.
 
 #### The LLM provider
 
@@ -872,22 +933,29 @@ Runtime writes it onto the first Entry the Turn wrote, before the write that Ent
 extra store write, no running total on the Conversation, and nothing aggregates it. The transcript is
 where you read it, which is the same argument as not building a second store for anything else.
 
-### Bookkeeping connector (`runtime/src/connectors/firefly.ts`, `compose/firefly/`)
+### Bookkeeping — the seven Operations' source (`import/operations/bookkeeping/`, `compose/firefly/`)
 
 Firefly III on the stack's Postgres, in its own database under its own role, created by
 `compose/postgres/db-init.sh`. A one-shot `firefly-bootstrap` container mints a personal access
 token over Firefly's own web endpoints — no artisan command can do it — writing it to a shared
 volume the Runtime reads.
 
-The Connector **never passes `source_name` / `destination_name`.** Firefly auto-creates an expense
-or revenue account when given a name it does not know, and the Accountant's job is precisely to
-decide which accounts an invoice hits, *by emitting a name*. So `Expenses:Helth` would not fail —
-it would succeed, silently creating a second account and corrupting a balance no test would catch.
-ADR-0006 makes that worse rather than better: Bookkeeping is the Authority and nothing holds a
-second copy, so there is no disagreement to detect. The Connector therefore resolves names to IDs
-against `GET /accounts` (cached per scan); an unresolvable name comes back as a tool error, which
-under the middle failure tier is appended as a tool result so the next Turn self-corrects against
-the real chart.
+**Since ADR-0025 the translation is not a compiled Connector but the seven Operations' own source**,
+run by the Operation Host against the `bookkeeping` egress. `FireflyConnector` keeps `isReachable()`
+for the health check; its operation-serving role has moved into `import/operations/bookkeeping/`,
+where a reader can see the HTTP each Operation makes. The hard-won behaviour survived the move: the
+chart-of-accounts cache is now `host.cache`; `external_id` idempotency and `findByExternalId` are the
+`reconcile` in `postTransaction`'s source; the `liabilities`/`liability` spelling (BUG-02) is a line
+in `listAccounts`; and the 422 translation into the model's vocabulary is a table in the shared prelude.
+
+The source **never passes `source_name` / `destination_name`.** Firefly auto-creates an expense or
+revenue account when given a name it does not know, and the Accountant's job is precisely to decide
+which accounts an invoice hits, *by emitting a name*. So `Expenses:Helth` would not fail — it would
+succeed, silently creating a second account and corrupting a balance no test would catch. ADR-0006
+makes that worse rather than better: Bookkeeping is the Authority and nothing holds a second copy, so
+there is no disagreement to detect. The source therefore resolves names to IDs against `GET
+/accounts` (cached in `host.cache`); an unresolvable name comes back as a tool error, which under the
+middle failure tier is appended as a tool result so the next Turn self-corrects against the real chart.
 
 ## Data
 

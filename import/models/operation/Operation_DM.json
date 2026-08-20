@@ -249,6 +249,188 @@
               },
               {
                 "type": "Field",
+                "id": "f_implementation",
+                "name": "Implementation",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 20,
+                      "hintList": [
+                        {
+                          "locale": "en",
+                          "values": [
+                            "built-in",
+                            "dynamic"
+                          ]
+                        },
+                        {
+                          "locale": "de",
+                          "values": [
+                            "built-in",
+                            "dynamic"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Implementation"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Implementierung"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_source",
+                "name": "Source",
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 65536,
+                      "lineBreaksPermitted": true,
+                      "noValueValidation": true
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Source"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Quelltext"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_language",
+                "name": "Language",
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 20,
+                      "hintList": [
+                        {
+                          "locale": "en",
+                          "values": [
+                            "typescript",
+                            "javascript"
+                          ]
+                        },
+                        {
+                          "locale": "de",
+                          "values": [
+                            "typescript",
+                            "javascript"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Language"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Sprache"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_egress",
+                "name": "Egress",
+                "annotations": [
+                  {
+                    "name": "indexed",
+                    "value": "true"
+                  }
+                ],
+                "Field": {
+                  "fieldType": {
+                    "type": "StringType",
+                    "StringType": {
+                      "maxLength": 40
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Egress"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Egress"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_timeoutMs",
+                "name": "TimeoutMs",
+                "Field": {
+                  "fieldType": {
+                    "type": "NumberType",
+                    "NumberType": {
+                      "minFractionalDigits": 0,
+                      "maxFractionalDigits": 0
+                    }
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Timeout (ms)"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Zeitlimit (ms)"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
+                "id": "f_clientReadable",
+                "name": "ClientReadable",
+                "Field": {
+                  "fieldType": {
+                    "type": "BooleanType"
+                  },
+                  "label": [
+                    {
+                      "locale": "en",
+                      "text": "Client readable"
+                    },
+                    {
+                      "locale": "de",
+                      "text": "Client-lesbar"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Field",
                 "id": "f_requiresApproval",
                 "name": "RequiresApproval",
                 "Field": {

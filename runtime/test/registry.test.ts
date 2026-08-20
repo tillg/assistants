@@ -10,9 +10,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
     OperationRegistry,
+    type OperationContext,
     type OperationImplementation,
     type OperationOutcome,
 } from "../src/operations/registry.js";
+import { OperationHost } from "../src/operations/dynamic/host.js";
+import type { DynamicOperationConfig } from "../src/config.js";
 import type { Assistant, Operation } from "../src/domain/types.js";
 
 function implementation(
@@ -318,6 +321,179 @@ describe("schemasFor", () => {
                 parameters: { type: "object", properties: { stored: { type: "string" } } },
             },
         ]);
+        log.restore();
+    });
+});
+
+/**
+ * The two-source join (ADR-0025). A grant may now resolve against stored Source as well as compiled
+ * code, and the registry is where the new branches — dynamic, uncompilable, ambiguous, an
+ * unconfigured egress — are enforced. Every one of these is a decision (or a mistake) someone made
+ * from the web application, so the fixture is a hand-built catalogue, as above.
+ */
+function hostConfig(overrides: Partial<DynamicOperationConfig> = {}): DynamicOperationConfig {
+    return {
+        timeoutMs: 20_000,
+        maxBodyBytes: 4 * 1024 * 1024,
+        memoryMb: 128,
+        cacheTtlMs: 300_000,
+        egresses: { bookkeeping: { url: "http://127.0.0.1:9/", token: "t" } },
+        ...overrides,
+    };
+}
+
+function dynamicRegistry(host: OperationHost, ...implementations: OperationImplementation[]): OperationRegistry {
+    const registry = new OperationRegistry(host);
+    registry.registerAll(implementations);
+    return registry;
+}
+
+const ctx = { idempotencyKey: "conv:1" } as unknown as OperationContext;
+
+/** A dynamic Operation Thing: Source, an egress, and `implementation: "dynamic"`. */
+function dynamic(key: string, source: string, overrides: Partial<Operation> = {}): Operation {
+    return operation(key, {
+        system: "Bookkeeping",
+        kind: "connector",
+        implementation: "dynamic",
+        source,
+        egress: "bookkeeping",
+        ...overrides,
+    });
+}
+
+describe("a Dynamic Operation resolves against its stored Source", () => {
+    it("resolves and executes source through the Operation Host", async () => {
+        const registry = dynamicRegistry(new OperationHost(hostConfig()));
+        const { granted, dropped } = registry.grantedTo(assistant(["bookkeeping.getBalance"]), [
+            dynamic("bookkeeping.getBalance", "function execute(args) { return args.x + 1; }"),
+        ]);
+
+        expect(dropped).toEqual([]);
+        expect(granted).toHaveLength(1);
+        expect(await granted[0]!.execute({ x: 41 }, ctx)).toEqual({ kind: "value", value: 42 });
+    });
+
+    it("reads mutating from the Thing for a dynamic Operation", () => {
+        const registry = dynamicRegistry(new OperationHost(hostConfig()));
+        const { granted } = registry.grantedTo(assistant(["bookkeeping.postTransaction"]), [
+            dynamic("bookkeeping.postTransaction", "function execute() { return 1; }\nfunction reconcile() {}", {
+                mutating: true,
+            }),
+        ]);
+        expect(granted[0]!.mutating).toBe(true);
+    });
+
+    it("gives a money-moving dynamic Operation its synchronous approval describer", () => {
+        const registry = dynamicRegistry(new OperationHost(hostConfig()));
+        const { granted } = registry.grantedTo(assistant(["bookkeeping.postTransaction"]), [
+            dynamic("bookkeeping.postTransaction", "function execute() { return 1; }\nfunction reconcile() {}", {
+                mutating: true,
+                requiresApproval: true,
+            }),
+        ]);
+        // The describer renders the money sentence the approval prompt shows, so the User reads
+        // "€184.30 from *Payables* …" rather than a raw JSON args block (ADR-0025 follow-up).
+        const prompt = granted[0]!.describeCall?.({
+            splits: [{ amount: "184.30", sourceAccount: "Payables", destinationAccount: "Expenses:Health" }],
+        });
+        expect(prompt).toBe("Book €184.30 from *Payables* to *Expenses:Health*?");
+    });
+
+    it("leaves an ordinary dynamic Operation without a describer", () => {
+        const registry = dynamicRegistry(new OperationHost(hostConfig()));
+        const { granted } = registry.grantedTo(assistant(["bookkeeping.getBalance"]), [
+            dynamic("bookkeeping.getBalance", "function execute() { return 1; }"),
+        ]);
+        expect(granted[0]!.describeCall).toBeUndefined();
+    });
+
+    it("reads mutating from code for a built-in, ignoring the Thing's copy", () => {
+        const registry = dynamicRegistry(
+            new OperationHost(hostConfig()),
+            implementation("email.send", { mutating: true }),
+        );
+        const { granted } = registry.grantedTo(assistant(["email.send"]), [
+            operation("email.send", { mutating: false }),
+        ]);
+        // The Thing says false; code says true; code wins, because `reconcile` trusts it (ADR-0025).
+        expect(granted[0]!.mutating).toBe(true);
+    });
+
+    it("treats unset implementation as built-in", () => {
+        const registry = dynamicRegistry(new OperationHost(hostConfig()), implementation("email.send"));
+        const { granted, dropped } = registry.grantedTo(assistant(["email.send"]), [
+            operation("email.send", { implementation: undefined }),
+        ]);
+        expect(dropped).toEqual([]);
+        expect(granted).toHaveLength(1);
+    });
+});
+
+describe("a Dynamic Operation the catalogue cannot honour", () => {
+    it("drops implementation:dynamic with no source as unimplemented", () => {
+        const registry = dynamicRegistry(new OperationHost(hostConfig()));
+        const { granted, dropped } = registry.grantedTo(assistant(["bookkeeping.getBalance"]), [
+            operation("bookkeeping.getBalance", { implementation: "dynamic", source: "" }),
+        ]);
+        expect(granted).toEqual([]);
+        expect(dropped).toEqual([{ key: "bookkeeping.getBalance", reason: "unimplemented" }]);
+    });
+
+    it("drops source that does not compile as uncompilable, with the reason in the log", () => {
+        const registry = dynamicRegistry(new OperationHost(hostConfig()));
+        const log = warnings();
+        const { granted, dropped } = registry.grantedTo(assistant(["bookkeeping.getBalance"]), [
+            dynamic("bookkeeping.getBalance", "function execute( { return 1; }"),
+        ]);
+        expect(granted).toEqual([]);
+        expect(dropped).toEqual([{ key: "bookkeeping.getBalance", reason: "uncompilable" }]);
+        expect(log.lines().join("\n")).toContain("bookkeeping.getBalance");
+        log.restore();
+    });
+
+    it("drops a dynamic Thing that is also registered in code as ambiguous", () => {
+        const registry = dynamicRegistry(
+            new OperationHost(hostConfig()),
+            implementation("bookkeeping.getBalance"),
+        );
+        const { granted, dropped } = registry.grantedTo(assistant(["bookkeeping.getBalance"]), [
+            dynamic("bookkeeping.getBalance", "function execute() { return 1; }"),
+        ]);
+        expect(granted).toEqual([]);
+        expect(dropped).toEqual([{ key: "bookkeeping.getBalance", reason: "ambiguous" }]);
+    });
+
+    it("drops a built-in Thing that carries stored source as ambiguous — the other direction", () => {
+        const registry = dynamicRegistry(new OperationHost(hostConfig()), implementation("email.send"));
+        const { granted, dropped } = registry.grantedTo(assistant(["email.send"]), [
+            operation("email.send", { implementation: "built-in", source: "function execute() {}" }),
+        ]);
+        expect(granted).toEqual([]);
+        expect(dropped).toEqual([{ key: "email.send", reason: "ambiguous" }]);
+    });
+
+    it("drops a dynamic Thing naming an undefined egress, with the egress in the log", () => {
+        const registry = dynamicRegistry(new OperationHost(hostConfig()));
+        const log = warnings();
+        const { granted, dropped } = registry.grantedTo(assistant(["bookkeeping.getBalance"]), [
+            dynamic("bookkeeping.getBalance", "function execute() { return 1; }", { egress: "nowhere" }),
+        ]);
+        expect(granted).toEqual([]);
+        expect(dropped).toEqual([{ key: "bookkeeping.getBalance", reason: "unconfigured-egress" }]);
+        expect(log.lines().join("\n")).toContain("nowhere");
+        log.restore();
+    });
+
+    it("resolves a mutating dynamic Operation with no reconcile, but reports it", () => {
+        const registry = dynamicRegistry(new OperationHost(hostConfig()));
+        const log = warnings();
+        const { granted, dropped } = registry.grantedTo(assistant(["bookkeeping.postTransaction"]), [
+            dynamic("bookkeeping.postTransaction", "function execute() { return 1; }", { mutating: true }),
+        ]);
+        expect(dropped).toEqual([]);
+        expect(granted).toHaveLength(1);
+        expect(log.lines().join("\n")).toContain("declares no reconcile");
         log.restore();
     });
 });

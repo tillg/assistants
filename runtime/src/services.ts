@@ -16,6 +16,7 @@ import type {
 } from "./domain/types.js";
 import { LoopDriver, type AdvanceDeps } from "./loop/advance.js";
 import { OperationRegistry } from "./operations/registry.js";
+import { OperationHost } from "./operations/dynamic/host.js";
 import { buildOperations } from "./operations/implementations.js";
 import { FireflyConnector } from "./connectors/firefly.js";
 import { Watcher } from "./watcher/watcher.js";
@@ -78,7 +79,7 @@ export function buildRuntime(config: Config): Runtime {
     let llmContext = { assistantKey: "", turn: 0 };
     const llm = buildProvider(llmProfile, () => llmContext);
 
-    const registry = new OperationRegistry();
+    const registry = new OperationRegistry(new OperationHost(config.dynamicOperation));
 
     async function findAssistant(key: string): Promise<Stored<Assistant> | undefined> {
         if (!key) return undefined;

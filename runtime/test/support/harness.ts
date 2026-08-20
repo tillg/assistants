@@ -6,11 +6,26 @@ import type { A12Client } from "../../src/a12/client.js";
 import { LoopDriver } from "../../src/loop/advance.js";
 import { OperationRegistry, type GrantedOperation } from "../../src/operations/registry.js";
 import { buildOperations } from "../../src/operations/implementations.js";
+import { OperationHost } from "../../src/operations/dynamic/host.js";
+import { loadBookkeepingSeeds } from "../../src/operations/bookkeepingSeeds.js";
 import { Watcher, RUNTIME_STATE_KEY } from "../../src/watcher/watcher.js";
 import { ScriptedProvider, type ScriptedStep } from "../../src/llm/scripted.js";
 import type { FireflyConnector } from "../../src/connectors/firefly.js";
+import type { DynamicOperationConfig } from "../../src/config.js";
 import type { Assistant, Conversation, OpenQuestion, Operation, Stored } from "../../src/domain/types.js";
 import { ASSISTANT_SEEDS } from "../../src/bootstrap/assistants.js";
+import { FireflyFixture } from "./fireflyFixture.js";
+
+/**
+ * The Firefly HTTP fixture the dynamic bookkeeping Operations reach through the Operation Host
+ * (ADR-0025). Set once per test file in `beforeAll` — `buildHarness` reads it, staying synchronous —
+ * so a file that exercises bookkeeping starts the fixture and calls `useFirefly(fixture)`; one that
+ * does not leaves it unset and the bookkeeping egress points nowhere (harmless unless executed).
+ */
+let activeFirefly: FireflyFixture | undefined;
+export function useFirefly(fixture: FireflyFixture | undefined): void {
+    activeFirefly = fixture;
+}
 
 /**
  * The catalogue a bootstrapped stack has: one Operation per registered Implementation, from its
@@ -22,7 +37,7 @@ import { ASSISTANT_SEEDS } from "../../src/bootstrap/assistants.js";
  * behaviour that decision forbids. In `test/` it is a fixture, which is all it ever was.
  */
 export function seedCatalogue(registry: OperationRegistry): Operation[] {
-    return registry.all().map((implementation) => ({
+    const builtIns = registry.all().map((implementation) => ({
         key: implementation.name,
         name: implementation.seed.name,
         system: implementation.seed.system,
@@ -33,6 +48,26 @@ export function seedCatalogue(registry: OperationRegistry): Operation[] {
         requiresApproval: implementation.seed.requiresApproval ?? false,
         enabled: true,
     }));
+    // The seven bookkeeping Operations are dynamic (ADR-0025): their Things carry Source and are not
+    // registered in the registry (that would be `ambiguous`), so they are added to the catalogue here
+    // the way bootstrap creates them — the two-source join resolves them through the Operation Host.
+    const dynamic = loadBookkeepingSeeds().map((implementation) => ({
+        key: implementation.name,
+        name: implementation.seed.name,
+        system: implementation.seed.system,
+        kind: implementation.seed.kind,
+        description: implementation.seed.description,
+        parameters: JSON.stringify(implementation.seed.parameters),
+        mutating: implementation.mutating,
+        requiresApproval: implementation.seed.requiresApproval ?? false,
+        enabled: true,
+        implementation: implementation.seed.implementation,
+        source: implementation.seed.source,
+        language: implementation.seed.language,
+        egress: implementation.seed.egress,
+        clientReadable: implementation.seed.clientReadable,
+    }));
+    return [...builtIns, ...dynamic];
 }
 
 /** Put a catalogue in the store, as bootstrap would have. Synchronous, so `buildHarness` can be. */
@@ -60,7 +95,8 @@ export interface Harness {
     catalogue: Operation[];
     driver: LoopDriver;
     watcher: Watcher;
-    firefly: FakeFirefly;
+    /** The Firefly HTTP fixture the dynamic bookkeeping Operations reach, or an unstarted one. */
+    firefly: FireflyFixture;
     seedAssistant(overrides?: Partial<Assistant>): Promise<Stored<Assistant>>;
     birth(input: {
         assistant: Stored<Assistant>;
@@ -72,146 +108,6 @@ export interface Harness {
     conversation(docRef: string): Promise<Stored<Conversation>>;
     questions(): Promise<Stored<OpenQuestion>[]>;
     answer(questionId: string, answer: Partial<OpenQuestion>): Promise<void>;
-}
-
-/** A working Firefly stand-in that records what it was asked to do. */
-export class FakeFirefly {
-    readonly posted: Array<{ externalId: string; amount: string }> = [];
-    // `liabilities`, PLURAL, because that is what Firefly's read API answers — its write API takes
-    // the singular. The fake used to say `liability`, which is exactly the mistake that made
-    // `listOpenItems` report nothing while thousands were owed: a fake agreeing with the bug.
-    // `currentBalance` and `currencyCode` are the connector's own field names, and they are here
-    // because a fake that answers a narrower shape than the real thing lets a projection drop a field
-    // without any test noticing — which is how `currency` went missing from `listAccounts` for as long
-    // as it did.
-    accounts = [
-        { id: "1", name: "Checking", type: "asset", currentBalance: "8400.00", currencyCode: "EUR" },
-        { id: "2", name: "Payables", type: "liabilities", currentBalance: "-340.00", currencyCode: "EUR" },
-        { id: "3", name: "Expenses:Health", type: "expense", currentBalance: "0.00", currencyCode: "EUR" },
-    ];
-
-    async listAccounts() {
-        return this.accounts;
-    }
-
-    /**
-     * Firefly's *group* shape, because that is what `projectTransactionGroup` consumes.
-     *
-     * Deliberately unlike the demo household, which cannot exercise what matters here: measured
-     * against the live stack, 21 of its 24 transactions share one date and **no group has more than
-     * one split**. So the second group below carries two, and the dates descend — the flattening and
-     * the ordering are only really asserted against fixtures built to have them.
-     *
-     * Amounts carry twelve decimal places because that is what Firefly returns (`"96.500000000000"`),
-     * and a fake that tidies them up would hide every formatting bug in the tile that renders them.
-     */
-    transactions: Array<Record<string, unknown>> = [
-        {
-            id: "163",
-            attributes: {
-                transactions: [
-                    {
-                        type: "withdrawal",
-                        date: "2026-08-01T00:00:00+02:00",
-                        amount: "96.500000000000",
-                        description: "Consultation and dressing change, 24 July",
-                        currency_code: "EUR",
-                        source_name: "Payables",
-                        destination_name: "Expenses:Health",
-                    },
-                ],
-            },
-        },
-        {
-            id: "142",
-            attributes: {
-                transactions: [
-                    {
-                        type: "withdrawal",
-                        date: "2026-07-02T00:00:00+02:00",
-                        amount: "84.200000000000",
-                        description: "Stadtwerke Frechen",
-                        currency_code: "EUR",
-                        source_name: "Checking",
-                        destination_name: "Expenses:Utilities",
-                    },
-                    {
-                        type: "deposit",
-                        date: "2026-07-02T00:00:00+02:00",
-                        amount: "12.000000000000",
-                        description: "Stadtwerke refund",
-                        currency_code: "EUR",
-                        source_name: "Expenses:Utilities",
-                        destination_name: "Checking",
-                    },
-                ],
-            },
-        },
-    ];
-
-    async listTransactions(input: { start: string; end: string; accountName?: string; limit?: number }) {
-        void input;
-        return this.transactions;
-    }
-    async resolveAccountId(name: string) {
-        const found = this.accounts.find((account) => account.name === name);
-        if (!found) throw new Error(`No account named "${name}"`);
-        return found.id;
-    }
-    /** Make the next post fail the way the real Firefly does — with its `details.errors` intact. */
-    failNextPost: Error | undefined;
-
-    async postTransaction(input: { externalId: string; splits: Array<{ amount: string; sourceAccount: string; destinationAccount: string }> }) {
-        if (this.failNextPost) {
-            const failure = this.failNextPost;
-            this.failNextPost = undefined;
-            throw failure;
-        }
-        const already = this.posted.find((entry) => entry.externalId === input.externalId);
-        if (already) return { id: "existing", alreadyExisted: true };
-        for (const split of input.splits) {
-            await this.resolveAccountId(split.sourceAccount);
-            await this.resolveAccountId(split.destinationAccount);
-        }
-        this.posted.push({ externalId: input.externalId, amount: input.splits[0]?.amount ?? "0" });
-        return { id: `txn-${this.posted.length}`, alreadyExisted: false };
-    }
-    async findByExternalId(externalId: string) {
-        return this.posted.some((entry) => entry.externalId === externalId) ? { id: "existing" } : undefined;
-    }
-    async getBalance(account: string) {
-        return { account, balance: "0.00", currency: "EUR" };
-    }
-    async listOpenItems() {
-        return [];
-    }
-    async listBudgets(period: { start: string; end: string }) {
-        // A period is required, and `spent` is a number that is never null: Firefly answers `[]` for
-        // an unspent budget, and the connector normalises that to 0 so "nothing spent" cannot be
-        // mistaken for "unknown".
-        void period;
-        return [{ id: "1", name: "Health", spent: 0, limit: 300, currency: "EUR" }];
-    }
-    async createBudget() {
-        return { id: "b1" };
-    }
-    async setBudgetLimit() {}
-    async createAccount(input: { name: string; type: string }) {
-        const created = {
-            id: String(this.accounts.length + 1),
-            name: input.name,
-            type: input.type,
-            // Firefly answers a freshly created account with a zero balance in the stack's currency;
-            // omitting them here would make a created account the one shape the fake cannot produce.
-            currentBalance: "0.00",
-            currencyCode: "EUR",
-        };
-        this.accounts.push(created);
-        return created;
-    }
-    async isReachable() {
-        return true;
-    }
 }
 
 export function buildHarness(
@@ -229,8 +125,16 @@ export function buildHarness(
 ): Harness {
     const store = options.store ?? new MemoryStore();
     const things = new ThingRepository(store as unknown as A12Client);
-    const firefly = new FakeFirefly();
-    const registry = new OperationRegistry();
+    // The Firefly the dynamic bookkeeping Operations reach, set by the test file (or an unstarted one).
+    const firefly = activeFirefly ?? new FireflyFixture();
+    const dynamicConfig: DynamicOperationConfig = {
+        timeoutMs: 20_000,
+        maxBodyBytes: 4 * 1024 * 1024,
+        memoryMb: 128,
+        cacheTtlMs: 300_000,
+        egresses: { bookkeeping: { url: firefly.url, token: "test-token" } },
+    };
+    const registry = new OperationRegistry(new OperationHost(dynamicConfig));
 
     let llmContext = { assistantKey: "", turn: 0 };
     const llm = new ScriptedProvider(steps, () => llmContext);
@@ -301,7 +205,9 @@ export function buildHarness(
     registry.registerAll(
         buildOperations({
             things,
-            firefly: firefly as unknown as FireflyConnector,
+            // Unused now that the seven bookkeeping Operations are dynamic (ADR-0025); removed from
+            // OperationDeps in step 10. The registry reaches Firefly through the Operation Host instead.
+            firefly: undefined as unknown as FireflyConnector,
             raiseQuestion: (input) =>
                 createQuestion({
                     conversation: input.context.conversation,

@@ -2342,3 +2342,148 @@ who forgets is the one who added the expensive one.
 **Reversal cost**: Low as a mechanism — one optional property and one line in `gate.ts` — but each
 individual grant is a judgement that has to be made again, which is the point of it being three
 characters of code rather than a rule.
+
+---
+
+## D-071 — The attachment download path works; the inline preview is same-origin `/cs` + a blob, not a server route
+
+**Decided**: The `preview-the-attachment` change renders PDF and plain-text attachments inline by
+**fetching the bytes same-origin and handing the browser a blob URL**, achieved with a one-line nginx
+proxy (`location /cs` in `client/nginx.conf.template`, a `NGINX_ASSISTANTS_SERVER_CONTENTSTORE_URL` in
+`compose/docker-compose.yml`, and a matching `/cs` entry in `client/webpack.dev.js`). No new server code.
+A **fourth** edit is mandatory and easy to miss: the frontend image substitutes template variables with
+`envsubst` against a **fixed allowlist** generated in `client/build.gradle` (`createDockerfile`
+`defaultCommand`). Any new `${VAR}` added to `nginx.conf.template` must be added there too, or the built
+nginx reads the literal `${VAR}` as an unknown variable and crash-loops — a failure the dev-server proxy
+never exercises, so it surfaces only at the first real `just build` + `up`.
+
+**The finding that decided the shape, measured on the wire in a live browser session.** Getting the
+bytes has two levels, and only one is ephemeral: `attachment_id` is a durable handle stored on the
+Document, reusable forever; `POST /api/v2/rpc LOAD_ATTACHMENT_URL {attachmentId, docRef}` (with the
+User's Keycloak token) exchanges it for `{location: ".../cs/download/<ticket>?filename=…"}`, and the
+ticket is **single-use** — replaying answers `error.content-store.ticket.unavailable`, two mints return
+two UUIDs, even a `HEAD` spends one. `/cs/download/{id}` is deliberately unauthenticated (UAA
+introspection whitelist) because the ticket *is* the capability, with a deliberately tiny blast radius.
+So the practical cost of a preview is one extra JSON-RPC call — mint your own, never reuse the one the
+Download menu is about to spend.
+
+**The platform's own path was not broken here — the earlier "broken" diagnosis was a mistake worth
+recording.** An earlier draft asserted `LOAD_ATTACHMENT_URL` was broken and blamed `content-storage=db`.
+Both were wrong: the `attachmentId`/`docRef` under test were **stale** — those Documents had been deleted
+and re-ingested while fixing an unrelated bug — so a dead pair reproduced `error.attachment.notFound`
+while the live pair returned a location. `content-storage=db` is a red herring; tickets are minted
+regardless of where the bytes live.
+
+**What actually blocks the obvious implementation — two obstacles, not four.** `Content-Disposition:
+attachment` is unconditional, so a live `<iframe src={location}>` stays blank and Chrome downloads the
+file; and CORS blocks `fetch(location)` because the frontend proxies `/api` and `/actuator` only, so
+`/cs` on :8082 is another origin. Both dissolve if `/cs` is proxied same-origin: `fetch` then reads the
+bytes, and a blob URL the app created renders inline whatever the disposition header said. The
+single-use ticket and the chunked (no `Accept-Ranges`) response constrain *how*, not *whether*. There is
+no `X-Frame-Options` and no CSP — framing was never the problem.
+
+**Alternative**: a same-origin authenticated **server route** that re-serves the attachment
+`Content-Disposition: inline`. Feasible — the server is Spring Boot + A12 DataServices and a
+`@RestController` would fit beside the three hand-written classes — and it avoids the blob's object-URL
+lifetime. Rejected as the heavier option: a fourth hand-written Java class, a `just build` of the shared
+server image, and an [ADR-0023](docs/adr/0023-the-runtime-is-the-door-outward.md) tension (the server is
+not where integrations should grow). The proxy achieves the same for one line of configuration, and the
+object-URL discipline (revoke on unmount and on `attachmentId` change) was mandated regardless. If a
+future need forces bytes to be *transformed* server-side (Office→PDF), that route becomes worth its cost;
+inline re-serving of bytes the store already holds does not.
+
+**The PDF frame carries no `sandbox` attribute, and that was forced by the browser, not chosen.** The
+design intended `sandbox` with no `allow-same-origin`. Measured in a real browser against the live
+invoice, Chrome renders a broken-document icon for `sandbox=""`, for `allow-same-origin`, and for
+`allow-scripts allow-same-origin` alike — it refuses to run its internal PDF viewer (a MimeHandler
+extension) inside *any* sandboxed frame; only an un-sandboxed frame shows the PDF. The isolation is the
+browser's own PDF viewer, which never exposes a scriptable document to the page — the same property that
+justified using the browser's viewer over an in-page renderer. Two guards keep the un-sandboxed frame
+safe: its source is always a **blob URL** (never a remote origin), and the blob is **re-typed to the
+attachment's declared MIME type** in `useAttachmentSource` before rendering, so a store response
+mislabelled `text/html` is shown as a broken PDF rather than sniffed into executable markup. A unit test
+pins that behaviour.
+
+**Reversal cost**: Low. The byte-delivery is one hook (`useAttachmentSource`) behind a mime-agnostic
+seam; swapping the proxy for a server route changes that hook and the config, not the renderers or the
+placement. The `/cs` proxy is additive and touches nothing the rest of the app relies on.
+
+---
+
+## D-072 — A Dynamic Operation's source lives on the Operation Thing, not in a mounted file
+
+*2026-08-20, during `dynamic-operations`. Recorded as ADR-0025.*
+
+**Decided**: The seven `bookkeeping.*` Operations become *dynamic* — their TypeScript Implementation
+Source is stored on the `Operation_DM` Thing (`f_source`, up to 64 KB) and run by the Operation Host,
+rather than compiled into the Runtime. The Source is created once from a seed and thereafter is the
+User's to read and edit in the web application.
+
+**Why on the Thing and not a mounted config file**: the reason ADR-0019 gave for putting the catalogue
+in the store in the first place — *the User cannot edit a file inside a container*. Source on the Thing
+is versioned by the store, readable beside the prose that describes it, and writable by exactly the
+actor already trusted with an Assistant's system prompt. A file would put the one part the User is now
+sovereign over back behind a checkout and a deploy.
+
+**Alternative**: Mounted config files, seeded from the image and edited on disk; or a hybrid where a
+file seeds the source but the store is authoritative. Both were refused: the file cannot be edited from
+the application, and a file-plus-store split is a second answer to *what does this Operation do*, which
+ADR-0006 exists to prevent.
+
+**Reversal cost**: Medium, and not code-only. Reverting means restoring the compiled Implementations
+**and** reverting the Thing fields (`implementation` to `built-in`, clearing `source`) in the same
+offline window — the migration ships a commented-out down-migration for exactly this. A running stack
+whose Things read `implementation: dynamic` while the old compiled code is back drops all seven as
+`ambiguous`.
+
+---
+
+## D-073 — The Operation Host runs stored source in a worker thread *and* a vm context, not either alone
+
+*2026-08-20, during `dynamic-operations`. Recorded as ADR-0025.*
+
+**Decided**: The Operation Host executes a Dynamic Operation's compiled Source inside a `node:vm`
+context with a curated global object, inside a worker thread with `resourceLimits` and a `terminate()`
+timeout. Both layers, together.
+
+**Why both**: neither alone is enough, and the honest reason is worth writing down because "vm is not a
+security boundary" is true and usually ends the discussion. The `vm` context gives curated globals and
+a synchronous-loop timeout but no memory ceiling and an `await` escapes its timer; a worker gives a
+hard `terminate()` and a memory ceiling but the full Node surface. Together they contain an *honest
+mistake* — an infinite loop, a runaway allocation, an accidental `fs` — from taking down the scan loop.
+
+**The boundary that keeps an Assistant out of this is not the sandbox — it is the store's write
+authority.** An Assistant cannot write `Operation_DM` (`runtime` holds no `ASSISTANT_WRITE`; the model
+is absent from `WRITABLE_MODELS`, `READABLE_MODELS` and `TRIGGER_ELIGIBLE_MODELS`). The sandbox is
+containment, not a security boundary, and the artifacts say so in those words. A worker *pool* was
+rejected in turn: a pool means residual state between two Operations' executions, harder to reason
+about than a 15–30 ms spawn.
+
+**Alternative**: `node:vm` alone (no memory ceiling, `await` escapes the timeout); a worker alone (full
+Node surface, no curated globals); a child process per call (heavier, same non-boundary against a
+store-writer). All rejected.
+
+**Reversal cost**: Low. The Host is four files under `runtime/src/operations/dynamic/` behind one
+`run()` method; the containment mechanism can change without touching the registry, the gate or any
+Operation's Source.
+
+---
+
+## D-074 — A key that resolves to both a built-in and a dynamic Implementation is refused, not ranked
+
+*2026-08-20, during `dynamic-operations`. Recorded as ADR-0025.*
+
+**Decided**: When `OperationRegistry` finds an Operation key that resolves to *both* a compiled
+Implementation and stored Source, the grant is dropped as `ambiguous` — in both directions — rather
+than resolved by a precedence rule.
+
+**Why**: ADR-0006's *one authority per fact* applies to *what does this Operation do* with more force
+than to anything else in the catalogue. A `bookkeeping.postTransaction` that exists in both places means
+somebody is mid-migration and does not know which one just moved money. Ranking (code wins, or the Thing
+wins) is one line shorter and is the wrong shape — it hides the one state a reader most needs to see.
+
+**Alternative**: Precedence — let the compiled Implementation win, or let the Thing win. Refused: it
+turns a broken, half-migrated catalogue into a silently running one.
+
+**Reversal cost**: Low. The ambiguity check is two branches in `grantedTo()`; swapping it for a
+precedence rule is a local edit, though doing so would reintroduce the failure it was written to prevent.

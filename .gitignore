@@ -48,6 +48,9 @@ gradle-app.setting
 
 # Scratch / test output
 tmp/
+# Ad-hoc debug screenshots dropped at the repo root (the tracked ones use other names)
+/debug-*.png
+/reveal-*.png
 .playwright-mcp/
 e2e/test-results/
 e2e/playwright-report/

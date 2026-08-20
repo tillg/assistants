@@ -31,11 +31,21 @@ const LOCALE_LOCAL_STORAGE_KEY = "locale";
 
 export type TranscriptStrings = typeof en_US.conversation;
 
-export function transcriptStrings(): TranscriptStrings {
+/**
+ * The language the transcript's bespoke React reads its words in — `"de"` or, for everything else and
+ * for any failure, `"en"`. Shared so that the transcript's other client-side localized data (the Model
+ * labels a Thing Label puts in brackets) picks the same locale by the same rule, off the `locale` the
+ * LocaleSelect writes to localStorage.
+ */
+export function transcriptLanguage(): "de" | "en" {
     try {
         const localeString = localStorage.getItem(LOCALE_LOCAL_STORAGE_KEY) ?? "en";
-        return Locale.fromString(localeString).language === "de" ? de_DE.conversation : en_US.conversation;
+        return Locale.fromString(localeString).language === "de" ? "de" : "en";
     } catch {
-        return en_US.conversation;
+        return "en";
     }
+}
+
+export function transcriptStrings(): TranscriptStrings {
+    return transcriptLanguage() === "de" ? de_DE.conversation : en_US.conversation;
 }

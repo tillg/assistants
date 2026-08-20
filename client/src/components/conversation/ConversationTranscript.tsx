@@ -44,10 +44,12 @@ const Thread = styled.div`
     padding: 0.5rem 0.75rem 1rem;
 `;
 
+// A metadata line, not prose: kept a plain element because its `data-role` is the test and selector
+// handle, and the Typography widget stamps its own `data-role` over any it is given.
 const Separator = styled.div`
     margin: 0.75rem 0 0.25rem;
     color: ${({ theme }) => theme.colors.text.secondaryColor};
-    font-size: 0.75em;
+    font-size: ${({ theme }) => theme.typography.fontSize.tinyFontSize};
     text-align: center;
 `;
 

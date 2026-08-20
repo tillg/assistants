@@ -19,8 +19,12 @@ import type { Assistant, Operation, RuntimeState, Stored } from "../src/domain/t
 
 const RECEPTIONIST = ASSISTANT_SEEDS[0]!;
 
-/** The Operation the asymmetry cases push around: granted to no Assistant, so nothing depends on it. */
-const VICTIM = "bookkeeping.createAccount";
+/**
+ * The Operation the asymmetry cases push around: mutating, granted to no Assistant, so nothing
+ * depends on it. `bookkeeping.createAccount` played this role until it became dynamic (ADR-0025) and
+ * left `buildOperations`; `email.receive` is the built-in that fits now.
+ */
+const VICTIM = "email.receive";
 
 async function storedAssistant(
     harness: ReturnType<typeof buildHarness>,
@@ -207,7 +211,9 @@ describe("bootstrap", () => {
             }),
         );
 
-        expect(result.divergedDescriptions).toEqual([`Create an account (${VICTIM})`]);
+        expect(result.divergedDescriptions).toEqual([
+            `${harness.registry.get(VICTIM)!.seed.name} (${VICTIM})`,
+        ]);
         const after = await storedOperation(harness, VICTIM);
         expect(after.data.description).toBe(
             harness.registry.get(VICTIM)!.seed.description,
@@ -241,5 +247,84 @@ describe("bootstrap", () => {
         expect(after.data.notes).toBe("Switched off while the chart is being tidied.");
         // …while the mechanical half underneath the decision was re-applied all the same.
         expect(after.data.system).toBe(harness.registry.get(VICTIM)!.seed.system);
+    });
+
+    // A Dynamic Operation seed carrier (ADR-0025): source and the four decision fields on the seed,
+    // never registered in the registry (that would be `ambiguous`), passed to bootstrap alongside the
+    // built-ins the way `cli.ts` passes the seven Firefly Sources.
+    const DYNAMIC = "bookkeeping.demo";
+    function dynamicSeed(patch: Partial<OperationImplementation["seed"]> = {}): OperationImplementation {
+        return {
+            name: DYNAMIC,
+            mutating: false,
+            async execute() {
+                throw new Error("dynamic operations run in the Operation Host");
+            },
+            seed: {
+                name: "Demo",
+                system: "Bookkeeping",
+                kind: "connector",
+                description: "A demo dynamic operation.",
+                parameters: { type: "object", properties: {} },
+                implementation: "dynamic",
+                source: "function execute() { return 1; }",
+                language: "typescript",
+                egress: "bookkeeping",
+                clientReadable: true,
+                ...patch,
+            },
+        };
+    }
+
+    it("creates a dynamic Operation with its source, egress, language and clientReadable", async () => {
+        const harness = buildHarness([]);
+        clearCatalogue(harness.store);
+
+        await bootstrap(harness.things, [...harness.registry.all(), dynamicSeed()]);
+
+        const thing = await storedOperation(harness, DYNAMIC);
+        expect(thing.data.implementation).toBe("dynamic");
+        expect(thing.data.source).toBe("function execute() { return 1; }");
+        expect(thing.data.language).toBe("typescript");
+        expect(thing.data.egress).toBe("bookkeeping");
+        expect(thing.data.clientReadable).toBe(true);
+    });
+
+    it("re-applies implementation, because it is a fact about how the Operation is built", async () => {
+        const harness = buildHarness([]);
+        clearCatalogue(harness.store);
+        await bootstrap(harness.things, [...harness.registry.all(), dynamicSeed()]);
+
+        // Someone edits the Thing to claim it is built-in — which is drift, not a decision.
+        const before = await storedOperation(harness, DYNAMIC);
+        await harness.things.update(SPECS.Operation_DM, before.docRef, { implementation: "built-in" });
+
+        const result = await bootstrap(harness.things, [...harness.registry.all(), dynamicSeed()]);
+
+        expect(result.operationsUpdated).toContain(DYNAMIC);
+        expect((await storedOperation(harness, DYNAMIC)).data.implementation).toBe("dynamic");
+    });
+
+    it("never re-applies edited source, and reports the divergence by name", async () => {
+        const harness = buildHarness([]);
+        clearCatalogue(harness.store);
+        await bootstrap(harness.things, [...harness.registry.all(), dynamicSeed()]);
+
+        const result = await bootstrap(harness.things, [
+            ...harness.registry.all(),
+            dynamicSeed({ source: "function execute() { return 2; }" }),
+        ]);
+
+        expect(result.divergedSource).toEqual([`Demo (${DYNAMIC})`]);
+        // The User's source stands; the seed's improvement reaches fresh installs only.
+        expect((await storedOperation(harness, DYNAMIC)).data.source).toBe("function execute() { return 1; }");
+    });
+
+    it("does not report source divergence when the seed carries none (a built-in)", async () => {
+        const harness = buildHarness([]);
+        clearCatalogue(harness.store);
+        await bootstrap(harness.things, harness.registry.all());
+        const result = await bootstrap(harness.things, harness.registry.all());
+        expect(result.divergedSource).toEqual([]);
     });
 });

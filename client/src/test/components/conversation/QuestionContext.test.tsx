@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 
 import { LoggerFactory } from "@com.mgmtp.a12.utils/utils-logging";
+import { resetThingByIdCache } from "../../../components/conversation/useThingById";
 
 import { QuestionContext } from "../../../components/conversation/QuestionContext";
 
@@ -47,6 +48,7 @@ function renderContext(document: object) {
 
 describe("QuestionContext", () => {
     beforeEach(() => {
+        resetThingByIdCache();
         vi.spyOn(LoggerFactory.getLogger("PT/useThingById"), "warn").mockImplementation(() => {});
     });
 
@@ -111,7 +113,9 @@ describe("QuestionContext", () => {
         renderContext({ OpenQuestion: { AssistantKey: "accountant", Kind: "choice", ConversationId: "" } });
 
         await waitFor(() => expect(screen.getByTestId("transcript-message")).toBeInTheDocument());
-        expect(server.asked).toHaveLength(0);
+        // No Conversation to read — the badge may still resolve the Assistant's Name, but no document
+        // is fetched for a thread that names none.
+        expect(server.asked.filter((request) => request.method === "GET_DOCUMENT")).toHaveLength(0);
         expect(screen.getByTestId("transcript-header")).toHaveTextContent("choice");
         expect(screen.getByTestId("answer-controls")).toBeInTheDocument();
     });

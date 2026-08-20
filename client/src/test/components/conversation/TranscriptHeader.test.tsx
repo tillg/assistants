@@ -1,12 +1,13 @@
-import { describe, expect, it } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+
+import { LoggerFactory } from "@com.mgmtp.a12.utils/utils-logging";
 
 import { TranscriptHeader } from "../../../components/conversation/TranscriptHeader";
 import { readEntries } from "../../../components/conversation/entries";
 import { ICONS } from "../../../components/icons";
-import { OPEN_FOREIGN_FORM } from "../../../sagas/openForeignForm";
 
-import { Frame, recordingStore } from "./harness";
+import { Frame, recordingStore, serveRpc } from "./harness";
 
 /** The head fields of a Conversation, with only what a case is about filled in. */
 function conversation(fields: Record<string, unknown>, entries: readonly object[] = []): object {
@@ -38,14 +39,58 @@ function renderHeader(document: object, store = recordingStore()) {
     return store;
 }
 
+/** Answers the badge's key→Name query so the Assistant renders by Name, not by its raw key. */
+function serveAssistant(key: string, name: string): void {
+    serveRpc((request) => ({
+        jsonrpc: "2.0",
+        id: request.id,
+        result: {
+            page: { pageNumber: 0, pageSize: 1 },
+            fullSize: 1,
+            entries: [
+                { type: "ROOT", docRef: `Assistant_DM/${key}`, document: { Assistant: { Key: key, Name: name } } }
+            ],
+            links: [],
+            otherResults: {}
+        }
+    }));
+}
+
 describe("TranscriptHeader", () => {
-    it("names the Assistant and what the Conversation is called", () => {
+    beforeEach(() => {
+        vi.spyOn(LoggerFactory.getLogger("PT/useAssistantName"), "warn").mockImplementation(() => {});
+        // A subject ThingLink reads its document; the single-reply server below is shaped for the badge
+        // query, so that read fails soft to a short id — which is fine, and this keeps its warning quiet.
+        vi.spyOn(LoggerFactory.getLogger("PT/useThingById"), "warn").mockImplementation(() => {});
+        // Every header names its Assistant, so every case resolves the default key to a Name.
+        serveAssistant("accountant", "Ada Ledger");
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it("names the Assistant by Name and what the Conversation is called", async () => {
         renderHeader(conversation({}));
 
         const header = screen.getByTestId("transcript-header");
         expect(header).toHaveTextContent("🤖");
-        expect(header).toHaveTextContent("accountant");
+        await waitFor(() => expect(screen.getByTestId("transcript-who")).toHaveTextContent("Ada Ledger"));
         expect(header).toHaveTextContent("Invoice 2026-118");
+    });
+
+    it("leads with the Conversation's Title, bold, on its own line", () => {
+        renderHeader(conversation({}));
+
+        expect(screen.getByTestId("transcript-title")).toHaveTextContent("Invoice 2026-118");
+    });
+
+    it("omits the Title line and leads with the Assistant when the Conversation has no Title yet", async () => {
+        renderHeader(conversation({ Title: "" }));
+
+        // A freshly-born Conversation has no Title; the band must not show an empty bold gap.
+        expect(screen.queryByTestId("transcript-title")).toBeNull();
+        await waitFor(() => expect(screen.getByTestId("transcript-who")).toHaveTextContent("Ada Ledger"));
     });
 
     it("says how far through its turns the Conversation is", () => {
@@ -104,25 +149,21 @@ describe("TranscriptHeader", () => {
         expect(screen.getByTestId("transcript-state")).toHaveTextContent("answered");
     });
 
-    it("links to the subject Thing, and asks the saga to open it beside its own list", () => {
-        const store = renderHeader(
+    it("names the subject Thing with its Model in brackets and opens it in a read-only popup", async () => {
+        renderHeader(
             conversation({ SubjectModel: "Invoice_DM", SubjectThingId: "a3f9c1de-0000-4000-8000-000000000001" })
         );
 
-        expect(screen.getByTestId("transcript-about-link")).toHaveTextContent("Invoice");
-        fireEvent.click(screen.getByTestId("transcript-about-link"));
+        const link = screen.getByTestId("thing-link");
+        expect(link).toHaveTextContent("about");
+        expect(link).toHaveTextContent("(Invoice)");
 
-        expect(store.actions).toEqual([
-            {
-                type: OPEN_FOREIGN_FORM,
-                payload: {
-                    module: "Invoice",
-                    documentModel: "Invoice_DM",
-                    thingId: "a3f9c1de-0000-4000-8000-000000000001",
-                    masterModule: "Invoice"
-                }
-            }
-        ]);
+        fireEvent.click(link);
+
+        // Opens a read-only summary of the subject in place — a reading, not a navigation away. (The
+        // subject document is not served by this header harness, so the summary shows the Model heading
+        // and fails soft in its body — enough to prove the popup opened on the right Thing.)
+        await waitFor(() => expect(screen.getByTestId("thing-summary-title")).toHaveTextContent("(Invoice)"));
     });
 
     it("offers text rather than a link when the subject's Model has no module", () => {
@@ -139,29 +180,23 @@ describe("TranscriptHeader", () => {
         expect(screen.getByTestId("transcript-about")).toHaveTextContent("scheduled for Thu 20 Aug at 09:00");
     });
 
-    it("links to the Conversation that called this one", () => {
-        const store = renderHeader(conversation({ ParentConversationId: "80d22bcd-4f19-4f8f-bbb7-8ab30e666f9a" }));
+    it("links to the Conversation that called this one, opening it in a popup", async () => {
+        renderHeader(conversation({ ParentConversationId: "80d22bcd-4f19-4f8f-bbb7-8ab30e666f9a" }));
 
-        fireEvent.click(screen.getByTestId("transcript-parent-link"));
+        const link = screen.getByTestId("thing-link");
+        expect(link).toHaveTextContent("called by");
+        expect(link).toHaveTextContent("(Conversation)");
 
-        expect(store.actions).toEqual([
-            {
-                type: OPEN_FOREIGN_FORM,
-                payload: {
-                    module: "Conversation",
-                    documentModel: "Conversation_DM",
-                    thingId: "80d22bcd-4f19-4f8f-bbb7-8ab30e666f9a",
-                    masterModule: "Conversation"
-                }
-            }
-        ]);
+        fireEvent.click(link);
+
+        await waitFor(() => expect(screen.getByTestId("thing-summary-title")).toHaveTextContent("(Conversation)"));
     });
 
-    it("has no parent link when nothing called this Conversation", () => {
+    it("has no Thing link when nothing is a subject and nothing called this Conversation", async () => {
         renderHeader(conversation({}));
 
-        expect(screen.getByTestId("transcript-who")).toHaveTextContent("accountant");
-        expect(screen.queryByTestId("transcript-parent-link")).toBeNull();
+        await waitFor(() => expect(screen.getByTestId("transcript-who")).toHaveTextContent("Ada Ledger"));
+        expect(screen.queryByTestId("thing-link")).toBeNull();
     });
 
     it("adds up what was recorded and says it is a lower bound", () => {

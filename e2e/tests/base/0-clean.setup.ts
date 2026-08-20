@@ -34,9 +34,28 @@ import { test } from "@playwright/test";
 import { E2E_PREFIX } from "../../utils/config";
 import { ThingStore } from "../../utils/thingstore";
 
-const DISPOSABLE: Array<{ model: string; root: string; field: string }> = [
-    { model: "Party_DM", root: "Party", field: "Name" },
-    { model: "Document_DM", root: "Document", field: "Title" }
+const str = (value: unknown): string => (typeof value === "string" ? value : "");
+
+/**
+ * How a leftover Thing of each Model is recognised. Both key on the `E2E` marker, but a Document
+ * carries one extra guard, and it exists because of a single hazard: since the letterbox, a
+ * `Document`'s `Title` is the **subject line of an arriving email** — untrusted input. Deleting a
+ * Document by its `Title` alone would let a forwarded mail whose subject begins `E2E` be silently
+ * reclaimed by the next run.
+ *
+ * So a Document is stale only if its `Title` carries the marker **and** it did not arrive from the
+ * ingest — which stamps every Document it creates `Source: email`. That never deletes an ingested
+ * Document, whatever the subject says (and so never touches the demo household), while still
+ * reclaiming every `E2E`-titled Thing the tests themselves create, whatever `Source` they gave it.
+ * `Party` has no untrusted feed, so it stays keyed on its `Name` prefix alone.
+ */
+const DISPOSABLE: Array<{ model: string; root: string; stale: (body: Record<string, unknown>) => boolean }> = [
+    { model: "Party_DM", root: "Party", stale: (body) => str(body.Name).startsWith(E2E_PREFIX) },
+    {
+        model: "Document_DM",
+        root: "Document",
+        stale: (body) => str(body.Title).startsWith(E2E_PREFIX) && str(body.Source) !== "email"
+    }
 ];
 
 test("Remove Things left behind by earlier e2e runs", async () => {
@@ -44,12 +63,9 @@ test("Remove Things left behind by earlier e2e runs", async () => {
     const store = await ThingStore.connect("admin");
 
     await store.withRuntimePaused(async () => {
-        for (const { model, root, field } of DISPOSABLE) {
+        for (const { model, root, stale: isStale } of DISPOSABLE) {
             const entries = await store.query(model);
-            const stale = entries.filter((entry) => {
-                const body = (entry.document[root] ?? {}) as Record<string, unknown>;
-                return String(body[field] ?? "").startsWith(E2E_PREFIX);
-            });
+            const stale = entries.filter((entry) => isStale((entry.document[root] ?? {}) as Record<string, unknown>));
             for (const entry of stale) {
                 await store.deleteDocument(entry.docRef);
             }

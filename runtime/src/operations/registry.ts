@@ -16,6 +16,9 @@
 import { log } from "../log.js";
 import type { ToolSchema } from "../llm/provider.js";
 import type { Assistant, Conversation, Operation, Stored } from "../domain/types.js";
+import { CompileError, type CompiledModule } from "./dynamic/compile.js";
+import type { OperationHost } from "./dynamic/host.js";
+import { dynamicDescribers, type OperationDescriber } from "./describers.js";
 
 export interface OperationContext {
     conversation: Stored<Conversation>;
@@ -121,6 +124,18 @@ export interface OperationImplementation {
         description: string;
         parameters: Record<string, unknown>;
         requiresApproval?: boolean;
+        /**
+         * ADR-0025 fields, carried by a Dynamic Operation's seed. `implementation` is on the mirror
+         * side of bootstrap's line — a fact about how the Operation is built. `source`, `language`,
+         * `egress`, `timeoutMs` and `clientReadable` are on the decision side: created once from the
+         * seed and never re-applied, so a running Operation the User has edited is left alone.
+         */
+        implementation?: "built-in" | "dynamic";
+        source?: string;
+        language?: "typescript" | "javascript";
+        egress?: string;
+        timeoutMs?: number;
+        clientReadable?: boolean;
     };
 }
 
@@ -134,7 +149,22 @@ export interface OperationImplementation {
 export interface DroppedGrant {
     /** The grant as the Assistant declared it, callee and all. */
     key: string;
-    reason: "absent" | "disabled" | "unimplemented" | "unparseable" | "self-call" | "bare-call";
+    /**
+     * `ambiguous` and `uncompilable` are ADR-0025's: a key that resolves to *both* a built-in and a
+     * stored Implementation is refused rather than ranked, and a Dynamic Operation whose Source does
+     * not compile is a dropped grant with the compiler's message in the log. `unconfigured-egress`
+     * is the third the dynamic path needs: a Source may name an egress deployment has not defined.
+     */
+    reason:
+        | "absent"
+        | "disabled"
+        | "unimplemented"
+        | "unparseable"
+        | "self-call"
+        | "bare-call"
+        | "ambiguous"
+        | "uncompilable"
+        | "unconfigured-egress";
 }
 
 export interface Resolution {
@@ -154,6 +184,28 @@ export class OperationRegistry {
      * re-announces it; a busy afternoon does not.
      */
     private readonly warnedWeaker = new Set<string>();
+
+    /**
+     * Dynamic Operations already warned about for being `mutating` with no `reconcile`. Same
+     * once-per-process discipline as {@link warnedWeaker}, and the same reason: the catalogue is read
+     * once per Turn, so warning per resolution would bury the line. `bookkeeping.postTransaction`
+     * without a `reconcile` is a double booking waiting for a crash (ADR-0025), so it is said — but once.
+     */
+    private readonly warnedNoReconcile = new Set<string>();
+
+    /**
+     * The Operation Host compiles and runs Dynamic Operations (ADR-0025). Optional so a test that
+     * only exercises built-in resolution can construct a bare registry; production always wires it
+     * in {@link buildRuntime}. A dynamic Thing met with no Host is dropped as `unimplemented`.
+     *
+     * `describers` supplies the synchronous approval-prompt renderer for a Dynamic Operation that
+     * needs one (the money-moving ones) — see {@link dynamicDescribers}. Defaulted so callers rarely
+     * pass it; a test overrides it to check the wiring.
+     */
+    constructor(
+        private readonly host?: OperationHost,
+        private readonly describers: Record<string, OperationDescriber> = dynamicDescribers,
+    ) {}
 
     register(implementation: OperationImplementation): void {
         if (this.operations.has(implementation.name)) {
@@ -230,11 +282,57 @@ export class OperationRegistry {
                 drop(key, "disabled");
                 continue;
             }
-            const implementation = this.operations.get(base);
-            if (!implementation) {
-                drop(key, "unimplemented");
-                continue;
+            // The two-source join (ADR-0025). `implementation` unset reads as `built-in`. A key that
+            // resolves to *both* a compiled and a stored Implementation is refused as `ambiguous`, in
+            // both directions — ranking would let a half-finished migration hide which one moved money.
+            const kind: "built-in" | "dynamic" =
+                thing.implementation === "dynamic" ? "dynamic" : "built-in";
+            const codeImplementation = this.operations.get(base);
+            const hasSource = (thing.source ?? "").trim() !== "";
+
+            let module: CompiledModule | undefined;
+            if (kind === "built-in") {
+                if (!codeImplementation) {
+                    drop(key, "unimplemented");
+                    continue;
+                }
+                if (hasSource) {
+                    drop(key, "ambiguous", "a built-in Operation must not carry stored source");
+                    continue;
+                }
+            } else {
+                if (codeImplementation) {
+                    drop(key, "ambiguous", "a dynamic Operation is also registered in code");
+                    continue;
+                }
+                if (!hasSource) {
+                    drop(key, "unimplemented");
+                    continue;
+                }
+                if (!this.host) {
+                    drop(key, "unimplemented", "no Operation Host is wired to run stored source");
+                    continue;
+                }
+                try {
+                    module = this.host.compile(thing.source ?? "", thing.language);
+                } catch (error) {
+                    drop(
+                        key,
+                        "uncompilable",
+                        error instanceof CompileError || error instanceof Error
+                            ? error.message
+                            : String(error),
+                    );
+                    continue;
+                }
+                // An unset egress is legal — a compute-only Operation. A *named* egress that
+                // configuration does not define is not: it is a request to nowhere, dropped by name.
+                if (thing.egress && thing.egress !== "" && !this.host.hasEgress(thing.egress)) {
+                    drop(key, "unconfigured-egress", `egress "${thing.egress}"`);
+                    continue;
+                }
             }
+
             let parameters: Record<string, unknown>;
             try {
                 // Parsing is not enough. `null`, `5`, `true` and `"x"` are all valid JSON and none
@@ -257,7 +355,10 @@ export class OperationRegistry {
                 continue;
             }
 
-            const operation = this.resolve(implementation, thing, parameters);
+            const operation =
+                kind === "dynamic"
+                    ? this.resolveDynamic(base, module!, thing, parameters)
+                    : this.resolve(codeImplementation!, thing, parameters);
 
             if (base === "assistant.call") {
                 // A bare `assistant.call` (no `:callee`) is not a wildcard — it is a mistake.
@@ -299,6 +400,40 @@ export class OperationRegistry {
         return toolSchemas(this.grantedTo(assistant, catalogue).granted);
     }
 
+    /**
+     * Build the executable for a Dynamic Operation reached through the inbound door (ADR-0023/0025).
+     *
+     * The gate has already read `clientReadable`, `mutating` and `requiresApproval` off the Thing;
+     * this only compiles the Source and hands back something to run. `undefined` when there is no
+     * Host, no Source, or the Source does not compile — each a refusal at the door, indistinguishable
+     * from the others, so a browser learns nothing.
+     */
+    clientExecutable(thing: Operation): GrantedOperation | undefined {
+        if (!this.host) return undefined;
+        if ((thing.source ?? "").trim() === "") return undefined;
+        // A named egress that configuration does not define is refused here too, so the inbound door
+        // answers a clean refusal rather than running to a 502 — matching what `grantedTo` does for
+        // the same Thing.
+        if (thing.egress && thing.egress !== "" && !this.host.hasEgress(thing.egress)) return undefined;
+        let module: CompiledModule;
+        try {
+            module = this.host.compile(thing.source ?? "", thing.language);
+        } catch {
+            return undefined;
+        }
+        let parameters: Record<string, unknown> = {};
+        try {
+            const parsed: unknown = JSON.parse(thing.parameters ?? "{}");
+            if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+                parameters = parsed as Record<string, unknown>;
+            }
+        } catch {
+            // The door does not need a valid parameter schema to run the Operation — that is the
+            // Assistants' concern (the LLM never sees this call). An empty object is fine.
+        }
+        return this.resolveDynamic(thing.key ?? "", module, thing, parameters);
+    }
+
     /** The join itself: prose and approval from the Thing, behaviour from the Implementation. */
     private resolve(
         implementation: OperationImplementation,
@@ -332,6 +467,53 @@ export class OperationRegistry {
                 ? {
                       reconcile: (args: Record<string, unknown>, context: OperationContext) =>
                           implementation.reconcile!(args, context),
+                  }
+                : {}),
+        };
+    }
+
+    /**
+     * The join for a Dynamic Operation: prose, approval, `mutating` and the egress all come from the
+     * Thing (there is no compiled author to ask), and `execute`/`reconcile` run the compiled Source
+     * through the Operation Host. This is the one place `mutating` is read from the Thing — the trust
+     * anchor is the store's write authority, not code review (ADR-0025).
+     */
+    private resolveDynamic(
+        base: string,
+        module: CompiledModule,
+        thing: Operation,
+        parameters: Record<string, unknown>,
+    ): GrantedOperation {
+        const host = this.host!;
+        const mutating = thing.mutating === true;
+        const requiresApproval = thing.requiresApproval === true;
+        const describe = this.describers[base];
+        const target = { key: base, egress: thing.egress, timeoutMs: thing.timeoutMs };
+        const declaresReconcile = host.declaresReconcile(module);
+
+        // A mutating Dynamic Operation with no reconcile is a double booking waiting for a crash. Not
+        // refused — the recovery path escalates rather than guessing, which is the safe answer — but
+        // said, once per process.
+        if (mutating && !declaresReconcile && !this.warnedNoReconcile.has(base)) {
+            this.warnedNoReconcile.add(base);
+            log.warn("a mutating Dynamic Operation declares no reconcile", { operation: base });
+        }
+
+        return {
+            name: base,
+            description: thing.description ?? "",
+            parameters,
+            mutating,
+            ...(requiresApproval ? { requiresApproval: true } : {}),
+            ...(describe ? { describeCall: describe } : {}),
+            async execute(args, context): Promise<OperationOutcome> {
+                const outcome = await host.run(module, "execute", args, context, target);
+                return outcome ?? { kind: "error", message: `Operation ${base} produced no outcome` };
+            },
+            ...(declaresReconcile
+                ? {
+                      reconcile: (args: Record<string, unknown>, context: OperationContext) =>
+                          host.run(module, "reconcile", args, context, target),
                   }
                 : {}),
         };

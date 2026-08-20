@@ -5,7 +5,7 @@ import type { Store } from "redux";
 
 import { LoggerFactory } from "@com.mgmtp.a12.utils/utils-logging";
 
-import { useThingById } from "../../../components/conversation/useThingById";
+import { resetThingByIdCache, useThingById } from "../../../components/conversation/useThingById";
 
 import { Frame, serveDocuments } from "./harness";
 
@@ -47,6 +47,7 @@ describe("Frame", () => {
 
 describe("the installed server", () => {
     beforeEach(() => {
+        resetThingByIdCache();
         vi.spyOn(LoggerFactory.getLogger("PT/useThingById"), "warn").mockImplementation(() => {});
     });
 

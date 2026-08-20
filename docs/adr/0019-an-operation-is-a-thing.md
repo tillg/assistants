@@ -4,7 +4,17 @@ The catalogue of Operations lived in `runtime/src/tools/tools.ts` and in a hand-
 
 So the catalogue moves into the ThingStore. `Operation_DM` holds one Thing per Operation — its key, the System it belongs to, the prose the model reads, its parameter schema, whether it mutates, whether it requires an approval, whether it is switched on at all. This is [ADR-0003](0003-assistants-are-things.md)'s argument taken a second time: an Assistant is a Thing because it is a definition the User edits and reviews, an Operation is the same kind of object, and the only reason they were treated differently is the order in which they were built. The alternative was a config file, and the reason it was refused for Assistants is the reason it is refused here — the User cannot edit a file inside a container.
 
-**The Implementation cannot be data, and that is what makes this safe to do.** The code keeps `execute`, `reconcile` and `describeCall`; the Thing names an Operation and the registry joins the two per Turn. So the catalogue can describe an Operation, rename it for the model, guard it, weaken it and switch it off — and it cannot make one exist. An Operation with no Implementation is not an Operation; it is a description of one, and it is reported as *unimplemented* rather than offered. This is what keeps the change from being `exec` with extra steps, which is learning 17 of [ASSISTANTS_VS_OPENCLAW.md](../../specs/research/ASSISTANTS_VS_OPENCLAW.md) and the whole point of [ADR-0010](0010-assistants-declare-their-tools.md).
+**The Implementation cannot be data, and that is what makes this safe to do.** The code keeps `execute`, `reconcile` and `describeCall`; the Thing names an Operation and the registry joins the two per Turn.
+
+> **Amendment, 2026-08-19.** [ADR-0025](0025-a-dynamic-operation-carries-its-implementation.md)
+> makes the Implementation data for the seven `bookkeeping.*` Operations, which become *dynamic* —
+> their source carried on the Operation Thing and run by an Operation Host. The sentence above is
+> left as written, per this repo's convention, but it no longer holds for the whole catalogue. What
+> ADR-0025 preserves is the part this paragraph was actually protecting: the safety was never the
+> compiler, it was that an Assistant cannot write `Operation_DM`. That is unchanged. Read ADR-0025
+> for what genuinely weakens — `mutating` and `clientReadable` come from the Thing for a dynamic
+> Operation, and the deployment allowlist, not code review, carries the inbound gate.
+ So the catalogue can describe an Operation, rename it for the model, guard it, weaken it and switch it off — and it cannot make one exist. An Operation with no Implementation is not an Operation; it is a description of one, and it is reported as *unimplemented* rather than offered. This is what keeps the change from being `exec` with extra steps, which is learning 17 of [ASSISTANTS_VS_OPENCLAW.md](../../specs/research/ASSISTANTS_VS_OPENCLAW.md) and the whole point of [ADR-0010](0010-assistants-declare-their-tools.md).
 
 **The grant stays a key, not a reference.** `bookkeeping.postTransaction` in an Assistant's grants is exactly the legibility ADR-0010 was arguing for; a ThingID is not, and it would bind a reference to a Model, which [ADR-0002](0002-thingid-identifies-only.md) rejects. The Operation key is its natural key, as `key` is an Assistant's.
 

@@ -44,14 +44,20 @@ The terms below are the ones the models, the code and the documents all share. D
 | **Open Question** | A question put to the User, and its answer. A Thing |
 | **Skill** | Markdown instructions belonging to exactly one Assistant, never shared |
 | **Operation** | A capability one System offers — external, internal, or the Runtime itself. A Thing; the ThingStore holds the catalogue of them |
-| **Implementation** | The code that performs one Operation. Not a Thing, because it is behaviour rather than data |
+| **Implementation** | The code that performs one Operation. Never a Thing — it is behaviour — but it may be **stored on** one (ADR-0025): compiled in for a Built-in Operation, carried by the Thing for a Dynamic one |
+| **Built-in Operation** | An Operation whose Implementation is compiled into the Runtime. It runs in this system's own scope and knows this codebase's vocabulary. Everything ADR-0019 says holds for it unchanged |
+| **Dynamic Operation** | An Operation whose Implementation is carried by its own Thing, as source the User may read and edit, run by the Operation Host. It reaches an External System and translates the answer; changing it is an edit and a Turn, not a release. The seven `bookkeeping.*` are the dynamic ones (ADR-0025) |
+| **Implementation Source** | A Dynamic Operation's Implementation, as text on the Thing: TypeScript declaring `execute` and, where it matters, `reconcile`. No imports, no module system — everything it may reach is handed to it. Writable only by an actor holding `ASSISTANT_WRITE`, which no Assistant is |
+| **Operation Host** | The half of the Runtime that turns Implementation Source into a running Implementation: compiles it, sandboxes it (a worker thread + a vm context), hands it its one capability, bounds it in time and memory, and translates what comes back. The only component that ever holds both a credential and someone else's source |
+| **Egress** | The single named outward capability a Dynamic Operation is granted — a base URL and its credential, resolved from configuration by the Operation Host. Source names the egress (`bookkeeping`) and never the URL or the token. An Operation with no egress can compute and nothing else |
+| **Result Contract** | How what the Source returns becomes an outcome: a returned value is a `value`; a thrown `OperationError` is an `error` the model reads; any other throw is an `error` whose detail goes to the log alone; a returned `host.pending(...)` is a `pending`. An HTTP 404 is a value, an error, or neither — the Source is the only thing that knows which |
 | **grant** | One row of an Assistant's `grants[]`, naming an Operation by its key. A field, not a Model of its own |
 | **Granted Operation** | What an Assistant may actually reach: an Operation, the grant naming it and the Implementation performing it, resolved together for the length of a Turn |
 | **Mailbox** | The Gmail account the Receptionist receives at. Not a Thing — its Authority is the mail provider |
 | **Message** | One email as it exists at the provider. Not a Thing either; a foreign representation, translated and discarded |
 | **Text Layer** | The text a PDF already carries. A property of the bytes, and the fact that decides whether reading it is free |
 | **Sparse Text Layer** | A Text Layer short enough to be suspect — under `SPARSE_TEXT_CHARS` (100). A *report*, never a verdict: below that many characters the text is either a scanner's leavings or a genuinely short document, length cannot tell the two apart, so every character comes back with a flag beside it and the Receptionist decides. Only genuinely empty is `no-text-layer` |
-| **Connector** | The translator between one External System's representation and Things |
+| **Connector** | The translator between one External System's representation and Things. Still the word for Mail, the Content Store and the Manual Connectors; for Bookkeeping the translation is now the Operation Host plus the Source it runs, not a class (ADR-0025) |
 | **Manual Connector** | A Connector that fulfils its Operation by asking the User to do it by hand |
 | **Runtime** | Watches Triggers, births Conversations, drives the loop. Not an External System |
 | **Trigger Watcher** / **Loop Driver** | The Runtime's two halves: find work; take one Conversation one Turn forward |
@@ -71,9 +77,13 @@ Three distinctions are load-bearing and easy to lose:
 - An **Operation** is what exists; a **Granted Operation** is what one Assistant may reach. One
   Operation Thing, many grants. And an **Implementation** is code where an Operation is data, which
   is not cosmetic: the catalogue can describe an Operation, guard it, reword it and switch it off,
-  and it cannot make one exist ([ADR-0019](../../docs/adr/0019-an-operation-is-a-thing.md)).
-  *Tool* is the LLM provider's word for the schema we send it and survives only at that boundary
-  ([ADR-0020](../../docs/adr/0020-tool-is-the-providers-word.md)).
+  and — for a **Built-in Operation** — it cannot make one exist
+  ([ADR-0019](../../docs/adr/0019-an-operation-is-a-thing.md)). **For a Dynamic Operation that last
+  clause no longer holds**: its Implementation is carried on the Thing as source, so the catalogue
+  *can* make one exist ([ADR-0025](../../docs/adr/0025-a-dynamic-operation-carries-its-implementation.md)).
+  What still holds is the safety it rests on — an Assistant cannot write `Operation_DM`, so it cannot
+  author one. *Tool* is the LLM provider's word for the schema we send it and survives only at that
+  boundary ([ADR-0020](../../docs/adr/0020-tool-is-the-providers-word.md)).
 - A **Schedule** is a Trigger configured on an Assistant and births a Conversation where none
   exists. A **wakeAt** is state on a Conversation that already exists. Configuration on a
   template versus state on an instance. A Schedule is a standing instruction about the current state
@@ -132,11 +142,18 @@ the model layer, which is the typed-identifier design ADR-0002 rejects.
 (ADR-0009), so it has no independent identity. Skills are a repeating group inside `Assistant_DM`:
 a name and a markdown body. Making them Things would invite precisely the sharing the rule forbids.
 
-**An Operation's Implementation is code, and `Operation_DM` has no field naming it.** The
+**A Built-in Operation's Implementation is code, and `Operation_DM` names it only by kind.** The
 Implementation is registered under the Operation's key and found by it, so there is exactly one
-name to keep in step rather than two. An Operation for which no Implementation is registered is
-reported as *unimplemented* and is not offered — which is a different state from being switched
-off, and the system says which.
+name to keep in step rather than two. An Operation for which no Implementation is registered — no
+compiled one for a built-in, no source for a dynamic — is reported as *unimplemented* and is not
+offered, a different state from being switched off, and the system says which.
+
+**A Dynamic Operation's Implementation *is* on the Thing** (ADR-0025): `source`, `language`,
+`egress` and `timeoutMs`, plus `implementation: dynamic` naming which kind it is. The registry's
+join becomes two-source — compiled code for a built-in, stored source for a dynamic one — and a key
+that resolves to both is refused as *ambiguous* rather than ranked. `mutating` and `clientReadable`,
+which a built-in reads from code, a dynamic Operation reads from the Thing; the trust anchor for that
+is not code review but the store's write authority, which no Assistant holds.
 
 ## Actors
 
@@ -181,9 +198,12 @@ invoice.
 the Runtime calls Assistants. It has no domain opinions.
 
 **Bookkeeping (Firefly III)** — the Authority for accounts, transactions, balances and budgets.
-The User works in it directly, Assistants reach it only through its Connector, and since
-[ADR-0023](../../docs/adr/0023-the-runtime-is-the-door-outward.md) the client reads it as well — per
-visit, through the Runtime, the one component that can reach it — storing nothing on the way.
+The User works in it directly; Assistants reach it through the seven `bookkeeping.*` Operations,
+which since [ADR-0025](../../docs/adr/0025-a-dynamic-operation-carries-its-implementation.md) are
+*dynamic* — stored source run by the Operation Host against the `bookkeeping` egress, rather than a
+compiled Connector. Since [ADR-0023](../../docs/adr/0023-the-runtime-is-the-door-outward.md) the client
+reads it as well — per visit, through the Runtime, the one component that can reach it — storing
+nothing on the way.
 
 **Manual Connectors** — `document.requestText`, `email.send`, `email.fetch`, `bank.sendMoney`.
 Each fulfils its Operation by raising an Open Question of kind `perform` and waiting for the User

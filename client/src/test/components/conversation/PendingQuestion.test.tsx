@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 
 import { LoggerFactory } from "@com.mgmtp.a12.utils/utils-logging";
+import { resetThingByIdCache } from "../../../components/conversation/useThingById";
 
 import { PendingQuestion } from "../../../components/conversation/PendingQuestion";
 import { ICONS } from "../../../components/icons";
@@ -34,6 +35,7 @@ function renderPending(questionId: string, store = recordingStore()) {
 
 describe("PendingQuestion", () => {
     beforeEach(() => {
+        resetThingByIdCache();
         vi.spyOn(LoggerFactory.getLogger("PT/useThingById"), "warn").mockImplementation(() => {});
     });
 

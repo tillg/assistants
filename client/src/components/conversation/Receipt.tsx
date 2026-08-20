@@ -1,6 +1,8 @@
 import { useState } from "react";
 import styled from "styled-components";
 
+import { Typography } from "@com.mgmtp.a12.widgets/widgets-core";
+
 import { ICONS } from "../icons";
 
 import type { Receipt as ReceiptItem } from "./entries";
@@ -12,6 +14,9 @@ import type { Receipt as ReceiptItem } from "./entries";
  * something looks wrong, and noise the rest of the time. An intent with no result is the one case a
  * Receipt stands open-ended — the call is still in flight, or it died — and it says so rather than
  * looking like a call that returned nothing.
+ *
+ * Text is the A12 `Typography` widget throughout, and every size is a `theme.typography.fontSize` token
+ * rather than a hand-picked `em`: the call's own words are primary body text, not a shrunken grey aside.
  */
 
 const Row = styled.div`
@@ -31,7 +36,7 @@ const Body = styled.div`
 const Toggle = styled.button`
     display: flex;
     gap: 0.5rem;
-    align-items: baseline;
+    align-items: flex-start;
     width: 100%;
     padding: 0.4rem 0.75rem;
     border: none;
@@ -42,13 +47,35 @@ const Toggle = styled.button`
     cursor: pointer;
 `;
 
-const Operation = styled.span`
+/**
+ * The name and the call's words stack, so a paragraph of narration reads as one rather than trailing
+ * off a line. A `span` (not a `div`), because Summary and its Typography children render inside the
+ * Toggle `<button>`, which may only hold phrasing content — hence `forwardedAs="span"` on the bodies.
+ */
+const Summary = styled.span`
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+`;
+
+const Operation = styled(Typography.Body)`
+    margin: 0;
+    color: inherit;
     font-family: monospace;
 `;
 
-const Aside = styled.span`
+/** The call's own words: primary body text at the base size, so a reader can actually read it. */
+const Description = styled(Typography.Body)`
+    margin: 0;
+    color: inherit;
+`;
+
+/** A call still in flight, or dead: a secondary status marker, not content. */
+const Pending = styled(Typography.Body)`
+    margin: 0;
     color: ${({ theme }) => theme.colors.text.secondaryColor};
-    font-size: 0.8em;
+    font-size: ${({ theme }) => theme.typography.fontSize.smallFontSize};
 `;
 
 const Detail = styled.div`
@@ -56,10 +83,10 @@ const Detail = styled.div`
     border-top: 1px solid ${({ theme }) => theme.colors.divider.colorSubtle};
 `;
 
-const Caption = styled.div`
-    margin-top: 0.4rem;
+const Caption = styled(Typography.Body)`
+    margin: 0.4rem 0 0;
     color: ${({ theme }) => theme.colors.text.secondaryColor};
-    font-size: 0.75em;
+    font-size: ${({ theme }) => theme.typography.fontSize.smallFontSize};
 `;
 
 const Code = styled.pre`
@@ -67,7 +94,7 @@ const Code = styled.pre`
     overflow-x: auto;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    font-size: 0.8em;
+    font-size: ${({ theme }) => theme.typography.fontSize.smallFontSize};
 `;
 
 export interface ReceiptProps {
@@ -88,9 +115,13 @@ export function Receipt({ receipt }: ReceiptProps) {
                     data-role="transcript-receipt-toggle"
                     onClick={() => setOpen((was) => !was)}>
                     <span aria-hidden>{ICONS.tool}</span>
-                    <Operation>{operation}</Operation>
-                    {intent?.text !== undefined && intent.text !== "" && <Aside>{intent.text}</Aside>}
-                    {result === undefined && <Aside>no result</Aside>}
+                    <Summary>
+                        <Operation forwardedAs="span">{operation}</Operation>
+                        {intent?.text !== undefined && intent.text !== "" && (
+                            <Description forwardedAs="span">{intent.text}</Description>
+                        )}
+                        {result === undefined && <Pending forwardedAs="span">no result</Pending>}
+                    </Summary>
                 </Toggle>
                 {open && (
                     <Detail data-role="transcript-receipt-body">

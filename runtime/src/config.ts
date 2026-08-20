@@ -128,6 +128,73 @@ export interface Config {
      */
     readonly visionMaxPages: number;
     readonly visionMaxBytes: number;
+
+    /** Everything the Operation Host needs to compile, bound and run a Dynamic Operation (ADR-0025). */
+    readonly dynamicOperation: DynamicOperationConfig;
+}
+
+/**
+ * One named Egress: the base URL a Dynamic Operation's Source may reach, and the credential the
+ * Operation Host attaches on the way out. Source names the egress and never sees either field.
+ *
+ * `token` wins when set; otherwise `tokenFile` is read at first use (as the FireflyConnector reads
+ * its own), so a missing file is a failure at call time with the path named, not a crash at startup.
+ */
+export interface EgressConfig {
+    readonly url: string;
+    readonly token: string;
+    readonly tokenFile?: string;
+}
+
+export interface DynamicOperationConfig {
+    /** Ceiling per execution. A Thing's `timeoutMs` may lower it, never raise it — see {@link clampTimeoutMs}. */
+    readonly timeoutMs: number;
+    /** Response-body cap in the injected client, so a foreign system cannot exhaust the scan loop. */
+    readonly maxBodyBytes: number;
+    /** The worker's `resourceLimits.maxOldGenerationSizeMb`. */
+    readonly memoryMb: number;
+    /** Staleness ceiling for `host.cache`; the old chart-of-accounts field had none. */
+    readonly cacheTtlMs: number;
+    /**
+     * The Egress table, keyed by lowercased egress name. Built from `EGRESS_<NAME>_URL` /
+     * `_TOKEN` / `_TOKEN_FILE`, so adding the bank later is two environment variables and no code.
+     * A `bookkeeping` entry is always present, defaulting to the Firefly variables.
+     */
+    readonly egresses: Readonly<Record<string, EgressConfig>>;
+}
+
+/**
+ * The effective per-execution timeout: a Thing may ask for less than the ceiling, never more.
+ * Unset, and anything not a positive finite number, reads as the ceiling itself.
+ */
+export function clampTimeoutMs(config: DynamicOperationConfig, requested: number | undefined): number {
+    if (requested === undefined || !Number.isFinite(requested) || requested <= 0) return config.timeoutMs;
+    return Math.min(requested, config.timeoutMs);
+}
+
+/**
+ * Scan the environment for `EGRESS_<NAME>_URL` and build one {@link EgressConfig} per name found,
+ * merged over the supplied defaults (an explicit `EGRESS_*` wins). The name is lowercased, so
+ * `EGRESS_BOOKKEEPING_URL` defines the egress Source names as `bookkeeping`.
+ */
+function egressTable(
+    env: NodeJS.ProcessEnv,
+    defaults: Record<string, EgressConfig>,
+): Record<string, EgressConfig> {
+    const table: Record<string, EgressConfig> = { ...defaults };
+    for (const key of Object.keys(env)) {
+        const match = /^EGRESS_(.+)_URL$/.exec(key);
+        if (!match || match[1] === undefined) continue;
+        const url = env[key] ?? "";
+        if (url === "") continue;
+        const raw = match[1];
+        table[raw.toLowerCase()] = {
+            url,
+            token: env[`EGRESS_${raw}_TOKEN`] ?? "",
+            tokenFile: env[`EGRESS_${raw}_TOKEN_FILE`] || undefined,
+        };
+    }
+    return table;
 }
 
 export interface MailConfig {
@@ -313,6 +380,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         // complete.
         visionMaxPages: number("VISION_MAX_PAGES", 10),
         visionMaxBytes: number("VISION_MAX_BYTES", 16 * 1024 * 1024),
+
+        dynamicOperation: {
+            timeoutMs: number("DYNAMIC_OPERATION_TIMEOUT_MS", 20_000),
+            maxBodyBytes: number("DYNAMIC_OPERATION_MAX_BODY_BYTES", 4 * 1024 * 1024),
+            memoryMb: number("DYNAMIC_OPERATION_MEMORY_MB", 128),
+            cacheTtlMs: number("DYNAMIC_OPERATION_CACHE_TTL_MS", 300_000),
+            // `bookkeeping` reuses the Firefly variables so an existing deployment needs no new
+            // environment to switch over; an explicit `EGRESS_BOOKKEEPING_URL` overrides it.
+            egresses: egressTable(process.env, {
+                bookkeeping: {
+                    url: optional("FIREFLY_URL", "http://firefly:8080"),
+                    token: optional("FIREFLY_TOKEN", ""),
+                    tokenFile: optional("FIREFLY_TOKEN_FILE", "/run/firefly/pat.txt") || undefined,
+                },
+            }),
+        },
     };
 }
 

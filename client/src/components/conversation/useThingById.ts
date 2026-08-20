@@ -23,9 +23,21 @@ import { LoggerFactory } from "@com.mgmtp.a12.utils/utils-logging";
  *
  * The docRef is composed here from the Model and the bare ThingID, because no Thing carries one:
  * ADR-0002 — a ThingID identifies and nothing more.
+ *
+ * A module-level cache (as in `useAssistantName`) keeps a screen that reads one Thing twice — a
+ * `ThingLink` for its label and then the `ThingPopup` it opens — from asking twice; it is not a store
+ * and holds nothing across a reload.
  */
 
 const logger = LoggerFactory.getLogger("PT/useThingById");
+
+/** Documents read successfully, by docRef. Not a store: a plain memo, emptied by any reload. */
+const cache = new Map<string, object>();
+
+/** Empties the memo. For tests, which need a cold cache to exercise the loading and rejection frames. */
+export function resetThingByIdCache(): void {
+    cache.clear();
+}
 
 /**
  * `GET_DOCUMENT` takes a docRef and nothing else, so this only reaches the `Accept-Language` header.
@@ -44,17 +56,25 @@ const NOTHING: ThingById = { state: "nothing" };
 
 /** Reads `<model>/<thingId>` once, and again whenever the id changes. Never throws. */
 export function useThingById(model: string, thingId: string | undefined): ThingById {
-    const [result, setResult] = useState<ThingById>(thingId ? LOADING : NOTHING);
+    const [result, setResult] = useState<ThingById>(() => cached(model, thingId) ?? (thingId ? LOADING : NOTHING));
 
     useEffect(() => {
         if (!thingId) {
             setResult(NOTHING);
             return;
         }
+        const known = cached(model, thingId);
+        if (known !== undefined) {
+            setResult(known);
+            return;
+        }
 
         let live = true;
         setResult(LOADING);
         void readThing(model, thingId).then((document) => {
+            if (document !== undefined) {
+                cache.set(`${model}/${thingId}`, document);
+            }
             if (live) {
                 setResult(document === undefined ? NOTHING : { state: "ready", document });
             }
@@ -65,6 +85,13 @@ export function useThingById(model: string, thingId: string | undefined): ThingB
     }, [model, thingId]);
 
     return result;
+}
+
+/** A ready result from the cache, or `undefined` when this Thing has not been read yet this session. */
+function cached(model: string, thingId: string | undefined): ThingById | undefined {
+    if (!thingId) return undefined;
+    const document = cache.get(`${model}/${thingId}`);
+    return document === undefined ? undefined : { state: "ready", document };
 }
 
 async function readThing(model: string, thingId: string): Promise<object | undefined> {

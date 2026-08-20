@@ -28,7 +28,7 @@ import { timingSafeEqual } from "node:crypto";
 import { decide } from "./gate.js";
 import { eq, path as fieldPath, SPECS, type ThingRepository } from "../a12/things.js";
 import { describeError, log } from "../log.js";
-import type { Operation } from "../domain/types.js";
+import type { Operation, Stored } from "../domain/types.js";
 import type { OperationContext, OperationRegistry } from "../operations/registry.js";
 
 /** A body larger than this is not a call this route has any use for. */
@@ -124,18 +124,29 @@ async function handle(
         return;
     }
 
-    const verdict = decide(key, options.registry, options.allowlist);
+    // Read the Operation Thing once, before the gate: a Dynamic Operation reads three of its four
+    // flags off it (ADR-0025), and the `Enabled` check needs it too. `undefined` means "not found or
+    // could not read", and `ambiguous` means two Things share the key — both refused, indistinguishably.
+    const lookup = options.things ? await findOperation(options.things, key) : undefined;
+    if (lookup === "ambiguous") {
+        log.warn("the inbox refused a call", { operation: key, reason: "not-allowed" });
+        send(response, 403, { ok: false, reason: "not-allowed" });
+        return;
+    }
+    const thing = lookup;
+
+    const verdict = decide(key, options.registry, options.allowlist, thing?.data);
     if (!verdict.allowed) {
         log.warn("the inbox refused a call", { operation: key, reason: verdict.reason });
         send(response, 403, { ok: false, reason: verdict.reason });
         return;
     }
 
-    // The fourth check, and the only one that is not code: an Operation the User has switched off is
-    // off everywhere, not merely invisible to the Assistants. Read from the Thing because that is the
-    // one thing on the Operation the Thing is genuinely the Authority for (ADR-0019) — unlike
-    // `Mutating`, which `gate.ts` explains at length is never trusted from there.
-    if (options.things && !(await isEnabled(options.things, key))) {
+    // The `Enabled` check: an Operation the User has switched off is off everywhere, not merely
+    // invisible to the Assistants. Read from the Thing because that is the one flag the Thing is
+    // genuinely the Authority for (ADR-0019). When the store could not be read the Thing is
+    // `undefined`, which fails closed — "I could not find out" must not mean "go ahead".
+    if (options.things && (thing === undefined || thing.data.enabled === false)) {
         log.warn("the inbox refused a call", { operation: key, reason: "not-allowed" });
         send(response, 403, { ok: false, reason: "not-allowed" });
         return;
@@ -160,7 +171,7 @@ async function handle(
     }
 
     try {
-        const outcome = await verdict.implementation.execute(args, NO_CONTEXT);
+        const outcome = await verdict.execute(args, NO_CONTEXT);
         send(response, 200, { ok: true, outcome });
     } catch (error) {
         // The External System failed, which is a fact about the world rather than a refusal — and
@@ -189,7 +200,21 @@ async function handle(
  * open or stay shut according to whichever row the store happened to list first, which is nobody's
  * decision. An ambiguous catalogue is a catalogue this cannot read, so it says so and refuses.
  */
-async function isEnabled(things: ThingRepository, key: string): Promise<boolean> {
+/**
+ * The Operation Thing for a key: the Thing, `undefined` (not found or unreadable), or `"ambiguous"`.
+ *
+ * One read serves both the gate — a Dynamic Operation's `clientReadable`, `mutating` and
+ * `requiresApproval` live on it (ADR-0025) — and the `Enabled` check. A store failure is `undefined`,
+ * which fails closed: this route grants access, so "I could not find out" must not open the door.
+ *
+ * Two Things carrying the same key are `"ambiguous"`, and refused. The search asks for two precisely
+ * so it can notice the second; reading `[0]` would let the door open or shut according to whichever
+ * row the store happened to list first, which is nobody's decision.
+ */
+async function findOperation(
+    things: ThingRepository,
+    key: string,
+): Promise<Stored<Operation> | undefined | "ambiguous"> {
     try {
         const found = await things.search<Operation>(
             SPECS.Operation_DM,
@@ -201,16 +226,15 @@ async function isEnabled(things: ThingRepository, key: string): Promise<boolean>
                 operation: key,
                 found: found.length,
             });
-            return false;
+            return "ambiguous";
         }
-        const operation = found[0];
-        return operation !== undefined && operation.data.enabled !== false;
+        return found[0];
     } catch (error) {
-        log.warn("could not read an Operation to check whether it is switched on", {
+        log.warn("could not read an Operation for the inbox", {
             operation: key,
             error: describeError(error),
         });
-        return false;
+        return undefined;
     }
 }
 

@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { eq, path, SPECS } from "../../src/a12/things.js";
 import { startInbox, type Inbox } from "../../src/inbound/server.js";
-import { buildHarness, type Harness } from "../support/harness.js";
+import { buildHarness, useFirefly, type Harness } from "../support/harness.js";
+import { FireflyFixture } from "../support/fireflyFixture.js";
 
 /**
  * The inbox, behind real HTTP.
@@ -21,6 +22,16 @@ const ALLOWED = ["bookkeeping.listAccounts", "bookkeeping.listTransactions"];
 
 let inbox: Inbox | undefined;
 
+// The dynamic bookkeeping Operations (ADR-0025) are reached through the Operation Host against this
+// in-process Firefly; the gate reads their flags off the Thing, so the door is opened with `things`.
+const fixture = new FireflyFixture();
+beforeAll(() => fixture.start());
+afterAll(() => fixture.stop());
+beforeEach(() => {
+    fixture.reset();
+    useFirefly(fixture);
+});
+
 afterEach(async () => {
     await inbox?.close();
     inbox = undefined;
@@ -28,8 +39,15 @@ afterEach(async () => {
 
 async function open(harness: Harness, allowlist: readonly string[] = ALLOWED): Promise<string> {
     // Port 0: the operating system picks a free one, so the suite never collides with itself or with
-    // whatever else is listening on this machine.
-    inbox = await startInbox({ port: 0, secret: SECRET, allowlist, registry: harness.registry });
+    // whatever else is listening on this machine. `things` is passed so the gate can read a dynamic
+    // Operation's flags off its Thing.
+    inbox = await startInbox({
+        port: 0,
+        secret: SECRET,
+        allowlist,
+        registry: harness.registry,
+        things: harness.things,
+    });
     return `http://127.0.0.1:${inbox.port}`;
 }
 
@@ -153,16 +171,18 @@ describe("the Runtime's inbox", () => {
     it("hands a failing Operation back as a failure, without dressing it as a refusal", async () => {
         const harness = buildHarness([]);
         // An allowed Operation whose *world* is broken — Firefly is down — as opposed to a call the
-        // gate declined. The tile renders the same error line either way, but conflating the two here
-        // would mean a refused call and an unreachable Firefly were indistinguishable in the log.
-        harness.firefly.listAccounts = () => Promise.reject(new Error("firefly is unreachable"));
+        // gate declined. A Dynamic Operation runs and returns an error *outcome* rather than throwing
+        // (a 404 from Firefly is a value it interprets, ADR-0025), so the door answers 200 with an
+        // error outcome — still plainly distinct from a 403 refusal, which is the property that matters.
+        fixture.down = true;
         const base = await open(harness);
 
         const { status, body } = await call(base, "bookkeeping.listAccounts");
 
-        expect(status).toBe(502);
-        expect(body["ok"]).toBe(false);
-        expect(String(body["reason"])).not.toBe("not-allowed");
+        expect(status).toBe(200);
+        const outcome = body["outcome"] as { kind: string; message?: string };
+        expect(outcome.kind).toBe("error");
+        expect(body["reason"]).not.toBe("not-allowed");
     });
 
     it("answers a health probe without a secret, and executes nothing", async () => {

@@ -11,8 +11,7 @@
 import { log } from "../log.js";
 import { ThingRepository, SPECS, byCreatedAt, nowIso, path as fieldPath, eq } from "../a12/things.js";
 import type { ModelSpec } from "../a12/things.js";
-import { FireflyError } from "../connectors/firefly.js";
-import type { FireflyConnector, PostingSplit } from "../connectors/firefly.js";
+import type { FireflyConnector } from "../connectors/firefly.js";
 import type { OperationContext, OperationImplementation, OperationOutcome } from "./registry.js";
 import { isAnswered } from "../watcher/watcher.js";
 import { readTextLayer } from "../readers/textLayer.js";
@@ -44,7 +43,12 @@ export interface VisionLimits {
 
 export interface OperationDeps {
     things: ThingRepository;
-    firefly: FireflyConnector;
+    /**
+     * No longer used by any Operation — the seven `bookkeeping.*` Operations are dynamic and reach
+     * Firefly through the Operation Host (ADR-0025). Kept optional so the existing callers need no
+     * change; the FireflyConnector still serves the demo loader and the health check.
+     */
+    firefly?: FireflyConnector;
     /**
      * The Content Store, for the two readers.
      *
@@ -90,74 +94,6 @@ const EXACT_MATCH_MAX_LENGTH = 100;
 const PAGE_SIZE_MAX = 100;
 
 /**
- * A calendar date, and nothing else — the shape every date argument on the Bookkeeping Operations is
- * documented to take. Anchored at both ends deliberately: an unanchored pattern would accept a date
- * with something appended to it, which is exactly the trailing junk this refuses.
- */
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-/**
- * The most transactions one call will fetch. A ceiling rather than a default, because the Operation
- * is `clientReadable` and its answer is assembled in memory in the process that runs the scan loop.
- */
-const TRANSACTIONS_LIMIT_MAX = 200;
-
-/**
- * Firefly's field names, in the vocabulary the model was actually given.
- *
- * The model only ever handles account *names* — `bookkeeping.listAccounts` returns names and the
- * connector resolves them to ids on the way out — so a 422 about `transactions.0.source_id` is
- * about a field it has no word for, quoting a number it has never seen.
- */
-const FIREFLY_FIELD_NAMES: Record<string, keyof PostingSplit> = {
-    source_id: "sourceAccount",
-    source_name: "sourceAccount",
-    destination_id: "destinationAccount",
-    destination_name: "destinationAccount",
-    budget_name: "budgetName",
-    category_id: "categoryName",
-    category_name: "categoryName",
-    currency_code: "currencyCode",
-    amount: "amount",
-    date: "date",
-    description: "description",
-    type: "type",
-    notes: "notes",
-};
-
-/**
- * A Firefly rejection, rewritten for the model that caused it.
- *
- * `details.errors` is keyed `transactions.<index>.<field>`, so the split and the field are both
- * recoverable — and once the field is known, so is the value the model supplied for it, which is
- * what replaces the internal id in Firefly's own sentence.
- */
-function describeRejection(error: FireflyError, splits: PostingSplit[]): string {
-    const errors = (error.details as { errors?: Record<string, string[]> } | undefined)?.errors;
-    if (!errors || Object.keys(errors).length === 0) return error.message;
-
-    const lines = new Set<string>();
-    for (const [key, messages] of Object.entries(errors)) {
-        const match = /^transactions\.(\d+)\.(.+)$/.exec(key);
-        const index = match ? Number(match[1]) : 0;
-        const field = match ? match[2]! : key;
-        const property = FIREFLY_FIELD_NAMES[field];
-        const supplied = property ? splits[index]?.[property] : undefined;
-        const label = property ?? field;
-        const where = splits.length > 1 ? ` (posting ${index + 1})` : "";
-        const said = messages
-            .join(" ")
-            // The internal id, replaced by the name the model actually gave.
-            .replace(/ID "\d+"/g, supplied ? `"${String(supplied)}"` : "that account")
-            .replace(/ or name ""\.?/g, "");
-        lines.add(
-            `${label}${where}${supplied === undefined ? "" : ` "${String(supplied)}"`}: ${said.trim()}`,
-        );
-    }
-    return `Firefly refused this posting.\n${[...lines].map((line) => `- ${line}`).join("\n")}`;
-}
-
-/**
  * The property that identifies a row within a repeating group.
  *
  * Merging by a key rather than appending is what makes both realistic model moves correct: "add
@@ -196,84 +132,6 @@ function mergeRows(group: string, existing: unknown, supplied: unknown): unknown
         else out[at] = { ...out[at], ...row };
     }
     return out;
-}
-
-/** One Firefly transaction group, reduced to the fields an Accountant reasons about. */
-function projectTransactionGroup(group: Record<string, unknown>): Array<Record<string, unknown>> {
-    const attributes = (group["attributes"] ?? {}) as Record<string, unknown>;
-    const splits = (attributes["transactions"] ?? []) as Array<Record<string, unknown>>;
-    return splits.map((split) => ({
-        transactionId: group["id"],
-        date: String(split["date"] ?? "").slice(0, 10),
-        description: split["description"],
-        amount: split["amount"],
-        currency: split["currency_code"],
-        from: split["source_name"],
-        to: split["destination_name"],
-        category: split["category_name"] ?? undefined,
-        budget: split["budget_name"] ?? undefined,
-        // The two links back to our own world: the idempotency key, and the Invoice's ThingID.
-        bookedUnderKey: split["external_id"] ?? undefined,
-        tags: split["tags"] ?? undefined,
-    }));
-}
-
-/**
- * How a booking reads in the approval question.
- *
- * This is the entire user-facing surface of *"nothing is booked without an answer"*, so it is a
- * sentence rather than a record: amount, where the money comes from, where it goes, the date, and
- * what it is for. A User who is shown a JSON blob learns to click yes without reading it, which is
- * how a safety feature becomes a formality.
- */
-function describePosting(args: Record<string, unknown>): string {
-    const splits = Array.isArray(args["splits"]) ? (args["splits"] as PostingSplit[]) : [];
-    // A model that emitted `splits` as a JSON string, or omitted it, gets the JSON fallback rather
-    // than a confident sentence about nothing. "Book a transaction with no postings?" is a safety
-    // question that describes no posting, which is worse than showing the User the raw call — the
-    // call is going to be refused by `execute` either way, and the fallback exists for exactly this.
-    if (splits.length === 0) return "";
-
-    // "€96.50 from *Payables* to *Expenses:Health*, dated …, for …" — the money and the two accounts
-    // are one phrase, so the commas fall where a reader would pause rather than after the verb.
-    const posting = (split: PostingSplit) =>
-        [
-            `${money(split.amount, split.currencyCode)} ` +
-                `from *${split.sourceAccount || "(no source)"}* ` +
-                `to *${split.destinationAccount || "(no destination)"}*`,
-            split.date ? `dated ${split.date}` : undefined,
-            split.description ? `for ${split.description}` : undefined,
-        ]
-            .filter(Boolean)
-            .join(", ");
-
-    if (splits.length === 1) return `Book ${posting(splits[0]!)}?`;
-    // The verb goes in the question and not in every bullet, so a list of postings reads as a list.
-    return [
-        `Book ${splits.length} postings${args["groupTitle"] ? ` under *${String(args["groupTitle"])}*` : ""}?`,
-        ``,
-        ...splits.map((split) => `- ${posting(split)}`),
-    ].join("\n");
-}
-
-/** `€96.50`, or `96.50 CHF` when it is not the currency the household keeps its books in. */
-function money(amount: unknown, currencyCode: unknown): string {
-    const value = String(amount ?? "?");
-    const currency = String(currencyCode ?? "EUR").toUpperCase();
-    return currency === "EUR" ? `€${value}` : `${value} ${currency}`;
-}
-
-/**
- * The current calendar month, as Firefly wants it.
- *
- * Firefly rejects `start === end` ("The start must be a date before end"), so a period always spans
- * the whole month rather than a single day.
- */
-function currentMonth(): { start: string; end: string } {
-    const now = new Date();
-    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0));
-    return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
 }
 
 /** `chase` also wakes the caller after five minutes to check; `wait` and `detach` do not. */
@@ -357,7 +215,7 @@ const VISION_LIMIT_DEFAULTS: VisionLimits = {
 };
 
 export function buildOperations(deps: OperationDeps): OperationImplementation[] {
-    const { things, firefly } = deps;
+    const { things } = deps;
     const vision = deps.vision ?? NULL_VISION_READER;
     const limits = deps.limits ?? VISION_LIMIT_DEFAULTS;
 
@@ -803,355 +661,6 @@ export function buildOperations(deps: OperationDeps): OperationImplementation[] 
                 ...(wakeAt ? { wakeAt } : {}),
                 note: `awaiting conversation ${child.thingId}`,
             };
-        },
-    };
-
-    const listAccounts: OperationImplementation = {
-        name: "bookkeeping.listAccounts",
-        mutating: false,
-        // Reads nothing from its context — it takes no arguments at all — so the Dashboard's Accounts
-        // Tile can call it with no Conversation behind it (ADR-0023).
-        clientReadable: true,
-        seed: {
-            name: "List accounts",
-            system: "Bookkeeping",
-            kind: "connector",
-            description:
-                "List the chart of accounts. Always look here before booking — account names must match " +
-                "exactly, and you may not invent one. Pass `type` to see only one kind: 'asset' is the " +
-                "money the household holds, 'expense' and 'revenue' are the other side of a booking, " +
-                "and 'liabilities' — plural — covers payables and receivables.",
-            parameters: {
-                type: "object",
-                properties: {
-                    type: str(
-                        "Optional: only accounts of this Firefly type. " +
-                            "asset | expense | revenue | liabilities.",
-                    ),
-                },
-            },
-        },
-        async execute(args): Promise<OperationOutcome> {
-            const accounts = await firefly.listAccounts(true);
-            // Filtered here rather than in the Connector's request, deliberately: the Connector caches
-            // the whole chart of accounts and `resolveAccountId` reads that same cache, so a
-            // type-narrowed fetch would either poison it or need a second one. The list is a
-            // household's, not an enterprise's.
-            //
-            // Compared case-insensitively because Firefly's *read* API answers `liabilities` where its
-            // *write* API accepts `liability` — the exact mismatch that made `listOpenItems` report
-            // nothing while thousands were owed (BUG-02). A caller who says either gets what they meant.
-            const wanted = String(args["type"] ?? "").trim().toLowerCase();
-            const matches = (accountType: string) =>
-                wanted === "" ||
-                accountType.toLowerCase() === wanted ||
-                // "liability" and "liabilities" are one kind under two spellings, and no caller
-                // should have to know which side of Firefly's API they are talking to.
-                (accountType.toLowerCase().startsWith("liabilit") && wanted.startsWith("liabilit"));
-
-            return {
-                kind: "value",
-                value: accounts
-                    .filter((account) => matches(account.type))
-                    .map((account) => ({
-                        name: account.name,
-                        type: account.type,
-                        balance: account.currentBalance,
-                        // The connector has always read this and this projection has always dropped
-                        // it. A balance without its currency is a number, not an amount — the Accounts
-                        // Tile cannot format one and a model reasoning about two accounts cannot
-                        // compare them.
-                        currency: account.currencyCode,
-                    })),
-            };
-        },
-    };
-
-    const postTransaction: OperationImplementation = {
-        name: "bookkeeping.postTransaction",
-        mutating: true,
-        describeCall: describePosting,
-        seed: {
-            name: "Book a transaction",
-            system: "Bookkeeping",
-            kind: "connector",
-            description:
-                "Book a balanced transaction into the books. Account names must already exist — call " +
-                "bookkeeping.listAccounts first. Safe to retry: booking the same thing twice is a no-op. " +
-                "The User must approve the exact posting before it happens: the first call is refused " +
-                "and asks them, and you are resumed to make the same call again once they have said yes.",
-            // The one Operation in the system that moves a number in someone's books, and therefore
-            // the one the README's "nothing is booked without an answer" is about. It is a **seed**:
-            // the Operation Thing carries the authoritative value, and the User owns it in both
-            // directions (ADR-0018, as amended).
-            //
-            // `bookkeeping.createAccount` deliberately does NOT carry it: it is granted to no
-            // Assistant (see ACCOUNTANT's grants), so the flag would only add a path nothing
-            // exercises.
-            requiresApproval: true,
-            parameters: {
-                type: "object",
-                properties: {
-                    groupTitle: str("A short title for the whole transaction."),
-                    thingId: str(
-                        "The ThingID of the Invoice this books. Always supply it: it links the journal " +
-                            "back to the Invoice, and it is the only way a repeat of this posting can be " +
-                            "recognised — the idempotency key differs between Turns, so it cannot.",
-                    ),
-                    splits: {
-                        type: "array",
-                        description: "The postings. Usually one.",
-                        items: {
-                            type: "object",
-                            properties: {
-                                type: { type: "string", enum: ["withdrawal", "deposit", "transfer"] },
-                                date: str("yyyy-mm-dd"),
-                                amount: str("A positive decimal, e.g. \"184.30\"."),
-                                description: str("What this posting is."),
-                                sourceAccount: str("Exact name of the account money leaves."),
-                                destinationAccount: str("Exact name of the account money arrives at."),
-                                currencyCode: str(
-                                    "The amount's currency, if it is not the account's own. A posting in " +
-                                        "another currency is refused rather than booked at the same " +
-                                        "number — convert it first, or ask the User.",
-                                ),
-                                budgetName: str("Optional budget to charge."),
-                                categoryName: str("Optional category."),
-                                notes: str("Optional notes."),
-                            },
-                            required: [
-                                "type",
-                                "date",
-                                "amount",
-                                "description",
-                                "sourceAccount",
-                                "destinationAccount",
-                            ],
-                        },
-                    },
-                },
-                required: ["splits"],
-            },
-        },
-        async execute(args, context): Promise<OperationOutcome> {
-            const splits = (args["splits"] ?? []) as PostingSplit[];
-            if (!Array.isArray(splits) || splits.length === 0) {
-                return { kind: "error", message: "postTransaction needs at least one split." };
-            }
-            let result;
-            try {
-                result = await firefly.postTransaction({
-                    groupTitle: args["groupTitle"] ? String(args["groupTitle"]) : undefined,
-                    externalId: context.idempotencyKey,
-                    thingId: args["thingId"] ? String(args["thingId"]) : undefined,
-                    splits,
-                });
-            } catch (error) {
-                if (!(error instanceof FireflyError)) throw error;
-                // Translated here rather than left to the generic error path, because only the
-                // caller knows which account *name* the model supplied for the id Firefly is
-                // complaining about. The raw 422 stays in the log for whoever has to debug Firefly.
-                log.error("firefly refused a posting", {
-                    status: error.status,
-                    message: error.message,
-                    details: error.details,
-                });
-                return { kind: "error", message: describeRejection(error, splits) };
-            }
-            return {
-                kind: "value",
-                value: {
-                    transactionId: result.id,
-                    alreadyExisted: result.alreadyExisted,
-                },
-            };
-        },
-        async reconcile(_args, context): Promise<OperationOutcome | undefined> {
-            // The one that would cost real money. Firefly carries our key in `external_id`, so
-            // this is a question we can actually answer rather than a guess.
-            const landed = await firefly.findByExternalId(context.idempotencyKey);
-            return landed
-                ? { kind: "value", value: { transactionId: landed.id, alreadyExisted: true } }
-                : {
-                      kind: "error",
-                      message:
-                          "This booking was interrupted before it reached the books, so nothing was posted. Book it again if it is still right.",
-                  };
-        },
-    };
-
-    const listTransactions: OperationImplementation = {
-        name: "bookkeeping.listTransactions",
-        mutating: false,
-        /** Reads only its `args`; the Transactions Tile supplies a date window (ADR-0023). */
-        clientReadable: true,
-        seed: {
-            name: "List transactions",
-            system: "Bookkeeping",
-            kind: "connector",
-            description:
-                "The register: transactions in a date range, optionally for one account. Use this to " +
-                "check what has already been booked before booking something again.",
-            parameters: {
-                type: "object",
-                properties: {
-                    start: str("First day to include, yyyy-mm-dd."),
-                    end: str("Last day to include, yyyy-mm-dd. Must be after start."),
-                    account: str("Optional: restrict to one account, by its exact name."),
-                    limit: num(`Maximum transactions (default 25, at most ${TRANSACTIONS_LIMIT_MAX}).`),
-                },
-                required: ["start", "end"],
-            },
-        },
-        async execute(args): Promise<OperationOutcome> {
-            // Both callers are strangers in different ways: an LLM writes a date from a sentence, and
-            // — since this Operation became `clientReadable` (ADR-0023) — a browser writes one from a
-            // form. The Connector now encodes what it is given, so a stray `&` can no longer steer the
-            // outbound request; refusing it here as well means the caller is told *why* rather than
-            // quietly receiving a window it did not ask for.
-            const start = String(args["start"] ?? "");
-            const end = String(args["end"] ?? "");
-            for (const [field, value] of [["start", start], ["end", end]] as const) {
-                if (!ISO_DATE.test(value)) {
-                    return {
-                        kind: "error",
-                        message:
-                            `\`${field}\` must be a calendar date written yyyy-mm-dd, e.g. 2026-01-31 — ` +
-                            `got "${value}". Give the first and last day of the window explicitly.`,
-                    };
-                }
-            }
-
-            const groups = await firefly.listTransactions({
-                start,
-                end,
-                accountName: args["account"] ? String(args["account"]) : undefined,
-                // Clamped, because the response is buffered into the process that runs the scan loop:
-                // a browser asking for a million rows would be asking the Runtime to stop watching.
-                limit: Math.min(
-                    TRANSACTIONS_LIMIT_MAX,
-                    Math.max(1, Number(args["limit"] ?? 25) || 25),
-                ),
-            });
-            // Projected rather than passed through: a Firefly group carries several dozen fields per
-            // split, and a register the model cannot read in one glance is a register it will not use.
-            return { kind: "value", value: groups.flatMap(projectTransactionGroup) };
-        },
-    };
-
-    const getBalance: OperationImplementation = {
-        name: "bookkeeping.getBalance",
-        mutating: false,
-        /** Reads only its `args`. Marked for symmetry; the Dashboard uses listAccounts instead. */
-        clientReadable: true,
-        seed: {
-            name: "Account balance",
-            system: "Bookkeeping",
-            kind: "connector",
-            description: "The current balance of one account.",
-            parameters: {
-                type: "object",
-                properties: { account: str("Exact account name.") },
-                required: ["account"],
-            },
-        },
-        async execute(args): Promise<OperationOutcome> {
-            return { kind: "value", value: await firefly.getBalance(String(args["account"] ?? "")) };
-        },
-    };
-
-    const listOpenItems: OperationImplementation = {
-        name: "bookkeeping.listOpenItems",
-        mutating: false,
-        seed: {
-            name: "List open items",
-            system: "Bookkeeping",
-            kind: "connector",
-            description:
-                "Unpaid invoices and unclaimed reimbursements — the non-zero balances on payable and " +
-                "receivable accounts.",
-            parameters: { type: "object", properties: {} },
-        },
-        async execute(): Promise<OperationOutcome> {
-            return { kind: "value", value: await firefly.listOpenItems() };
-        },
-    };
-
-    const getBudgetReport: OperationImplementation = {
-        name: "bookkeeping.getBudgetReport",
-        mutating: false,
-        seed: {
-            name: "Budget report",
-            system: "Bookkeeping",
-            kind: "connector",
-            description:
-                "Each budget's target and what has been spent against it, for a period. Defaults to the " +
-                "current calendar month. A budget with no target set for the period reports no limit, " +
-                "which is not the same as a target of zero.",
-            parameters: {
-                type: "object",
-                properties: {
-                    start: str(
-                        "First day of the period, yyyy-mm-dd. Defaults to the 1st of this month.",
-                    ),
-                    end: str("Last day of the period, yyyy-mm-dd. Defaults to the end of this month."),
-                },
-            },
-        },
-        async execute(args): Promise<OperationOutcome> {
-            // A period is required by Firefly, not optional: without one it reports `spent: null` for
-            // every budget, which reads as "nothing spent". ACCOUNTING.md always specified
-            // `getBudgetReport(period)`; the parameter simply was not there.
-            const month = currentMonth();
-            const start = args["start"] ? String(args["start"]) : month.start;
-            const end = args["end"] ? String(args["end"]) : month.end;
-            return { kind: "value", value: await firefly.listBudgets({ start, end }) };
-        },
-    };
-
-    const createAccount: OperationImplementation = {
-        name: "bookkeeping.createAccount",
-        mutating: true,
-        seed: {
-            name: "Create an account",
-            system: "Bookkeeping",
-            kind: "connector",
-            description: "Add an account to the chart of accounts.",
-            parameters: {
-                type: "object",
-                properties: {
-                    name: str("The account name."),
-                    type: str("asset | expense | revenue | liability."),
-                    currencyCode: str("Default EUR."),
-                },
-                required: ["name", "type"],
-            },
-        },
-        async execute(args): Promise<OperationOutcome> {
-            // Search-then-create, so a repeated Turn cannot produce two accounts with one name —
-            // the silent chart corruption this connector exists to prevent.
-            const name = String(args["name"] ?? "");
-            const accounts = await firefly.listAccounts(true);
-            const existing = accounts.find(
-                (account) => account.name.toLowerCase() === name.trim().toLowerCase(),
-            );
-            if (existing) return { kind: "value", value: { ...existing, alreadyExisted: true } };
-            const created = await firefly.createAccount({
-                name,
-                type: String(args["type"] ?? "expense"),
-                currencyCode: args["currencyCode"] ? String(args["currencyCode"]) : undefined,
-            });
-            return { kind: "value", value: created };
-        },
-        async reconcile(args): Promise<OperationOutcome> {
-            const name = String(args["name"] ?? "");
-            const accounts = await firefly.listAccounts(true);
-            const existing = accounts.find(
-                (account) => account.name.toLowerCase() === name.trim().toLowerCase(),
-            );
-            return existing
-                ? { kind: "value", value: { ...existing, alreadyExisted: true } }
-                : { kind: "error", message: `This call was interrupted; no account named "${name}" exists.` };
         },
     };
 
@@ -1658,13 +1167,6 @@ export function buildOperations(deps: OperationDeps): OperationImplementation[] 
         thingstoreSearch,
         askUser,
         assistantCall,
-        listAccounts,
-        postTransaction,
-        listTransactions,
-        getBalance,
-        listOpenItems,
-        getBudgetReport,
-        createAccount,
         requestText,
         emailSend,
         emailFetch,

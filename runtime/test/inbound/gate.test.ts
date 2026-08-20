@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { decide } from "../../src/inbound/gate.js";
 import { OperationRegistry, type OperationImplementation } from "../../src/operations/registry.js";
+import { OperationHost } from "../../src/operations/dynamic/host.js";
+import type { DynamicOperationConfig } from "../../src/config.js";
+import type { Operation } from "../../src/domain/types.js";
 
 /**
  * The gate, alone.
@@ -123,5 +126,86 @@ describe("the External Call gate", () => {
 
         expect(new Set(reasons).size).toBe(1);
         expect(reasons[0]).toBe("not-allowed");
+    });
+});
+
+/**
+ * The same gate, for a Dynamic Operation (ADR-0025). Three of the four flags now come from the
+ * Operation Thing rather than from code, and the allowlist — the one control not in the store — is
+ * what carries the weight. This is why the Dashboard's two now-dynamic reads keep working, and why a
+ * mis-edited `mutating` or `clientReadable` on a Thing still cannot open a write route.
+ */
+function hostedRegistry(): OperationRegistry {
+    const config: DynamicOperationConfig = {
+        timeoutMs: 20_000,
+        maxBodyBytes: 4 * 1024 * 1024,
+        memoryMb: 128,
+        cacheTtlMs: 300_000,
+        egresses: { bookkeeping: { url: "http://127.0.0.1:9/", token: "t" } },
+    };
+    return new OperationRegistry(new OperationHost(config));
+}
+
+function dynamicThing(overrides: Partial<Operation> = {}): Operation {
+    return {
+        key: "bookkeeping.listAccounts",
+        name: "bookkeeping.listAccounts",
+        system: "Bookkeeping",
+        kind: "connector",
+        implementation: "dynamic",
+        source: "function execute() { return { kind: 'value', value: [] }; }",
+        egress: "bookkeeping",
+        parameters: '{"type":"object","properties":{}}',
+        clientReadable: true,
+        mutating: false,
+        enabled: true,
+        ...overrides,
+    };
+}
+
+describe("the gate for a Dynamic Operation", () => {
+    it("admits an allowlisted, client-readable, non-mutating, unguarded dynamic Operation", () => {
+        const verdict = decide("bookkeeping.listAccounts", hostedRegistry(), ALLOWED, dynamicThing());
+        expect(verdict.allowed).toBe(true);
+        expect(verdict.allowed && typeof verdict.execute).toBe("function");
+    });
+
+    it("refuses the same dynamic Operation when it is off the allowlist", () => {
+        expect(decide("bookkeeping.listAccounts", hostedRegistry(), [], dynamicThing()).allowed).toBe(false);
+    });
+
+    it("refuses a dynamic Operation the Thing marks mutating", () => {
+        const verdict = decide(
+            "bookkeeping.listAccounts",
+            hostedRegistry(),
+            ALLOWED,
+            dynamicThing({ mutating: true }),
+        );
+        expect(verdict.allowed).toBe(false);
+    });
+
+    it("refuses a dynamic Operation whose clientReadable is unset", () => {
+        const verdict = decide(
+            "bookkeeping.listAccounts",
+            hostedRegistry(),
+            ALLOWED,
+            dynamicThing({ clientReadable: undefined }),
+        );
+        expect(verdict.allowed).toBe(false);
+    });
+
+    it("refuses a dynamic Operation the Thing marks as requiring an approval", () => {
+        const verdict = decide(
+            "bookkeeping.listAccounts",
+            hostedRegistry(),
+            ALLOWED,
+            dynamicThing({ requiresApproval: true }),
+        );
+        expect(verdict.allowed).toBe(false);
+    });
+
+    it("refuses when the Thing could not be read, rather than trusting a dynamic call blind", () => {
+        // No `thing` passed: a Dynamic Operation reads its flags from it, so absence must fail closed.
+        expect(decide("bookkeeping.listAccounts", hostedRegistry(), ALLOWED, undefined).allowed).toBe(false);
     });
 });

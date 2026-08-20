@@ -15,6 +15,7 @@ import { A12Client } from "../a12/client.js";
 import { ThingRepository } from "../a12/things.js";
 import { FireflyConnector } from "../connectors/firefly.js";
 import { buildOperations } from "../operations/implementations.js";
+import { loadBookkeepingSeeds } from "../operations/bookkeepingSeeds.js";
 import { sleep } from "../loop/advance.js";
 import { bootstrap, setPaused } from "./bootstrap.js";
 
@@ -70,7 +71,11 @@ async function main(): Promise<void> {
         },
     });
 
-    const result = await bootstrap(things, operations);
+    // The seven bookkeeping Operations are dynamic (ADR-0025): their Source lives on the Thing, not
+    // in `buildOperations`. Their seeds are loaded from disk and passed alongside the built-ins;
+    // bootstrap creates the Things a fresh install needs, and the migration switches an installed one.
+    const dynamic = loadBookkeepingSeeds();
+    const result = await bootstrap(things, [...operations, ...dynamic]);
     log.info("bootstrap complete", {
         created: result.created,
         updated: result.updated,
@@ -78,6 +83,14 @@ async function main(): Promise<void> {
         operationsCreated: result.operationsCreated.length,
         operationsUpdated: result.operationsUpdated.length,
     });
+    if (result.divergedSource.length > 0) {
+        // The same stickiness as the descriptions, and the more important one: a developer who
+        // improved shipped Source reaches fresh installs only. Named here so nobody has to discover it.
+        log.warn(
+            "these Operations carry Source that differs from their seed; bootstrap changed nothing",
+            { operations: result.divergedSource },
+        );
+    }
     if (result.divergedDescriptions.length > 0) {
         // Not an error and not a nag: the stored prose is the User's, and this is the one place the
         // stickiness is visible instead of mysterious. A developer who edited a seed description

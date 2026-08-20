@@ -35,7 +35,7 @@ Spelling throughout the project is British English.
 [DECISIONS.md](DECISIONS.md) (decisions taken while building, with their alternatives and
 reversal costs) · [BUGS.md](BUGS.md) (43 reproduced defects from the 2026-08-09 hunt; each entry
 records whether it still stands) ·
-[docs/adr/](docs/adr/) (twenty-four architecture decisions) ·
+[docs/adr/](docs/adr/) (twenty-five architecture decisions) ·
 [RESEARCH_INDEX.md](RESEARCH_INDEX.md) (the four research papers in
 [specs/research/](specs/research/), each with what it settled and what it left open: what
 Bookkeeping must provide and why Firefly III, how the agentic loop should work and why no workflow
@@ -149,7 +149,7 @@ flowchart LR
 
     subgraph conn["Connectors — translation lives here, and only here"]
         direction LR
-        CF["Firefly Connector<br/>connectors/firefly.ts<br/>REST ↔ Things"]
+        CF["Bookkeeping — dynamic Operations<br/>source on the Thing, run by the<br/>Operation Host · REST ↔ Things (ADR-0025)"]
         CM["Manual Connector<br/>returns pending, raises an<br/>Open Question of kind perform"]
         CB["Bank Connector<br/>not written yet<br/>— FinTS one day"]
     end
@@ -177,8 +177,10 @@ Three things this buys, all of them things you would otherwise have to remember:
 
 - **The Operation is the seam, not the System.** An Assistant reaches a capability, never a host.
   `System` records `Bookkeeping` — the role — and Firefly III is only its current occupant, so
-  replacing the ledger is a Connector rewrite behind an unchanged catalogue: no Assistant, prompt or
-  grant changes ([ADR-0019](docs/adr/0019-an-operation-is-a-thing.md)).
+  replacing the ledger is behind an unchanged catalogue: no Assistant, prompt or grant changes
+  ([ADR-0019](docs/adr/0019-an-operation-is-a-thing.md)). And for `Bookkeeping` that rewrite is now
+  editing the Operations' own stored source in the web application, not recompiling a Connector
+  ([ADR-0025](docs/adr/0025-a-dynamic-operation-carries-its-implementation.md)).
 - **A human is just an external System with a slow Connector.** `bank.sendMoney` is you in an
   online-banking tab today and a FinTS call tomorrow; the dashed box is the whole of the change.
   Which is also why Manual Connectors are *not* a safety mechanism — that protection disappears the
@@ -347,6 +349,12 @@ Then:
 To watch an Assistant work, `just logs runtime`. A Conversation's transcript is also stored on the
 Conversation Thing and reads as a thread in the UI, under a header that says which Assistant, about
 what, where it stands and what it has cost — and it carries the pending question, if there is one.
+The header names things the way a person would: the Conversation's own **Title** leads, bold; the
+Assistant is **🤖 + its Name** (resolved from the stored key, falling back to the key if it no longer
+resolves); and what the Conversation is *about* — or the Conversation that *called* it — is named by
+the Thing's own title with its Model in brackets (e.g. *Acme GmbH · #2024-0417 (Invoice)*), as a link
+that opens a **read-only summary of that Thing in a popup**, so checking it costs a glance and leaves the
+Transcript where it was rather than navigating away.
 
 ### The language model
 
@@ -727,12 +735,15 @@ Conversations with a Turn owing, and schedules whose due instant has come round 
 **scan 0**, the letterbox, which is the one pass that does not look in the store at all and runs on
 its own slower clock. The **Loop Driver**
 is one function, `advance(conversationId)`,
-that takes one Conversation exactly one Turn forward and returns holding nothing. Twenty
+that takes one Conversation exactly one Turn forward and returns holding nothing. Thirteen built-in
 **Implementations** are registered — ThingStore reads and writes, `ui.askUser`, `assistant.call`,
-seven `bookkeeping.*` operations against Firefly, the two document readers, `email.receive` and four
-Manual Connectors — and each Turn joins
-them by key to the catalogue of Operation Things it reads from the store, so what an Assistant is
-offered is the Implementation's code and the Operation's prose, flags and kill switch together
+the two document readers, `email.receive` and four Manual Connectors — and the seven `bookkeeping.*`
+Operations are *dynamic*: their TypeScript is stored on the Operation Thing and run by the **Operation
+Host** against Firefly, not compiled in
+([ADR-0025](docs/adr/0025-a-dynamic-operation-carries-its-implementation.md)). Each Turn joins both by
+key to the catalogue of Operation Things it reads from the store — a two-source join, compiled code or
+stored source — so what an Assistant is offered is the Implementation and the Operation's prose, flags
+and kill switch together, and it cannot tell which kind it is holding
 ([ADR-0019](docs/adr/0019-an-operation-is-a-thing.md)). It authenticates as a dedicated
 `runtime` user with no `DOCUMENT_DELETE`, no `MODEL_MANAGE` ([D-007](DECISIONS.md)) and no
 `ASSISTANT_WRITE` ([D-007a](DECISIONS.md)) — a Keycloak
@@ -1059,7 +1070,7 @@ This is one running vertical slice, not a finished system. What is honestly miss
 │   ├── system/               the system as it stands: domain, architecture, functional
 │   ├── research/             the research papers, and the sources they were read from
 │   └── changes/              proposal, domain, architecture and plan, per change in flight
-├── docs/                     adr/ — twenty-four architecture decision records; logo/ — design explorations
+├── docs/                     adr/ — twenty-five architecture decision records; logo/ — design explorations
 ├── assets/                   the logo and its derived files
 ├── buildSrc/, quality/       Gradle build logic and the Checkstyle configuration
 └── licenses/                 licence texts for the third-party notices

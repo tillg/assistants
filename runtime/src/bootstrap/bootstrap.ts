@@ -30,6 +30,12 @@ export interface BootstrapReport {
      * exactly as they are. See the rule below.
      */
     divergedDescriptions: string[];
+    /**
+     * Dynamic Operations whose stored Source no longer matches the seed's — named, and changed
+     * nowhere (ADR-0025). Same rule as `divergedDescriptions`: a developer who improves shipped
+     * Source reaches fresh installs only, and this is where they find out.
+     */
+    divergedSource: string[];
 }
 
 /**
@@ -75,31 +81,36 @@ export async function bootstrap(
     const operationsCreated: string[] = [];
     const operationsUpdated: string[] = [];
     const divergedDescriptions: string[] = [];
+    const divergedSource: string[] = [];
 
     for (const implementation of implementations) {
         const seed = implementation.seed;
         const key = `operation:${implementation.name}`;
         // The mechanical mirror, and nothing else. `ThingRepository.update` merges onto the raw
-        // stored document, so these four are exactly enough to leave the other five alone — the
-        // same property `setPaused` relies on.
+        // stored document, so these are exactly enough to leave the decision fields alone — the
+        // same property `setPaused` relies on. `implementation` joins it (ADR-0025): it is a fact
+        // about how the Operation is built, and a Thing that has drifted from it is broken, not
+        // customised.
         const mirror = {
             system: seed.system,
             kind: seed.kind,
             parameters: JSON.stringify(seed.parameters),
             mutating: implementation.mutating,
+            implementation: seed.implementation ?? "built-in",
         };
         const existing = await things.findByIdempotencyKey<Operation>(SPECS.Operation_DM, key);
         if (existing) {
             // Written only where the mirror actually differs. `update` stamps `updatedAt`, so an
-            // unconditional write moved the timestamp on all seventeen Operations on every run —
-            // and therefore on every `just dev`. That is the field the audit trail rests on: it is
-            // supposed to record who weakened an approval and when, not when bootstrap last ran.
+            // unconditional write moved the timestamp on all Operations on every run — and therefore
+            // on every `just dev`. That is the field the audit trail rests on: it is supposed to
+            // record who weakened an approval and when, not when bootstrap last ran.
             // The report follows: `operationsUpdated` now names the Operations that changed.
             const differs =
                 (existing.data.system ?? "") !== mirror.system ||
                 (existing.data.kind ?? "") !== mirror.kind ||
                 (existing.data.parameters ?? "") !== mirror.parameters ||
-                (existing.data.mutating ?? false) !== mirror.mutating;
+                (existing.data.mutating ?? false) !== mirror.mutating ||
+                (existing.data.implementation ?? "built-in") !== mirror.implementation;
             if (differs) {
                 await things.update(SPECS.Operation_DM, existing.docRef, mirror);
                 operationsUpdated.push(implementation.name);
@@ -111,6 +122,13 @@ export async function bootstrap(
                 const shown = existing.data.name || seed.name;
                 divergedDescriptions.push(`${shown} (${implementation.name})`);
             }
+            // Source is on the decision side, never re-applied — so a developer who improves shipped
+            // Source reaches fresh installs only, and the divergence is reported by name rather than
+            // discovered. Overwriting it would make `just dev` silently revert the User's Operation.
+            if (seed.source !== undefined && (existing.data.source ?? "") !== seed.source) {
+                const shown = existing.data.name || seed.name;
+                divergedSource.push(`${shown} (${implementation.name})`);
+            }
             continue;
         }
         await things.create<Record<string, unknown>>(SPECS.Operation_DM, {
@@ -119,6 +137,12 @@ export async function bootstrap(
             description: seed.description,
             ...mirror,
             requiresApproval: seed.requiresApproval ?? false,
+            // The decision-side dynamic fields, written once at creation (ADR-0025).
+            ...(seed.source !== undefined ? { source: seed.source } : {}),
+            ...(seed.language !== undefined ? { language: seed.language } : {}),
+            ...(seed.egress !== undefined ? { egress: seed.egress } : {}),
+            ...(seed.timeoutMs !== undefined ? { timeoutMs: seed.timeoutMs } : {}),
+            ...(seed.clientReadable !== undefined ? { clientReadable: seed.clientReadable } : {}),
             // A newly created Operation is switched on. Nobody has decided otherwise yet.
             enabled: true,
             idempotencyKey: key,
@@ -173,7 +197,15 @@ export async function bootstrap(
         created.push("runtime-state");
     }
 
-    return { created, updated, kept, operationsCreated, operationsUpdated, divergedDescriptions };
+    return {
+        created,
+        updated,
+        kept,
+        operationsCreated,
+        operationsUpdated,
+        divergedDescriptions,
+        divergedSource,
+    };
 }
 
 /** Set or clear the global kill switch. Used by `just pause` / `just resume` and the demo loader. */

@@ -37,11 +37,9 @@
 import { expect, test, type Page } from "../../fixtures";
 import { OpenQuestionPage } from "../../pages/OpenQuestionPage";
 import { OverviewPage } from "../../pages/OverviewPage";
-import { DataType } from "../../types";
 import { AppTestID, TestID } from "../../types/testIds";
 import { createArrivingDocument, RECEPTIONIST, waitForRaisedQuestion, type RaisedQuestion } from "../../utils/agents";
 import { AGENT_TIMEOUT_MS } from "../../utils/config";
-import { getByLabelWithOptionalAsterisk } from "../../utils/locators";
 import { ThingStore } from "../../utils/thingstore";
 
 const MODULE = "Conversations";
@@ -144,7 +142,11 @@ test.describe("Conversation transcript", () => {
 
         const header = transcript.getByTestId(AppTestID.TRANSCRIPT_HEADER);
         await expect(header).toBeVisible();
-        await expect(header.getByTestId(AppTestID.TRANSCRIPT_WHO)).toContainText(question.assistantKey);
+        // The Assistant is named by its AssistantBadge — the resolved display Name (a case variant of the
+        // stored key for the seeded assistants), or the key itself while the resolving read is in flight.
+        await expect(header.getByTestId(AppTestID.TRANSCRIPT_WHO)).toContainText(
+            new RegExp(question.assistantKey, "i")
+        );
         await expect(header.getByTestId(AppTestID.TRANSCRIPT_BLOCKED)).toBeVisible();
         // A lower bound, never a total: a Turn that threw before writing an Entry recorded nothing.
         await expect(header.getByTestId(AppTestID.TRANSCRIPT_COST)).toContainText("≥");
@@ -156,6 +158,11 @@ test.describe("Conversation transcript", () => {
         expect(await header.evaluate((element) => getComputedStyle(element).position)).toBe("sticky");
 
         // And that it does stay put. Scrolling to the last Entry must not take the header with it.
+        // Bring the box itself into view first: a *blocked* Conversation opens auto-scrolled toward the
+        // answer area (a separate behavior), which can leave the box straddling the fold — orthogonal to
+        // the sticky-within-the-box behavior this asserts, which is that the internal thread scroll below
+        // does not carry the header away.
+        await transcript.evaluate((element) => element.scrollIntoView({ block: "start" }));
         await transcript.evaluate((element) => {
             element.scrollTop = element.scrollHeight;
         });
@@ -204,25 +211,33 @@ test.describe("Conversation transcript", () => {
         ).toHaveLength(0);
     });
 
-    test("should follow the header's about link to the subject Thing", async ({ getPageAs }) => {
+    test("should open the subject Thing as a read-only summary from the header's link", async ({ getPageAs }) => {
         const page = await getPageAs("admin");
         const overview = new OverviewPage(page);
 
         await (await openSubjectConversation(page)).click();
         await overview.finishedLoading();
 
-        const link = page.getByTestId(AppTestID.TRANSCRIPT_ABOUT_LINK);
+        // The subject is named the one way the system now names a Thing: its title, its Model in
+        // brackets, as a link. (The subject here is the Document that triggered the Conversation.)
+        const link = page.getByTestId(AppTestID.THING_LINK);
         await expect(link).toBeVisible();
+        await expect(link).toContainText("(Document)");
         await link.click();
-        await overview.finishedLoading();
 
-        // The Document's own form, with the Documents list beside it — reading a Thing is a
-        // different act, not a step inside a conversation, so its own module is the master.
-        const form = page.getByRole("form").first();
-        await expect(form).toBeVisible({ timeout: 15_000 });
-        // `toContainText` cannot see this: a Document's Title lives in an input's *value*, which is
-        // not text content. Asserting the field is also the stronger claim — it says we landed on
-        // this Document, not merely on a page that happens to quote its text somewhere.
-        await expect(getByLabelWithOptionalAsterisk(form, "Title", DataType.String)).toHaveValue(arrived.title);
+        // Reading a Thing is now a reading *in place*: a read-only summary over the current screen, not a
+        // navigation into the Documents module. It leads with the Thing's identity and shows its data as
+        // text (never inputs) — so it holds the Document's Title, and it is not editable.
+        const summary = page.getByTestId("thing-summary");
+        await expect(summary).toBeVisible({ timeout: 15_000 });
+        await expect(page.getByTestId("thing-summary-title")).toContainText("(Document)");
+        await expect(summary).toContainText(arrived.title);
+        // Read-only: reads may cross documents, writes may not — the summary is text, with no form fields.
+        await expect(summary.getByRole("textbox")).toHaveCount(0);
+
+        // Dismissed with Escape, it returns to exactly where the reader was — the Transcript, in place.
+        await page.keyboard.press("Escape");
+        await expect(summary).toBeHidden();
+        await expect(page.getByTestId(AppTestID.CONVERSATION_TRANSCRIPT)).toBeVisible();
     });
 });

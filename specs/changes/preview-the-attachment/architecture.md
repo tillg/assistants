@@ -7,16 +7,22 @@ The whole change, if the unknown resolves the easy way:
 ```mermaid
 flowchart LR
     U["the User opens<br/>a Document"] --> FE["Form Engine<br/>Document_FM"]
-    FE --> AP["AttachmentPreview<br/>client/src/components/document/ — new"]
+    FE --> AP["AttachmentPreview<br/>mime dispatcher — new"]
     AP -->|"1. how do I get the bytes?"| L["platformAttachmentLoader<br/>already wired in appsetup.ts"]
     L -->|"JSON-RPC"| S[("server")]
     AP -->|"2. fetch, with the User's token"| S
-    AP -->|"3. Blob → objectURL → iframe"| V["the browser's own<br/>PDF viewer"]
+    AP -->|"3. dispatch on mimeType"| V["PDF → sandboxed iframe<br/>text → &lt;pre&gt; · image → A12"]
 
     style AP fill:#fff3e0,stroke:#e65100
 ```
 
 One orange box. Everything else exists.
+
+**One dispatcher, several file types.** The box is not PDF-specific: it fetches bytes the same way for
+every attachment and then dispatches on MIME type to a renderer. PDF and plain text are rendered here;
+images stay A12's job; everything else is a registered renderer away. See
+[Extending to other file types](#extending-to-other-file-types) — it is the reason this is one component
+and not a PDF widget.
 
 **The browser renders the PDF, not us.** Chrome, Safari and Firefox all ship a PDF viewer with paging,
 zoom, text selection, search and print. Putting a blob URL in an `<iframe>` gets all of it for nothing.
@@ -89,7 +95,10 @@ disposition header is.
 ### Therefore: a server route, and this change is not client-only
 
 An inline preview needs a **same-origin, authenticated endpoint on the application server** that reads
-the attachment and re-serves it with `Content-Disposition: inline`. Two shapes, and the choice matters:
+the attachment and re-serves it with `Content-Disposition: inline` — under the attachment's own
+content-type, knowing nothing about whether it is a PDF, an image or text. That indifference is what
+lets one route serve every file type the dispatcher supports, now and later. Two shapes, and the choice
+matters:
 
 | | re-serve inline | return bytes for a blob URL |
 |---|---|---|
@@ -125,7 +134,7 @@ interface AttachmentPreviewProps {
 
 | Concern | Decision |
 |---|---|
-| **when it renders** | `mimeType === "application/pdf"` and an `attachmentId` is present. Anything else renders nothing at all — not an empty frame, not a placeholder |
+| **when it renders** | when the registry has a renderer for `mimeType` and an `attachmentId` is present — `application/pdf` and `text/plain` today, images left to A12. A type with no registered renderer renders nothing at all — not an empty frame, not a placeholder |
 | **how it fetches** | from the same-origin server route, or via `platformAttachmentLoader` + a proxied `/cs`. **Not** a hand-rolled token fetch: there is none in `client/src` today and this should not be the first |
 | **tickets** | mint a fresh one per preview. Never reuse, and never spend the one the Download menu item is about to use |
 | **not through `useExternalCall`** | that seam is `ConnectorLocator → getServerConnector().fetchData()` with a `JsonRpc2Request` payload — JSON-RPC framing, wrong for a binary body, and a second way of attaching a token for no gain |
@@ -133,11 +142,75 @@ interface AttachmentPreviewProps {
 | **states** | loading, rendered, and refused. Refused shows the filename and a download link — the behaviour we have today — because a preview that fails must degrade to the thing it replaced |
 | **read-only** | it never writes a field, never dispatches a form action, and does not participate in validation or dirty state |
 
-**Height is a real design question, not a detail.** An invoice is portrait A4 and a form column is not.
-Too short and it previews the letterhead only, which is worse than useless — it is the one part of an
-invoice that carries no information. A fixed tall frame with the browser's own scrolling, or a
-collapsed strip that expands, are the two honest options; the second is better if the Documents list is
-being triaged and worse if a single invoice is being read.
+**Layout — beneath was not enough; it is now side-by-side with a reveal.** The first cut placed the
+preview as a full-width pane *beneath* the form, and in a real browser that failed the feature's own
+promise: the Documents screen is a master-detail (overview list left, form right ~690px wide), so a
+pane beneath a full-height Document form sits below the fold — the User opens a Document and sees the
+form, not the document. The shipped layout instead puts the form and the preview in a **`flex-wrap`
+row** — side by side when both fit, the preview wrapping beneath on a narrow window — and the pane
+**scrolls itself into view** when it has wrapped into the lower half of the viewport, so a Document
+always opens with its document visible (measured: 3% → 100% of the invoice page on open). Every
+non-Document form is the row's only child and stays full-width. Within the preview each renderer sizes
+itself differently:
+
+- **PDF** renders in a **centered A4-shaped frame**, sized by height rather than width. `aspect-ratio:
+  210 / 297` (A4 is 210×297 mm, so 1 : 1.414 portrait), a viewport-relative height (~`80vh`) so one
+  page fits without scrolling the outer page, width derived from the ratio, `margin-inline: auto` to
+  centre it. Multi-page PDFs scroll inside the browser's own viewer. This is height-driven on purpose:
+  a *full-width* A4 frame on a wide form would be `width × 1.414` tall — well past the viewport for a
+  single page — which is why the frame is a centred column, not the full pane width.
+- **Plain text** takes the pane's full width at its **natural height** — a `<pre>` grows to its
+  content; text is not A4-shaped.
+
+Two things the A4 frame is *not*. It is an A4-shaped **viewport**, not a per-document measurement:
+Letter (1 : 1.294), landscape, or mixed-size PDFs still render — the browser's viewer fits-to-width and
+scrolls — the frame shape simply will not match their pages exactly, and measuring each PDF to match is
+work this change does not do. And too short a frame would preview only the letterhead, the one part of
+an invoice carrying no information — which is why the height is generous, not a thumbnail.
+
+## Extending to other file types
+
+The concept generalises, and the component is built so it can — because the mechanism has two halves
+that vary independently:
+
+1. **Byte delivery** — mint a ticket, fetch through the same-origin inline route (or proxied `/cs` + a
+   blob). This half is **mime-agnostic**: it re-serves whatever bytes the attachment holds with their
+   own content-type and does not branch on file type at all. It is the reusable extension point, and
+   the same route serves every preview.
+2. **Rendering** — hand those bytes to something that can draw them. This is the half that varies, and
+   it is why "preview a PDF" and "preview a Word document" are not the same size of change.
+
+So `AttachmentPreview` is a **dispatcher on `mimeType`** over a small registry of renderers:
+
+```tsx
+type AttachmentRenderer = (source: PreviewSource) => ReactElement;
+
+const renderers: Record<string, AttachmentRenderer> = {
+    "application/pdf": PdfFrame,   // the browser's own PDF viewer, in an <iframe> (see Security)
+    "text/plain":      TextBlock,  // HTML-escaped into a <pre> — never rendered as markup
+    // image/*  — deliberately absent: A12's File Picker already previews images
+    // text/markdown, application/vnd.* — a later change registers a renderer here
+};
+```
+
+A `mimeType` with no registered renderer renders **nothing** — today's icon-and-download stands.
+Adding a format later is *registering a renderer*, not touching the fetch.
+
+What the browser renders natively drops in almost for free; what it cannot needs a library or a
+converter — and, for bytes that arrived from an untrusted email, a sanitiser:
+
+| Attachment | Renderer | Cost |
+|---|---|---|
+| **Image** (png/jpg/webp…) | browser-native — **already done by A12's File Picker**, so the dispatcher defers | none |
+| **PDF** | the browser's PDF viewer in an `<iframe>` (no `sandbox` — see Security) | the byte-delivery route — this change |
+| **Plain text** (`text/plain`) | HTML-escaped into a `<pre>` | tiny — no viewer, no library |
+| **Markdown** (`text/markdown`) | a markdown→HTML renderer **plus a sanitiser** | a library and an XSS surface the sandboxed-PDF path avoids — a later change |
+| **Office** (docx/xlsx) | a converter (server→PDF, or a heavy client lib) | a new process and failure mode — a later change |
+
+**In scope now: the three the browser renders natively** — PDF and plain text implemented here, images
+left to A12 — plus the registry itself as the seam for the rest. Markdown-rendered and Office are
+deliberately deferred *behind* that seam: each brings its own renderer and, for markdown, its own
+security section, which is the honest reason they are a separate change rather than a missing branch.
 
 ## Where it hangs in the form
 
@@ -162,8 +235,21 @@ it, because it is the difference between a component and a platform customisatio
 - **Do not widen the download route to reach them.** If the fix in the "cannot download" world is to
   unauthenticate or whitelist a path so an `<iframe src>` can load it, that is the wrong fix — an
   attachment is household post. Fetch with the User's credential and use a blob.
-- **`sandbox` the iframe** and set no `allow-same-origin`, so a malicious PDF cannot reach the
-  application's origin.
+- **The PDF frame carries no `sandbox` attribute — measured, not an oversight.** The original intent
+  here was to `sandbox` the iframe with no `allow-same-origin`. It cannot be done: Chrome refuses to run
+  its internal PDF viewer (a MimeHandler extension) inside *any* sandboxed frame — `sandbox=""`,
+  `allow-same-origin`, and `allow-scripts allow-same-origin` were each tried in a real browser and each
+  rendered a broken-document icon; only an un-sandboxed frame shows the PDF. The isolation is therefore
+  the **browser's PDF viewer itself**: it renders the bytes without ever exposing a scriptable document
+  to the page, which is the same reason this change uses the browser's viewer rather than rendering the
+  PDF in-page. Two things make the un-sandboxed frame safe: the frame's source is a **blob URL**, never
+  a remote origin; and the blob is **re-typed to the attachment's declared MIME type** before it is
+  handed over, so a store response mislabelled `text/html` cannot be sniffed into scriptable markup — a
+  mismatch renders as a broken PDF, never as HTML.
+- **Text is untrusted too, and is never markup.** The `text/plain` renderer HTML-escapes the bytes
+  into a `<pre>` — it must not become an "interpret it as HTML/markdown" path by accident. Every future
+  renderer added to the registry owns its own sanitisation; that per-renderer security surface is
+  exactly what keeps markdown a separate change.
 
 ## Rejected alternatives
 

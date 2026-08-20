@@ -24,6 +24,9 @@
  *   2. The RPC body is always a JSON **array** (a batch), even for a single call.
  */
 
+import { readFileSync } from "node:fs";
+import { basename } from "node:path";
+
 import USERS from "../fixtures/users.json" with { type: "json" };
 import type { TestUsername } from "../types";
 
@@ -58,6 +61,23 @@ export interface ThingEntry {
     docRef: string;
     thingId: string;
     document: A12Document;
+}
+
+/** Exactly what a `Document_DM` `Attachment` group needs to be openable in the web application. */
+export interface UploadedAttachment {
+    original_filename: string;
+    internal_filename: string;
+    attachment_id: string;
+    size: number;
+    mime_type: string;
+}
+
+/** The A12 `AttachmentHeader` the upload answers with — only `attachmentId` is guaranteed. */
+interface AttachmentHeader {
+    attachmentId: string;
+    filename?: string;
+    mimeType?: string;
+    size?: number;
 }
 
 interface RpcResponse {
@@ -228,6 +248,79 @@ export class ThingStore {
             locale: "en"
         });
         return docRef;
+    }
+
+    /**
+     * Store a file's bytes in the A12 Content Store and return the attachment group `ADD_DOCUMENT`
+     * wants under a `Document_DM`'s `Attachment`.
+     *
+     * The route is the one the web application's own uploader uses and the Runtime's
+     * `runtime/src/a12/content.ts` already replicates for the mail ingest — a plain REST POST with
+     * the **raw bytes as the body** and every parameter in the query string:
+     *
+     *     POST {baseUrl}/api/v2/attachment
+     *          ?filename=<name>&documentModelName=<model>&pathToField=<path to the attachment group>
+     *
+     * built by `AttachmentUploadV2.Request.build` in
+     * `@com.mgmtp.a12.dataservices/dataservices-access`. Three details are copied deliberately from
+     * that reference: the query string is encoded exactly once; `Content-Type` is
+     * `application/json;charset=utf8` on a binary body (A12's `HeadersFilter` sets it wholesale, and
+     * the server reads the stream regardless of the label); and the token is a plain `Bearer`, the
+     * same Keycloak token {@link rpc} carries. The response is an A12 `AttachmentHeader` whose only
+     * guaranteed field is `attachmentId`; the rest fall back so the group stays valid.
+     */
+    async uploadAttachment(
+        filePath: string,
+        mimeType: string,
+        documentModelName = "Document_DM",
+        pathToField = "/Document/Attachment"
+    ): Promise<UploadedAttachment> {
+        if (!this.token) {
+            await this.login();
+        }
+        const bytes = readFileSync(filePath);
+        const filename = basename(filePath);
+        const query =
+            `filename=${encodeURIComponent(filename)}` +
+            `&documentModelName=${encodeURIComponent(documentModelName)}` +
+            `&pathToField=${encodeURIComponent(pathToField)}`;
+        const url = `${this.baseUrl}/api/v2/attachment?${query}`;
+
+        const send = (): Promise<Response> =>
+            fetch(url, {
+                method: "POST",
+                headers: {
+                    Accept: "application/json",
+                    // Binary body, JSON label — mirrors what the web application sends. See the note
+                    // in runtime/src/a12/content.ts; the server reads the stream regardless.
+                    "Content-Type": "application/json;charset=utf8",
+                    Authorization: `Bearer ${this.token}`
+                },
+                body: bytes
+            });
+
+        let response = await send();
+        if (response.status === 401) {
+            await this.login();
+            response = await send();
+        }
+        if (!response.ok) {
+            throw new Error(
+                `attachment upload failed: HTTP ${response.status} ${(await response.text()).slice(0, 400)}`
+            );
+        }
+
+        const header = (await response.json()) as AttachmentHeader;
+        if (!header?.attachmentId) {
+            throw new Error(`attachment upload returned no attachmentId: ${JSON.stringify(header).slice(0, 200)}`);
+        }
+        return {
+            original_filename: filename,
+            internal_filename: header.filename ?? filename,
+            attachment_id: header.attachmentId,
+            size: header.size ?? bytes.length,
+            mime_type: header.mimeType ?? mimeType
+        };
     }
 
     async getDocument(docRef: string): Promise<A12Document> {

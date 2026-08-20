@@ -164,6 +164,25 @@ export interface Operation extends MachineFields {
     /** Tri-state: unset reads as enabled. Only an explicit `false` switches an Operation off. */
     enabled?: boolean;
     notes?: string;
+    /**
+     * How this Operation is implemented. Unset reads as `built-in` — its Implementation is compiled
+     * into the Runtime. `dynamic` means the Implementation is carried by this Thing as `source` and
+     * run by the Operation Host (ADR-0025).
+     */
+    implementation?: "built-in" | "dynamic";
+    /** A Dynamic Operation's Implementation Source: TypeScript (or JavaScript) declaring `execute`. */
+    source?: string;
+    /** The language of `source`. Unset reads as `typescript`. */
+    language?: "typescript" | "javascript";
+    /** The single named outward capability the Source may reach, resolved to a base URL and credential. */
+    egress?: string;
+    /** Per-execution ceiling in ms. Unset reads as the configured default; may lower it, never raise it. */
+    timeoutMs?: number;
+    /**
+     * Whether the inbound gate may serve this Operation to the browser. Read off the Thing for a
+     * dynamic Operation (the peer of `mutating`); unset reads as `false` — not client-readable.
+     */
+    clientReadable?: boolean;
 }
 
 export type ConversationStatus = "running" | "waiting" | "done" | "failed";

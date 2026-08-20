@@ -68,6 +68,16 @@ export default merge({}, common, {
                 secure: false,
                 changeOrigin: true,
                 logLevel: "debug"
+            },
+            {
+                // The attachment preview fetches `/cs/download/<ticket>` same-origin so it can read the
+                // bytes (CORS blocks the cross-origin ticket URL) and hand them to the browser as a blob.
+                // The store serves `/cs` from the same process as `/api`, on :8082 — see nginx.conf.template.
+                context: ["/cs"],
+                target: "http://localhost:8082",
+                secure: false,
+                changeOrigin: true,
+                logLevel: "debug"
             }
         ]
     },

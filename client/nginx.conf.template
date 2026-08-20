@@ -45,5 +45,15 @@ http {
             proxy_pass_request_headers on;
        }
 
+       # The attachment preview fetches the content store's `/cs/download/<ticket>` for the bytes.
+       # The platform advertises that download URL cross-origin (:8082), which CORS blocks and whose
+       # `Content-Disposition: attachment` defeats an <iframe src>. Proxying `/cs` here makes it
+       # same-origin, so the client reads the bytes with `fetch` and renders them from a blob URL.
+       location /cs {
+            proxy_pass ${NGINX_ASSISTANTS_SERVER_CONTENTSTORE_URL};
+            proxy_redirect off;
+            proxy_pass_request_headers on;
+       }
+
     }
 }

@@ -137,8 +137,32 @@ A capability one System offers, as that system defines it — `sendMoney`, `getN
 _Avoid_: method, endpoint, action, tool
 
 **Implementation**:
-The code that performs one Operation. Not a Thing, because it is behaviour and not data. An Operation is offered to an Assistant only while an Implementation for it is registered; one whose Implementation has gone is *unimplemented*, which is a different state from being switched off, and the system says which.
+The code that performs one Operation. Never a Thing — it is behaviour, not data — but it may be **stored on** one: for a **Built-in Operation** it is compiled into the Runtime, and for a **Dynamic Operation** it is carried by the Operation Thing as source. An Operation is offered to an Assistant only while an Implementation for it is registered; one whose Implementation has gone is *unimplemented*, which is a different state from being switched off, and the system says which.
 _Avoid_: handler, adapter, function
+
+**Built-in Operation**:
+An Operation whose Implementation is code in the Runtime's own source, compiled and shipped with it. It runs inside this system's scope, context and domain — it reads and writes Things, asks the User, starts an Assistant, reads an attachment's bytes — and it knows the vocabulary of this codebase. It is changed by changing this repository. Everything [ADR-0019](docs/adr/0019-an-operation-is-a-thing.md) says about an Implementation being authoritative over the Thing continues to hold for it, without exception.
+_Avoid_: native, core, compiled operation, hard-coded
+
+**Dynamic Operation**:
+An Operation whose Implementation is carried by its own Thing, as source the User may read and edit, and executed by the **Operation Host** rather than called. It belongs to an External System, and what it does is reach that system and translate the answer. It is configuration in the sense that matters: changing it is an edit and a Turn, not a release. It is not a lesser Operation — it is granted, approved, reconciled, logged and refused exactly like a built-in one, and an Assistant cannot tell which kind it is holding. The seven `bookkeeping.*` Operations are the dynamic ones ([ADR-0025](docs/adr/0025-a-dynamic-operation-carries-its-implementation.md)).
+_Avoid_: script, plugin, custom operation, user-defined operation
+
+**Implementation Source**:
+The text of a Dynamic Operation's Implementation: TypeScript declaring an `execute` function and, where it matters, a `reconcile` one. Stored on the Operation Thing, so it is versioned by the store, readable in the web application beside the prose that describes it, and writable only by an actor holding `ASSISTANT_WRITE` — which the Runtime is not, and no Assistant is. It has no imports and no module system: everything it may reach is handed to it.
+_Avoid_: script, snippet, code (unqualified), handler body
+
+**Operation Host**:
+The half of the Runtime that turns Implementation Source into a running Implementation: it compiles the source, evaluates it inside a sandbox, hands it the one capability it is allowed, bounds it in time and memory, and translates what comes back into the same outcome a built-in returns. It is to a Dynamic Operation what the compiled implementations are to a built-in one, and it is the *only* component that ever holds both a credential and someone else's source.
+_Avoid_: interpreter, engine, executor, plugin loader, VM
+
+**Egress**:
+The single named outward capability a Dynamic Operation is granted — a base URL and the credential for it, resolved from deployment configuration by the Operation Host. Source names the egress (`bookkeeping`) and never the URL or the token: it cannot reach a host that is not the one bound, and it cannot read the credential the host attaches on its behalf. An Operation with no egress can compute and nothing else.
+_Avoid_: endpoint, target, connection, scope
+
+**Result Contract**:
+How what the Source returns becomes an Operation's outcome. A returned value is a `value` outcome; a thrown `OperationError` is an `error` outcome whose message the model reads; anything else thrown is an `error` outcome with a message that says only that the Operation failed, with the detail going to the log and never to the transcript; a returned `host.pending(...)` is a `pending` outcome, because an Operation may answer *not now* and a Dynamic one is not excused from that. What it may *not* do is decide its own success by convention — an HTTP 404 is a value, an error or neither depending on what was asked, and the Source is the only thing that knows which.
+_Avoid_: return mapping, error handling, response schema
 
 **grant**:
 One row of an Assistant's grants, naming an Operation by its key — and, for `assistant.call`, naming the Assistant it may call. A field on the Assistant rather than a Thing of its own. Reading an Assistant's grants tells you everything it can reach.
@@ -153,7 +177,7 @@ A property of an **Operation**: it either requires one or does not, and the Runt
 _Avoid_: permission, sign-off, confirmation gate, four-eyes
 
 **Connector**:
-The translator that maps a foreign representation to and from Things for one External System.
+The translator that maps a foreign representation to and from Things for one External System. The word still covers Mail, the Content Store and the **Manual Connectors**. For Bookkeeping it no longer names a class: that translation now lives in the **Operation Host** plus the **Implementation Source** it runs, seven pieces of source rather than one `FireflyConnector` ([ADR-0025](docs/adr/0025-a-dynamic-operation-carries-its-implementation.md)).
 _Avoid_: adapter, mapper, gateway
 
 **Manual Connector**:

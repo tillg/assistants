@@ -1,6 +1,8 @@
 import { useState } from "react";
 import styled from "styled-components";
 
+import { Typography } from "@com.mgmtp.a12.widgets/widgets-core";
+
 import { iconFor } from "../icons";
 
 import type { TranscriptEntry } from "./entries";
@@ -59,14 +61,19 @@ const Body = styled.div<{ $shape: Shape; $side: Side; $warning: boolean }>`
                 ? theme.colors.interaction.selected.colorLight
                 : theme.colors.background.groupBackground};
     color: ${({ theme, $shape }) => ($shape === "meta" ? theme.colors.text.secondaryColor : theme.colors.text.color)};
-    font-size: ${({ $shape }) => ($shape === "meta" ? "0.8em" : "1em")};
+    font-size: ${({ theme, $shape }) =>
+        $shape === "meta" ? theme.typography.fontSize.smallFontSize : theme.typography.fontSize.mediumFontSize};
 `;
 
 const Icon = styled.span`
     line-height: 1.4;
 `;
 
-const Text = styled.div`
+/** The entry's prose, as A12 body text; colour and size are inherited from the Bubble's shape above. */
+const Text = styled(Typography.Body)`
+    margin: 0;
+    color: inherit;
+    font-size: inherit;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 `;
@@ -86,9 +93,11 @@ const Disclosure = styled.button`
     cursor: pointer;
 `;
 
+// A metadata line, not prose: kept a plain element because the transcript's `data-role` contract is its
+// test and selector handle, and the Typography widget stamps its own `data-role` over any it is given.
 const Footnote = styled.div`
-    margin-top: 0.25rem;
-    font-size: 0.75em;
+    margin: 0.25rem 0 0;
+    font-size: ${({ theme }) => theme.typography.fontSize.tinyFontSize};
     color: ${({ theme }) => theme.colors.text.secondaryColor};
 `;
 

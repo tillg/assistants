@@ -1257,6 +1257,14 @@ const DROP_REASONS: Record<DroppedGrant["reason"], (named: string) => string> = 
     "self-call": (named) => `${named} would call yourself, which is not permitted.`,
     "bare-call": (named) =>
         `${named} is not a wildcard: name the Assistant you mean, as "assistant.call:<key>".`,
+    // ADR-0025. Each is a configuration error the User fixes, not one the model can re-plan around —
+    // said out loud for the same reason `disabled` is, so the model does not treat "not a tool" as true.
+    ambiguous: (named) =>
+        `${named} resolves to both a built-in and a stored Implementation, so the Runtime will not guess which is authoritative; the User must resolve it.`,
+    uncompilable: (named) =>
+        `${named}'s stored code does not compile, so there is nothing to call; the User must fix its Source.`,
+    "unconfigured-egress": (named) =>
+        `${named} names an egress this deployment has not configured, so it cannot reach anything.`,
 };
 
 export function sleep(ms: number): Promise<void> {

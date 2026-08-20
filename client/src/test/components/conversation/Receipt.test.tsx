@@ -54,6 +54,16 @@ describe("Receipt", () => {
         expect(screen.queryByTestId("transcript-receipt-body")).toBeNull();
     });
 
+    it("keeps only phrasing content inside the toggle button (valid DOM nesting)", () => {
+        renderReceipt({ type: "receipt", intent: CALL });
+
+        const toggle = screen.getByTestId("transcript-receipt-toggle");
+        expect(toggle.tagName).toBe("BUTTON");
+        // A <div> or <p> inside a <button> is invalid nesting the browser will restructure; the
+        // summary and its Typography bodies must render as inline <span>s.
+        expect(toggle.querySelector("div, p")).toBeNull();
+    });
+
     it("says so when a call has no answer — in flight, or dead", () => {
         renderReceipt({ type: "receipt", intent: CALL });
 

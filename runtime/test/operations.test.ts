@@ -11,7 +11,6 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { buildHarness, nowIso, SPECS, type Harness } from "./support/harness.js";
 import type { OperationContext, OperationOutcome } from "../src/operations/registry.js";
-import { FireflyError } from "../src/connectors/firefly.js";
 import type { Assistant, Conversation, Stored } from "../src/domain/types.js";
 
 /** What `thingstore.search` and `thingstore.get` return per row. */
@@ -80,11 +79,12 @@ describe("the Operations ACCOUNTING.md requires", () => {
         const required = requiredBookkeepingOperations();
         expect(required.length).toBeGreaterThan(0);
 
+        // Since ADR-0025 the Bookkeeping Operations are dynamic — they live in the catalogue as Things
+        // carrying their Source, not as registered Implementations — so the check is that the catalogue
+        // a bootstrapped stack has provides each one, which is what an Assistant resolves against.
         const harness = buildHarness([]);
-        const registered = new Set(
-            [...required, "x"].filter((name) => harness.registry.get(`bookkeeping.${name}`)),
-        );
-        const missing = required.filter((name) => !registered.has(name));
+        const present = new Set(harness.catalogue.map((operation) => operation.key));
+        const missing = required.filter((name) => !present.has(`bookkeeping.${name}`));
         expect(missing).toEqual([]);
     });
 });
@@ -305,71 +305,6 @@ describe("the idempotency key creation is keyed on", () => {
 
         // Both callers end up referring to the same Thing, whichever of them won.
         expect(b.thingId).toBe(a.thingId);
-    });
-});
-
-describe("bookkeeping.postTransaction", () => {
-    it("names the field and the account the model used when Firefly refuses", async () => {
-        // `FireflyError.details` carries per-field reasons and nothing ever read them, so what
-        // survived was Firefly's first sentence — which talks in *internal Firefly account ids*.
-        // The model only ever handled names: `bookkeeping.listAccounts` returns names, and the
-        // connector resolves them to ids on the way out. So it was told a number it had never seen,
-        // about a field it was not told the name of.
-        const harness = buildHarness([]);
-        harness.firefly.failNextPost = new FireflyError(
-            '[a] Could not find a valid source account when searching for ID "5" or name "". (and 1 more error)',
-            422,
-            {
-                errors: {
-                    "transactions.0.source_id": [
-                        '[a] Could not find a valid source account when searching for ID "5" or name "".',
-                    ],
-                },
-            },
-        );
-
-        const outcome = await call(harness, "bookkeeping.postTransaction", {
-            splits: [
-                {
-                    type: "withdrawal",
-                    date: "2026-08-01",
-                    amount: "96.50",
-                    description: "Consultation",
-                    sourceAccount: "Expenses:Health",
-                    destinationAccount: "Checking",
-                },
-            ],
-        });
-
-        expect(outcome.kind).toBe("error");
-        const message = outcome.kind === "error" ? outcome.message : "";
-        // The field, in the vocabulary the model was given.
-        expect(message).toMatch(/sourceAccount/);
-        // The account it actually named...
-        expect(message).toContain("Expenses:Health");
-        // ...and not an internal id it was never shown.
-        expect(message).not.toMatch(/ID "\d+"/);
-    });
-
-    it("still reports a failure with no per-field details", async () => {
-        const harness = buildHarness([]);
-        harness.firefly.failNextPost = new FireflyError("Firefly HTTP 500", 500, undefined);
-
-        const outcome = await call(harness, "bookkeeping.postTransaction", {
-            splits: [
-                {
-                    type: "withdrawal",
-                    date: "2026-08-01",
-                    amount: "1.00",
-                    description: "x",
-                    sourceAccount: "Checking",
-                    destinationAccount: "Expenses:Health",
-                },
-            ],
-        });
-
-        expect(outcome.kind).toBe("error");
-        expect(outcome.kind === "error" && outcome.message).toContain("Firefly HTTP 500");
     });
 });
 

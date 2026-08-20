@@ -286,7 +286,7 @@
                 "id": "grid_behaviour",
                 "name": "GridBehaviour",
                 "layout": {
-                  "lg": "6-6"
+                  "lg": "4-4-4"
                 },
                 "row": [
                   {
@@ -297,8 +297,12 @@
                       {
                         "type": "Control",
                         "id": "ctrl_mutating",
-                        "elementRef": "f_mutating",
-                        "readonly": true
+                        "elementRef": "f_mutating"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_clientReadable",
+                        "elementRef": "f_clientReadable"
                       },
                       {
                         "type": "Control",
@@ -306,9 +310,88 @@
                         "elementRef": "f_requiresApproval"
                       }
                     ]
+                  },
+                  {
+                    "type": "Row",
+                    "id": "row_4b",
+                    "name": "r4b",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_implementation",
+                        "elementRef": "f_implementation",
+                        "readonly": true
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_egress",
+                        "elementRef": "f_egress"
+                      },
+                      {
+                        "type": "Control",
+                        "id": "ctrl_language",
+                        "elementRef": "f_language"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Row",
+                    "id": "row_4c",
+                    "name": "r4c",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_timeoutMs",
+                        "elementRef": "f_timeoutMs"
+                      }
+                    ]
                   }
                 ],
                 "verticalAlignment": "BOTTOM"
+              }
+            ]
+          },
+          {
+            "type": "Section",
+            "id": "section_source",
+            "name": "SectionSource",
+            "title": {
+              "type": "Multilingual",
+              "multilingualText": {
+                "text": [
+                  {
+                    "locale": "en",
+                    "text": "Implementation source"
+                  },
+                  {
+                    "locale": "de",
+                    "text": "Quelltext der Implementierung"
+                  }
+                ]
+              }
+            },
+            "screenElements": [
+              {
+                "type": "ControlGrid",
+                "id": "grid_source",
+                "name": "GridSource",
+                "layout": {
+                  "lg": "12"
+                },
+                "row": [
+                  {
+                    "type": "Row",
+                    "id": "row_source",
+                    "name": "rSource",
+                    "cell": [
+                      {
+                        "type": "Control",
+                        "id": "ctrl_source",
+                        "elementRef": "f_source"
+                      }
+                    ]
+                  }
+                ]
               }
             ]
           },
@@ -422,6 +505,10 @@
         },
         {
           "elementRef": "f_parameters",
+          "exposition": "AREA"
+        },
+        {
+          "elementRef": "f_source",
           "exposition": "AREA"
         }
       ]

@@ -1,6 +1,6 @@
 import styled from "styled-components";
 
-import { ICONS } from "../icons";
+import { AssistantBadge } from "../AssistantBadge";
 
 import { ConversationTranscript, TranscriptBox } from "./ConversationTranscript";
 import { Band, Who } from "./TranscriptHeader";
@@ -30,7 +30,8 @@ const Body = styled.div`
 
 const Kind = styled.span`
     font-weight: 400;
-    color: ${({ theme }) => theme.colors.text.secondaryColor};
+    /* secondaryColorDark for legibility on the white band — see TranscriptHeader's Slot. */
+    color: ${({ theme }) => theme.colors.text.secondaryColorDark};
 `;
 
 export interface QuestionContextProps {
@@ -55,8 +56,7 @@ export function QuestionContext({ document, height }: QuestionContextProps) {
         <TranscriptBox $height={height} data-role="conversation-transcript">
             <Band data-role="transcript-header">
                 <Who data-role="transcript-who">
-                    <span aria-hidden>{ICONS.assistant}</span>
-                    <span>{question.assistantKey}</span>
+                    <AssistantBadge assistantKey={question.assistantKey} />
                     <Kind>{question.kind}</Kind>
                 </Who>
             </Band>

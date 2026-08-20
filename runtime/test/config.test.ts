@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { loadConfig } from "../src/config.js";
+import { clampTimeoutMs, loadConfig } from "../src/config.js";
 
 /** `loadConfig` reads `process.env` directly, so the variable has to be moved out of the way. */
 function withoutEnv<T>(name: string, body: () => T): T {
@@ -182,5 +182,57 @@ describe("configuration", () => {
             delete process.env["THINGSTORE_PASSWORD"];
             delete process.env["MAIL_SECURE"];
         }
+    });
+
+    it("ships the Operation Host's bounds, and a bookkeeping egress that reuses Firefly (ADR-0025)", () => {
+        process.env["THINGSTORE_PASSWORD"] = "supplied-by-the-caller";
+        process.env["FIREFLY_URL"] = "http://firefly.test:8080";
+        process.env["FIREFLY_TOKEN"] = "pat-123";
+        try {
+            const dyn = withoutEnv("DYNAMIC_OPERATION_TIMEOUT_MS", () => loadConfig()).dynamicOperation;
+            expect(dyn.timeoutMs).toBe(20_000);
+            expect(dyn.maxBodyBytes).toBe(4 * 1024 * 1024);
+            expect(dyn.memoryMb).toBe(128);
+            expect(dyn.cacheTtlMs).toBe(300_000);
+            // An existing deployment switches over with no new environment: `bookkeeping` inherits
+            // the Firefly variables, and Source names the egress, never the URL or the token.
+            expect(dyn.egresses["bookkeeping"]).toEqual({
+                url: "http://firefly.test:8080",
+                token: "pat-123",
+                tokenFile: "/run/firefly/pat.txt",
+            });
+        } finally {
+            delete process.env["THINGSTORE_PASSWORD"];
+            delete process.env["FIREFLY_URL"];
+            delete process.env["FIREFLY_TOKEN"];
+        }
+    });
+
+    it("builds an egress from EGRESS_<NAME>_* — the bank is two variables and no code", () => {
+        process.env["THINGSTORE_PASSWORD"] = "supplied-by-the-caller";
+        process.env["EGRESS_BANK_URL"] = "https://bank.example/api";
+        process.env["EGRESS_BANK_TOKEN"] = "bank-secret";
+        try {
+            const egresses = loadConfig().dynamicOperation.egresses;
+            // The name is lowercased, so `EGRESS_BANK_URL` is the egress Source names as `bank`.
+            expect(egresses["bank"]).toEqual({
+                url: "https://bank.example/api",
+                token: "bank-secret",
+                tokenFile: undefined,
+            });
+        } finally {
+            delete process.env["THINGSTORE_PASSWORD"];
+            delete process.env["EGRESS_BANK_URL"];
+            delete process.env["EGRESS_BANK_TOKEN"];
+        }
+    });
+
+    it("lets a Thing's timeout lower the ceiling, never raise it", () => {
+        const dyn = { timeoutMs: 20_000, maxBodyBytes: 0, memoryMb: 0, cacheTtlMs: 0, egresses: {} };
+        expect(clampTimeoutMs(dyn, undefined)).toBe(20_000); // unset reads as the ceiling
+        expect(clampTimeoutMs(dyn, 5_000)).toBe(5_000); // lower is honoured
+        expect(clampTimeoutMs(dyn, 999_999)).toBe(20_000); // higher is clamped to the ceiling
+        expect(clampTimeoutMs(dyn, 0)).toBe(20_000); // nonsense reads as the ceiling
+        expect(clampTimeoutMs(dyn, -1)).toBe(20_000);
     });
 });

@@ -173,8 +173,10 @@ are not:
 | `Enabled` | **yours** | Whether the Operation is offered at all |
 | `Requires approval` | **yours** | Whether the Runtime refuses the call until it has asked you about those exact arguments and been told yes |
 | `Notes` | **yours** | Why you did what you did |
+| `Implementation` | the code's, read-only | `built-in` or `dynamic` — how the Operation is performed. A fact about the Operation, not a choice |
+| `Source`, `Egress`, `Language`, `Timeout` | **yours, for a dynamic Operation** | The TypeScript that *is* the Operation, the outward capability it may reach, and its bounds. Empty and irrelevant for a built-in one (ADR-0025) |
 
-Two of those deserve their own sentence.
+Three of those deserve their own sentence.
 
 **Switching an Operation off is the kill switch that was missing.** `just pause` stops everything
 and an Assistant's `enabled` flag stops one Assistant; between them there was nothing. Unticking
@@ -184,23 +186,38 @@ tries to call it is told it is *switched off* — not that it never had it, whic
 would visibly contradict.
 
 **`Requires approval` is yours in both directions.** You may add one where the code asks for none,
-and remove one it does ask for — including on `bookkeeping.postTransaction`. The Runtime writes a
-line in the log naming any Operation whose requirement you have weakened, once per restart, and
-obeys you. That is deliberate: it is your money. It is also the one route an Assistant has to this
-setting, since it cannot edit the catalogue but can compose a persuasive sentence asking you to.
+and remove one it does ask for — including on `bookkeeping.postTransaction`. For a built-in Operation
+the Runtime writes a line in the log naming any Operation whose requirement you have weakened, once
+per restart, and obeys you. That is deliberate: it is your money. It is also the one route an
+Assistant has to this setting, since it cannot edit the catalogue but can compose a persuasive
+sentence asking you to.
 
-What you cannot do is invent an Operation. The catalogue describes Operations; the code performs
-them, and the two are joined by the key. An Operation with no Implementation registered under its
-key is not offered to anybody and says so (ADR-0019). The overview accordingly has no **Add**
-button: a row created by hand would carry no idempotency key, so the next `just bootstrap` would
-create a second Thing under the same key rather than recognising the one you made.
+**For a Bookkeeping Operation you can now read, and edit, what it does.** Since
+[ADR-0025](../../docs/adr/0025-a-dynamic-operation-carries-its-implementation.md) the seven
+`bookkeeping.*` Operations are *dynamic*: the TypeScript that reaches Firefly and turns its answer
+into something a model can read is `Source` on the Operation Thing, shown in the form as text. If
+Firefly renames an endpoint, or you move the books to a different system, you edit four lines and the
+next Turn uses them — no checkout, no deploy. It is the first capability in this system you can
+*create* rather than only constrain, and it is safe for the same reason the rest of the catalogue is:
+an Assistant cannot write an Operation Thing, so it cannot write the code either. For a dynamic
+Operation `Mutating` and `Requires approval` are read from the Thing too (there is no compiled author
+to ask), so the guard that keeps them honest is that same write authority, not code review.
+
+What you cannot do is invent an Operation from the overview. The catalogue describes Operations; a
+built-in one's code performs it and the two are joined by the key, and even a dynamic one is created
+from a seed so it carries an idempotency key. The overview accordingly has no **Add** button: a row
+created by hand would carry no idempotency key, so the next `just bootstrap` would create a second
+Thing under the same key rather than recognising the one you made. A built-in Operation with no
+Implementation registered under its key, or a dynamic one whose source does not compile, is not
+offered to anybody and says so (ADR-0019, ADR-0025).
 
 Editing the catalogue never gives birth to a Conversation, and `just bootstrap` will not undo what
 you decided: it re-applies only the fields the code owns — `System`, `Kind`, `Parameters`,
-`Mutating` — and leaves the description, the approval requirement, the kill switch and your notes
-exactly as you left them. The cost of that is the mirror image of the Assistant seeds: a description
-improved in the source does *not* reach a system that already has the Operation, and bootstrap
-reports it by name rather than letting you wonder.
+`Mutating`, `Implementation` — and leaves the description, the approval requirement, the kill switch,
+your notes, and a dynamic Operation's `Source` exactly as you left them. The cost of that is the
+mirror image of the Assistant seeds: a description — or a `Source` — improved in the seed does *not*
+reach a system that already has the Operation, and bootstrap reports it by name rather than letting
+you wonder.
 
 ### Giving an Assistant a schedule
 
@@ -414,6 +431,7 @@ is stale, and `just ps` shows it.
 | **Transactions** | Firefly III, tagged `thing:<thingId>` with a deep link in `external_url` |
 | **Transcripts** | `Conversation.entries[]`, and `just logs runtime` |
 | **Health** | The Runtime's compose healthcheck, driven by `heartbeatAt` |
+| An **attachment preview** | The Document form, in a full-width pane beneath the fields — a PDF renders inline in the browser's own viewer inside a sandboxed frame, plain text renders HTML-escaped, images stay A12's file-picker job, and every other type keeps its icon-and-download until a renderer is registered. Read-only: it fetches the bytes same-origin and shows them, and changes no Thing |
 
 Nothing is emailed, nothing is paid, and nothing leaves the machine except calls to the configured
 LLM API and the poll of the Receptionist's Mailbox. *Emailed* is worth being precise about now that

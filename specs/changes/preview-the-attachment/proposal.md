@@ -12,9 +12,10 @@ question they opened the Document to ask.
 | | Today | After |
 |---|---|---|
 | a PDF attachment | an icon and a filename | the first page, rendered, inline |
+| a plain-text attachment | an icon and a filename | its text, inline |
 | reading it | download → locate → open elsewhere → return | it is already on the screen |
 | an image attachment | already previewed by A12 | unchanged |
-| a non-previewable attachment | an icon and a filename | unchanged |
+| an attachment the browser cannot render (Word, Excel, markdown) | an icon and a filename | unchanged — until a renderer is added for it |
 
 **This is a reading affordance and nothing else.** No Thing changes, no field is written, no Operation
 is added, and nothing an Assistant does is affected. It is the smallest change in this repository so
@@ -108,11 +109,11 @@ re-serves it as `Content-Disposition: inline`. That is a server change, and it i
 
 | Area | What changes |
 |---|---|
-| **A preview component** | `client/src/components/document/` — fetches the attachment, renders it, revokes the object URL on unmount. Read-only |
+| **A preview component** | `client/src/components/document/` — fetches the attachment, dispatches on its MIME type to a renderer, revokes the object URL on unmount. Read-only |
 | **Where it appears** | the Document form, beneath or beside the attachment field. Exact seam depends on the answer above |
-| **PDF only** | images already work; everything else keeps today's icon |
-| **A server route** | a same-origin, authenticated endpoint that re-serves the attachment as `Content-Disposition: inline`. Forced by the findings above, not a design preference |
-| **Tests** | component tests for the three states (loading, rendered, refused), a server test for the route, plus one e2e that opens a Document and asserts the preview is present |
+| **Formats the browser renders natively** | PDF and plain text, through one mime-agnostic fetch; images stay A12's job. A renderer registry is the seam for markdown, Office and the rest — see [architecture.md](architecture.md#extending-to-other-file-types) |
+| **A server route** | a same-origin, authenticated endpoint that re-serves the attachment as `Content-Disposition: inline` under its own content-type. Forced by the findings above, not a design preference |
+| **Tests** | component tests for the three states (loading, rendered, refused) across the PDF and text branches, a test that an unregistered MIME type renders nothing, a server test for the route, plus one e2e that opens a Document and asserts the preview is present |
 
 **Out of scope**
 
@@ -120,7 +121,7 @@ re-serves it as `Content-Disposition: inline`. That is a server change, and it i
 |---|---|
 | Replacing the attachment control | upload, replace and delete all work; this adds a view and takes nothing away |
 | A custom Form Engine `WidgetMap` entry | a bigger footprint in the form engine's own extension surface. Only if a plain component cannot be placed |
-| Previewing anything but PDF | images are the platform's job and it does them; Word and Excel need a converter, which is a different change |
+| Rendering markdown or Office formats now | the browser renders neither; each needs a renderer or converter — markdown also a sanitiser for untrusted bytes. Deferred *behind* the renderer registry, not designed out |
 | Page navigation, zoom, text selection, search | the browser's built-in PDF viewer provides all of it for free. Building any of it ourselves would be rebuilding a viewer |
 | Rendering with `pdfjs` in the client | the browser already has a PDF viewer. `pdfjs-dist` is in the **Runtime** to extract text without a canvas, which is a different problem |
 | Fixing the busy-vs-broken tile state | a real defect, and the neighbouring session's to design |

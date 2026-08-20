@@ -3,7 +3,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 
 import { LoggerFactory } from "@com.mgmtp.a12.utils/utils-logging";
 
-import { useThingById } from "../../../components/conversation/useThingById";
+import { resetThingByIdCache, useThingById } from "../../../components/conversation/useThingById";
 
 import { serveRpc, type RpcRequest } from "./harness";
 
@@ -35,6 +35,7 @@ const QUESTION = { OpenQuestion: { Prompt: "Book it?" } };
 describe("useThingById", () => {
     beforeEach(() => {
         sent = [];
+        resetThingByIdCache();
         vi.spyOn(LoggerFactory.getLogger("PT/useThingById"), "warn").mockImplementation(() => {});
     });
 
@@ -60,6 +61,20 @@ describe("useThingById", () => {
 
         await waitFor(() => expect(result.current.state).toBe("ready"));
         expect(result.current.state === "ready" && result.current.document).toEqual(QUESTION);
+    });
+
+    it("caches a document so a second reader of the same Thing does not fetch twice", async () => {
+        install((request) => found(request, QUESTION));
+
+        const first = renderHook(() => useThingById("OpenQuestion_DM", "cache-me"));
+        await waitFor(() => expect(first.result.current.state).toBe("ready"));
+        expect(sent).toHaveLength(1);
+
+        // The ThingPopup a ThingLink opens reads the same Thing; the cache serves it, and it is ready
+        // from the first frame — no second GET_DOCUMENT, no loading flash.
+        const second = renderHook(() => useThingById("OpenQuestion_DM", "cache-me"));
+        expect(second.result.current.state).toBe("ready");
+        expect(sent).toHaveLength(1);
     });
 
     it("has nothing to show, and asks for nothing, when there is no id", () => {

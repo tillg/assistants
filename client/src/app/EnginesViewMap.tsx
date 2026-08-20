@@ -14,6 +14,8 @@
  * KIND, either express or implied.
  */
 
+import styled from "styled-components";
+
 import type { View } from "@com.mgmtp.a12.client/client-core";
 import { CRUDViews } from "@com.mgmtp.a12.crud/crud-core";
 import { TreeEngineFactories } from "@com.mgmtp.a12.treeengine/treeengine-core";
@@ -21,8 +23,31 @@ import { DefaultElementLibraryFactories } from "@com.mgmtp.a12.contentengine/con
 import { withFormElementContexts } from "@com.mgmtp.a12.formengine/formengine-content-elements";
 
 import { CustomizableRelationshipFormEngine } from "../components/CustomizableRelationshipFormEngine";
+import { DocumentAttachmentPane } from "../components/document/DocumentAttachmentPane";
 
 type ViewMap = Record<string, View.ViewComponent | undefined>;
+
+/**
+ * Form and (for a Document) its attachment preview, side by side. `flex-wrap` is the whole trick: on a
+ * wide screen the form and the ~A4 preview sit next to each other, so a Document opens with its fields
+ * *and* its PDF both on screen — which is the point, since checking the Receptionist's classification
+ * against the document means seeing both at once. When the two cannot both fit (a narrow window), the
+ * preview wraps beneath the form. When the pane renders nothing — every non-Document form, and a
+ * Document whose attachment has no renderer — the form is the only child and takes the full width, so
+ * nothing else changes.
+ */
+const FormWithPreview = styled.div`
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 1.5rem;
+`;
+
+/** The form's column: grows to fill, and `min-width: 0` lets its own grid reflow instead of overflowing. */
+const FormColumn = styled.div`
+    flex: 1 1 480px;
+    min-width: 0;
+`;
 
 /**
  * View map for the engines used in the App Model.
@@ -39,7 +64,17 @@ export const enginesViewMap = {
         return <TreeEngineFactories.ViewComponent {...props} />;
     },
     FormEngine(props) {
-        return <CustomizableRelationshipFormEngine {...props} />;
+        // The Document form grows a read-only attachment preview beside it (wrapping beneath on a narrow
+        // window). The pane self-gates on the activity's model, so every other form is the sole child and
+        // renders full-width exactly as before — see {@link DocumentAttachmentPane}.
+        return (
+            <FormWithPreview>
+                <FormColumn>
+                    <CustomizableRelationshipFormEngine {...props} />
+                </FormColumn>
+                <DocumentAttachmentPane activityId={props.activityId} />
+            </FormWithPreview>
+        );
     },
     OverviewEngine(props) {
         return <CRUDViews.OverviewEngineView {...props} />;

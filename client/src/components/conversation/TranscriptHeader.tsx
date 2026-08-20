@@ -1,15 +1,15 @@
 import { format, isValid } from "date-fns";
-import { useDispatch } from "react-redux";
 import styled from "styled-components";
 
-import { openForeignForm } from "../../sagas/openForeignForm";
-
+import { AssistantBadge } from "../AssistantBadge";
+import { ThingLink } from "../ThingLink";
 import { ICONS } from "../icons";
 
 import { formatRecordedCost, recordedCost } from "./cost";
 import type { TranscriptEntry } from "./entries";
 import { transcriptStrings } from "./localize";
 import { subjectDescriptor } from "./subject";
+import { shortId } from "./thingLabel";
 
 /**
  * The pinned band above a Transcript: who is talking, what it is about, where it stands, what it has
@@ -88,31 +88,30 @@ export const Who = styled.div`
     font-weight: 600;
 `;
 
-const Title = styled.span`
-    font-weight: 400;
-    color: ${({ theme }) => theme.colors.text.secondaryColor};
+/**
+ * The Conversation's own Title, leading the band on its own line: `flex-basis: 100%` takes the whole
+ * width so the Assistant badge and the slots wrap beneath it. It is omitted entirely when there is no
+ * Title — a freshly-born Conversation — so the band never opens on an empty bold gap.
+ */
+const Title = styled.div`
+    flex-basis: 100%;
+    font-weight: 600;
+    color: ${({ theme }) => theme.colors.text.color};
 `;
 
 const Slot = styled.div`
     display: flex;
     gap: 0.5rem;
     align-items: baseline;
-    color: ${({ theme }) => theme.colors.text.secondaryColor};
-    font-size: 0.85em;
+    /* secondaryColorDark, not secondaryColor: on this white band the latter is blue95 (~#ebf1f7), which
+       renders the turn/cost metadata at ~1.3:1 — illegible. secondaryColorDark (~#616f7c, ~5:1) is the
+       readable muted grey the platform's own typography uses. */
+    color: ${({ theme }) => theme.colors.text.secondaryColorDark};
+    font-size: ${({ theme }) => theme.typography.fontSize.smallFontSize};
 `;
 
 const Cost = styled(Slot)`
     margin-left: auto;
-`;
-
-const Link = styled.button`
-    padding: 0;
-    border: none;
-    background: none;
-    color: ${({ theme }) => theme.colors.interaction.primaryInteractionColor};
-    font: inherit;
-    text-decoration: underline;
-    cursor: pointer;
 `;
 
 const Blocked = styled.span`
@@ -125,63 +124,34 @@ export interface TranscriptHeaderProps {
 }
 
 export function TranscriptHeader({ document, entries }: TranscriptHeaderProps) {
-    const dispatch = useDispatch();
     const head = readConversation(document);
     const subject = subjectDescriptor(head.subjectModel, head.subjectThingId);
     const t = transcriptStrings();
 
     return (
         <Band data-role="transcript-header">
+            {head.title !== "" && <Title data-role="transcript-title">{head.title}</Title>}
             <Who data-role="transcript-who">
-                <span aria-hidden>{ICONS.assistant}</span>
-                <span>{head.assistantKey}</span>
-                <Title>{head.title}</Title>
+                <AssistantBadge assistantKey={head.assistantKey} />
             </Who>
 
             <Slot data-role="transcript-about">
                 {subject !== undefined && (
-                    <Link
-                        type="button"
-                        data-role="transcript-about-link"
-                        onClick={() =>
-                            dispatch(
-                                openForeignForm({
-                                    module: subject.module,
-                                    documentModel: subject.model,
-                                    thingId: head.subjectThingId,
-                                    // Reading a Thing is a different act, not a step inside a
-                                    // conversation, so its own list belongs beside it.
-                                    masterModule: subject.module
-                                })
-                            )
-                        }>
-                        {`${t.about} ${subject.module} ${shortId(head.subjectThingId)}`}
-                    </Link>
+                    // The subject Thing, named the one way the system names a Thing — title, Model in
+                    // brackets, a link that opens its form read-only in place rather than navigating away.
+                    // The whitelist still gates it: only a subject with a navigable Model is offered.
+                    <ThingLink model={subject.model} thingId={head.subjectThingId} prefix={t.about} />
                 )}
                 {subject === undefined && head.subjectThingId !== "" && (
-                    // A `subjectModel` with no navigable module: text, rather than a link into a scene
-                    // that does not exist and would render an activity nobody can see.
+                    // A `subjectModel` with no navigable module: text, rather than a link that could not
+                    // open a form (domain.md — a link that cannot open a form is not offered as one).
                     <span>{`${t.about} ${head.subjectModel} ${shortId(head.subjectThingId)}`}</span>
                 )}
                 {head.subjectThingId === "" && head.scheduledFor !== "" && (
                     <span>{`${t.scheduledFor} ${instantLabel(head.scheduledFor)}`}</span>
                 )}
                 {head.parentConversationId !== "" && (
-                    <Link
-                        type="button"
-                        data-role="transcript-parent-link"
-                        onClick={() =>
-                            dispatch(
-                                openForeignForm({
-                                    module: "Conversation",
-                                    documentModel: "Conversation_DM",
-                                    thingId: head.parentConversationId,
-                                    masterModule: "Conversation"
-                                })
-                            )
-                        }>
-                        {`${t.calledBy} ${shortId(head.parentConversationId)}`}
-                    </Link>
+                    <ThingLink model="Conversation_DM" thingId={head.parentConversationId} prefix={t.calledBy} />
                 )}
             </Slot>
 
@@ -201,11 +171,6 @@ export function TranscriptHeader({ document, entries }: TranscriptHeaderProps) {
             <Cost data-role="transcript-cost">{`${formatRecordedCost(recordedCost(entries))} ${t.recorded}`}</Cost>
         </Band>
     );
-}
-
-/** Enough of a ThingID to recognise it by, which is all a header has room for. */
-function shortId(thingId: string): string {
-    return thingId.slice(0, 8);
 }
 
 function instantLabel(at: string): string {

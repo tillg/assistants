@@ -81,7 +81,12 @@ export class OpenQuestionPage extends FormPage {
         // The Conversation form, with the thread that leads up to the question.
         const transcript = this.page.getByTestId(AppTestID.CONVERSATION_TRANSCRIPT);
         await expect(transcript).toBeVisible();
-        await expect(transcript.getByTestId(AppTestID.TRANSCRIPT_WHO)).toContainText(question.assistantKey);
+        // The header names the Assistant via its AssistantBadge, which resolves the stored key to the
+        // Assistant's display Name (a case variant of the key for the seeded assistants) and falls back to
+        // the key while the read is in flight — so match the key case-insensitively.
+        await expect(transcript.getByTestId(AppTestID.TRANSCRIPT_WHO)).toContainText(
+            new RegExp(question.assistantKey, "i")
+        );
 
         await transcript.getByTestId(AppTestID.PENDING_QUESTION_ANSWER).click();
         await this.finishedLoading();
@@ -91,7 +96,10 @@ export class OpenQuestionPage extends FormPage {
         // header, read across documents by `ConversationId`. The `Conversation` Control that used
         // to be asserted here is now inside the collapsed *Details* section, and a collapsed A12
         // `Section` does not render its children at all — so there is nothing in the DOM to read.
-        await expect(this.page.getByTestId(AppTestID.TRANSCRIPT_WHO)).toContainText(question.assistantKey);
+        // (Case-insensitive: the badge shows the resolved display Name, a case variant of the key.)
+        await expect(this.page.getByTestId(AppTestID.TRANSCRIPT_WHO)).toContainText(
+            new RegExp(question.assistantKey, "i")
+        );
     }
 
     /** Answer it exactly as a User does: confirm or refuse, say something, save. No timestamp. */
