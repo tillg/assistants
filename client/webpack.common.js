@@ -98,7 +98,8 @@ export default {
         new HtmlWebpackPlugin({
             hash: true,
             template: "./resources/html/index.html",
-            favicon: "./resources/html/images/favicon.svg",
+            // Single source of truth: the browser-tab icon is the shared brand asset, not a client copy.
+            favicon: Path.join(__dirname, "../assets/logo/favicon.svg"),
             chunks: ["main"]
         }),
         new HtmlWebpackPlugin({
@@ -117,8 +118,7 @@ export default {
                 {
                     from: Path.join(__dirname, "resources/html/images"),
                     to: Path.resolve(__dirname, "build/webpack/images"),
-                    noErrorOnMissing: true,
-                    globOptions: { ignore: ["**/images/favicon.svg"] }
+                    noErrorOnMissing: true
                 }
             ]
         })

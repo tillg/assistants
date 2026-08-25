@@ -89,7 +89,9 @@ export function useThingById(model: string, thingId: string | undefined): ThingB
 
 /** A ready result from the cache, or `undefined` when this Thing has not been read yet this session. */
 function cached(model: string, thingId: string | undefined): ThingById | undefined {
-    if (!thingId) return undefined;
+    if (!thingId) {
+        return undefined;
+    }
     const document = cache.get(`${model}/${thingId}`);
     return document === undefined ? undefined : { state: "ready", document };
 }

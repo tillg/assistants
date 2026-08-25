@@ -36,6 +36,10 @@ import type { ReactElement } from "react";
 import { FrameViews } from "@com.mgmtp.a12.client/client-core";
 import { UaaSelectors, UserInfoHeader } from "@com.mgmtp.a12.uaa/uaa-authentication-client";
 
+// The brand lockup (mark + wordmark) is the shared asset; the wordmark is outlined SF Mono, so it renders
+// identically to the Keycloak sign-in lockup rather than as re-typeset live text.
+import assistantsLockup from "../../../assets/logo/lockup-light.svg";
+
 import { RESOURCE_KEYS, useLocalizer } from "../localization";
 import ThemeChooser from "../components/ThemeChooser";
 
@@ -55,6 +59,9 @@ export function CustomApplicationFrameLayout(props: FrameViews.ApplicationFrameL
         <FrameViews.ApplicationFrameLayout
             {...props}
             permissions={roles}
+            logo={<img src={assistantsLockup} alt="Assistants" style={{ height: "2rem", display: "block" }} />}
+            // The lockup already carries the wordmark, so the frame's default text title is cleared.
+            title={<></>}
             additionalHeaderItems={[
                 ...(props.additionalHeaderItems ?? []),
                 {

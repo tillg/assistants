@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 
 import { LoggerFactory } from "@com.mgmtp.a12.utils/utils-logging";
-import { resetThingByIdCache } from "../../../components/conversation/useThingById";
 
+import { resetThingByIdCache } from "../../../components/conversation/useThingById";
 import { ConversationTranscript } from "../../../components/conversation/ConversationTranscript";
 import fixture from "../../fixtures/conversation.json";
 
