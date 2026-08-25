@@ -71,6 +71,9 @@ The terms below are the ones the models, the code and the documents all share. D
 | **Blocked** | A Conversation waiting on the **User** specifically, as against waiting on a tool or on another Assistant. Derived from `waitingFor` and never stored — it is what the 🛑 in the Conversations overview marks, and what the User is scanning that list for. *Avoid* stuck, pending, paused (the global switch) and suspended (any wait) |
 | **Icon vocabulary** (`ICONS`) | 👦🏼 human · 🤖 Assistant · 🛠️ tool · 🛑 blocked. Whenever the system has to say *who* or *stuck*, it says it with one of these, and each **means the same thing wherever it appears** — the 🤖 beside an Assistant on the Dashboard is the 🤖 beside its words in a Transcript. Machinery has no icon, which is the point of it |
 | **Place labels** (`PLACE_ICONS`) | 🗣 conversations · 📄 documents · 💰 bookkeeping · 💳 transactions · 🏦 accounts. A different job: these label a **destination** and **mean nothing outside the Dashboard**, which is why they are a separate constant from `ICONS` rather than more entries in it. No Assistants label exists — every Assistant is the 🤖 `ICONS` already has, not a fifth robot |
+| **Display Name** (of an Assistant) | How an Assistant is named on screen: 🤖 + its **Name**, one unit. A Conversation stores only the **Key** (`AssistantKey`), which is what the Runtime matches and is not for reading; the Name is resolved from the Assistant Thing at read time. Resolving can fail — an Assistant may be renamed, disabled or deleted while its Conversations remain — and that is a fact, not a defect: an unresolved key is shown **as the key**, never blank. No *(Model)* suffix: the 🤖 already says *Assistant* |
+| **Thing Label** | How every other Thing is named on screen: its own **title**, then its **Model in brackets** — *Acme GmbH · #2024-0417 (Invoice)*. Neither part is stored on the Thing (ADR-0002: a ThingID identifies and nothing more); both are composed by the reader. There is no single title field, so the Label knows a per-Model table: `Document`/`Process`/`Conversation` → `Title`; `Party` → `Name`, then `LegalName`; `Invoice` → *IssuerName · #InvoiceNumber*, then `Subject`. Empty fields fall back to a short id; a Model outside the closed, localized set gets no bracket rather than a wrong one |
+| **Open in place** | The second verb for reaching a Thing from a link. *Navigate to* leaves the screen and rebuilds another module around the Thing; *open in place* shows a **read-only summary** of the Thing in a popup over the current screen, dismissed to return exactly where the reader was. Read-only by the same rule as every cross-document read: reads may cross documents, writes may not — editing the Thing is a separate act on its own form |
 
 Three distinctions are load-bearing and easy to lose:
 
@@ -377,9 +380,11 @@ three conditions are new, both live outside the Assistant's definition, and both
 remove a capability — nothing in the catalogue can give an Assistant something its grants do not
 name. A grant that fails any of them is **dropped with its reason**, and the reason reaches the
 model as well as the log: *not granted*, *switched off*, *no longer implemented*, or a parameter
-schema that will not parse. Saying *"that is not one of your tools"* to a model whose Assistant
-plainly still grants the Operation is a false premise to re-plan around, which is why the four
-reasons exist.
+schema that will not parse — and, for a Dynamic Operation, *ambiguous* (the key resolves to both
+compiled code and stored source), *uncompilable* (the Source does not compile, with the compiler's
+message in the log) or *unconfigured egress* (the Source names an egress deployment has not defined)
+(ADR-0025). Saying *"that is not one of your tools"* to a model whose Assistant plainly still grants
+the Operation is a false premise to re-plan around, which is why each reason is named.
 
 **The set of actors who may cause an Operation to run has widened, and the conjunction is what makes
 that safe.** Until ADR-0023 the only route into an Implementation was an Assistant through the loop;
@@ -392,7 +397,11 @@ and it must be **`Enabled`** in the catalogue — the first four in
 any transport exists, and the fifth read off the Operation Thing by the inbox around it. The
 allowlist is not redundant with `mutating = false`: *changes nothing* is not *safe for a browser to
 invoke at will*, and an Operation that touches an LLM is non-mutating and costs money every time it
-is called. Approval plays no part on this route because there is nothing to approve — a call that
+is called. For a Dynamic Operation the middle three flags are read off the Operation Thing rather
+than from code (ADR-0025) — the inbox fetches the Thing once, for them and for `Enabled` — so the
+allowlist, which lives in the compose file and not in the store, is the one check a User's edit cannot
+open; a Dynamic key that is also registered in code is refused at the door as it is in the registry.
+Approval plays no part on this route because there is nothing to approve — a call that
 changes nothing has no arguments a User could be asked to authorise, which is exactly why
 `requiresApproval` appears here as a *refusal* rather than as a question. **Opening a read route does
 not open a write one.**

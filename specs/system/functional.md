@@ -42,8 +42,9 @@ error. It is not a special mechanism; it is the same Open Question with a differ
 
 An **approval** is not a kind either. When an Assistant calls an Operation that requires one —
 `bookkeeping.postTransaction`, and nothing else today — the Runtime refuses the call and raises an
-ordinary `confirm` question, opening *"**Approval needed.**"* and rendering the exact posting as a
-sentence: *"Book €96.50 from Payables to Expenses:Health, dated 2026-08-01, for …?"* Saying yes is
+ordinary `confirm` question, opening *"**Approval needed.**"* and showing the exact posting — since
+ADR-0025 as the Operation's name over a fenced JSON block of its arguments (the accounts, the amount,
+the date, the description), because a dynamic Operation carries no sentence renderer. Saying yes is
 the whole of the interaction; nothing is booked until you do (ADR-0018). Two things about it are
 worth knowing:
 
@@ -135,6 +136,17 @@ Four are freely editable by the User — `Party`, `Document`, `Invoice`, `Proces
 `Invoice` or a `Document` by hand is a supported way in; so is pasting extracted text into a
 Document's `extractedText`.
 
+**Opening a Document shows the document.** Since the letterbox the Documents overview is an inbox of
+post the User has never seen, and one forwarded builder's mail arrives as three Documents — the invoice,
+a letterhead logo and a *Widerrufsbelehrung*. Opening one whose attachment is a PDF renders its first
+page inline in the browser's own viewer, paging, zoom and text selection included; plain text renders as
+text. Triage becomes scrolling rather than three downloads, and checking the Receptionist's
+`classificationNote` against the document it describes — the supervision the system is built around —
+no longer requires leaving the application. Images keep A12's own preview; anything else keeps its
+icon and Download menu. Where the browser cannot draw the attachment, or the fetch fails, the pane shows
+the filename and a Download control that mints its own ticket. A scanned attachment with no text layer
+is the case that gains most: its `extractedText` is empty, and the page is now visible anyway.
+
 ### Editing an Assistant
 
 **Assistants are Things you edit in the UI, not code you deploy** (ADR-0003). Changing the
@@ -168,7 +180,8 @@ are not:
 | Field | Whose | What it is for |
 |---|---|---|
 | `Key`, `System`, `Kind`, `Parameters` | the code's, read-only | What the Operation is and what arguments it takes. `Key` is what a grant names and what the Implementation is found by, so renaming it would point every grant at nothing |
-| `Mutating` | the code's, read-only | Whether performing it changes something outside this system. It sits beside the approval checkbox because it is the input to the question that checkbox answers |
+| `Mutating` | the code's, read-only — **yours, for a dynamic Operation** | Whether performing it changes something outside this system. It sits beside the approval checkbox because it is the input to the question that checkbox answers. For a dynamic Operation there is no compiled author to ask, so the Runtime reads it from here (ADR-0025) |
+| `Client readable` | **yours, for a dynamic Operation** | Whether the Dashboard may call it through the Runtime's door (ADR-0023). Unset means no. Only `bookkeeping.listAccounts` and `bookkeeping.listTransactions` are seeded with it, and the deployment allowlist still has the last word |
 | `Name`, `Description` | **yours** | The label, and the prose the model reads, in markdown. The description is how a model decides which Operation to call, so it is prompt engineering, and it is now something you can edit without a deploy |
 | `Enabled` | **yours** | Whether the Operation is offered at all |
 | `Requires approval` | **yours** | Whether the Runtime refuses the call until it has asked you about those exact arguments and been told yes |
@@ -202,6 +215,24 @@ next Turn uses them — no checkout, no deploy. It is the first capability in th
 an Assistant cannot write an Operation Thing, so it cannot write the code either. For a dynamic
 Operation `Mutating` and `Requires approval` are read from the Thing too (there is no compiled author
 to ask), so the guard that keeps them honest is that same write authority, not code review.
+
+Writing one is writing a `Source` of this shape, in TypeScript with no `import`, `export` or
+`require`: an `async function execute(args, host)` that returns the value the model will read, and —
+for a mutating Operation — a `reconcile` that finds what an earlier attempt under the same key already
+did, so a crash between the call and its record is not a double booking. `host` is everything the
+Source may reach: `host.http.request({ method, path, query, body })` against the base URL of the
+`Egress` you name (the credential is attached by the Runtime and never visible to the Source, an
+absolute URL is refused, and an HTTP status comes back as a value rather than a throw — the Source
+decides what a 404 means); `host.error(message)` to fail with a message the model reads;
+`host.pending({ waitingFor, wakeAt })` to answer *not now*; `host.cache` for what is worth keeping
+between calls, such as the chart of accounts; and `host.context.idempotencyKey`. Any other throw
+reaches the model only as *the Operation failed*, with the detail in the log. `Timeout` may lower the
+deployment's ceiling, never raise it. Save the form and the next Turn runs the new Source; if it does
+not compile, or names an `Egress` the deployment does not configure, every Assistant granted it is told
+so by name on its next Turn and the log carries the compiler's message — there is no validation as you
+type. The sandbox it runs in stops an honest mistake (a loop, a runaway allocation) from taking the
+Runtime down; it is not a security boundary, and the seven shipped Sources in
+`import/operations/bookkeeping/` are the worked examples.
 
 What you cannot do is invent an Operation from the overview. The catalogue describes Operations; a
 built-in one's code performs it and the two are joined by the key, and even a dynamic one is created
@@ -245,11 +276,26 @@ What to expect from one, because none of it is obvious:
   receipts between them, day and gap separators, and a pending question as the last bubble. A row
   waiting on the User carries **🛑**.
 - **The thread carries a header, and the header does not scroll away**, because forty Entries down
-  *who* and *about what* are exactly what a reader has stopped being able to see. Four facts, pinned:
-  the Assistant and the Conversation's title; a link to the subject Thing, or the instant a Schedule
-  was serving, and a link to the calling Conversation when there is one; the status and what it waits
-  on, 🛑 when that is the User and the finish reason when it is over; and what it has cost, in tokens
-  and in turns taken against the cap.
+  *who* and *about what* are exactly what a reader has stopped being able to see. Four facts, pinned,
+  said by name rather than by identifier: the Conversation's **Title**, bold, on top (omitted for a
+  freshly-born Conversation with no title yet, so the Assistant leads instead); the Assistant as
+  **🤖 Receptionist** — icon plus Name, resolved from the key it stores, and the raw key if the
+  Assistant has since been renamed, disabled or deleted; the subject Thing as *about* **Acme GmbH ·
+  #2024-0417** *(Invoice)* — its own title with its Model in brackets, or the instant a Schedule was
+  serving — and the calling Conversation as *called by* its Title *(Conversation)* when there is one;
+  the status and what it waits on, 🛑 when that is the User and the finish reason when it is over; and
+  what it has cost, in tokens and in turns taken against the cap.
+- **A named Thing is always a link, and the link opens it in place.** Clicking *about* or *called by*
+  shows a read-only summary of that Thing — its title and Model as the heading, its filled fields as
+  rows — in a popup over the Conversation; Esc or a click outside dismisses it and the Transcript is
+  exactly where it was. It never navigates into the Thing's module, so the list the reader was
+  working from is never lost. A Thing that cannot be read still shows as a short id and still gets a
+  link; editing the Thing remains a deliberate act on its own form.
+- The Conversation form itself leads with that same band; the collapsed drawer of raw fields beneath
+  it is titled **Details**, so the word *Conversation* appears once — as the form's title. The Details
+  drawer and the Conversations overview's columns still show the raw Assistant key and subject
+  ThingID: they are modelled surfaces, and naming them the same way needs a custom widget each — a
+  recorded follow-on, not a decision.
 - Each Entry carries what the Turn that wrote it cost, as prompt and completion tokens, on the first
   Entry that Turn wrote. The header adds them up — and renders the figure with a **≥**, because a Turn
   that errored records nothing, so the total is a lower bound.
@@ -418,6 +464,7 @@ is stale, and `just ps` shows it.
 | An **answer** | Saving an Open Question form | The only interaction the whole slice requires |
 | An **Assistant definition** | Editing the Assistant form, or the seed file | Markdown prompts and Skills |
 | An **Operation's** prose, approval requirement or kill switch | Editing the Operation form | The rest of the Operation is the code's, and shown read-only. `just bootstrap` does not undo these |
+| A **dynamic Operation's** `Source`, `Egress`, `Language`, `Timeout`, `Mutating`, `Client readable` | Editing the Operation form — the seven `bookkeeping.*` today | TypeScript run by the Operation Host on the next Turn; no deploy (ADR-0025). Created from `import/operations/bookkeeping/` on a fresh install and never re-applied by `just bootstrap` |
 | **Demo data** | `just demo-data` | Parties, processes, documents, invoices, and matching Firefly books |
 | **LLM configuration** | `active` in `llm.json`, one name; the key in `.env` as `<PROFILE>_KEY` | `scripted` is shipped active; costs nothing and needs no key |
 | A **schedule** | A `cron` on an Assistant's `schedule` Trigger | Read in `SCHEDULE_TIMEZONE`, default `Europe/Berlin`. One timezone for the whole system |
@@ -428,10 +475,10 @@ is stale, and `just ps` shows it.
 |---|---|
 | **Open Questions** | The web application's inbox — a 🛑 in the Conversations list, answered on the question's own form |
 | **Things** — Invoices, Parties, Process steps | The ThingStore, visible in the UI |
-| **Transactions** | Firefly III, tagged `thing:<thingId>` with a deep link in `external_url` |
+| **Transactions** | Firefly III, tagged `thing:<thingId>`, with the Turn's idempotency key in `external_id`. The `external_url` back-link was dropped when the posting became stored source (ADR-0025): the Source knows Firefly's API base, not its browser URL |
 | **Transcripts** | `Conversation.entries[]`, and `just logs runtime` |
 | **Health** | The Runtime's compose healthcheck, driven by `heartbeatAt` |
-| An **attachment preview** | The Document form, in a full-width pane beneath the fields — a PDF renders inline in the browser's own viewer inside a sandboxed frame, plain text renders HTML-escaped, images stay A12's file-picker job, and every other type keeps its icon-and-download until a renderer is registered. Read-only: it fetches the bytes same-origin and shows them, and changes no Thing |
+| An **attachment preview** | The Document form, beside the fields when the window is wide enough and beneath them otherwise — a PDF renders inline in the browser's own viewer in a centred A4-shaped frame, plain text renders HTML-escaped, images stay A12's file-picker job, and every other type keeps its icon-and-download until a renderer is registered. Read-only: it fetches the bytes same-origin through the frontend's `/cs` proxy and shows them, and changes no Thing (D-071) |
 
 Nothing is emailed, nothing is paid, and nothing leaves the machine except calls to the configured
 LLM API and the poll of the Receptionist's Mailbox. *Emailed* is worth being precise about now that
@@ -649,17 +696,18 @@ This is one running vertical slice, not a finished system.
   scan and reports itself unhealthy rather than falling back to what the code knows. That is the
   intended behaviour — a second answer to *"what can this Assistant do"* is exactly what the
   catalogue exists to remove — and the remedy is in the log.
-- **The end-to-end cleanup deletes by `Title` prefix, and since the letterbox `Title` is an email
-  subject.** `e2e/tests/base/0-clean.setup.ts` removes every `Document_DM` and `Party_DM` Thing whose
-  name field starts with `E2E`, and it runs as a setup dependency of essentially every end-to-end run.
-  Before ADR-0024 that field only ever held what a test had typed; now it holds whatever the household
-  forwarded, so a genuine invoice whose subject happens to begin *E2E* is deleted, silently, by the
-  next test run — untrusted input meeting a delete, which is the shape of the problem rather than its
-  likelihood. The recommendation, not yet a patch, is to scope the cleanup by something a forwarded
-  mail cannot produce rather than to constrain what the household is allowed to forward. `Source` alone
-  will not serve: the mail tier's own Documents are written by the same ingest and carry `Source:
-  email` like any other, which is precisely why `e2e/utils/mailbox.ts` stamps a per-run token into the
-  subject — that token, not the bare prefix, is the discriminator the cleanup should be reading.
+- **The end-to-end cleanup no longer deletes a Document by `Title` alone — closed, with a caveat.**
+  `e2e/tests/base/0-clean.setup.ts` runs as a setup dependency of essentially every end-to-end run,
+  and since the letterbox a Document's `Title` is an email subject: a genuine invoice whose subject
+  began *E2E* would have been deleted, silently, by the next test run — untrusted input meeting a
+  delete. It now removes a `Document_DM` Thing only when its `Title` starts with `E2E` **and** its
+  `Source` is not `email`, the value the ingest stamps on everything it creates and the only one a
+  forwarded mail can produce; the preview spec stamps `Source: E2E` on the Document it makes, and
+  older `E2E`-titled test Documents with `Source: scan` are still reclaimed. `Party_DM` keeps its
+  `Name`-prefix match, having no `Source` and no untrusted feed. The caveat: the mail tier's own
+  Documents are written by the same ingest and carry `Source: email` like any other, so they are not
+  reclaimed by this rule — `e2e/utils/mailbox.ts`'s per-run subject token remains the discriminator
+  for those.
 - **Whether the paid reading rung earns its keep has never been measured.** `llm.json` names no
   `vision` profile, so `document.readScan`, the Anthropic `document`-block request shape and the
   fold-in of its usage into a Turn's recorded cost have only ever run against the null reader and the
@@ -676,14 +724,16 @@ This is one running vertical slice, not a finished system.
   seen. Catching it would mean comparing content rather than identifiers, which is judgement rather
   than a key, and judgement belongs to the Receptionist. The check itself was always described; what
   was never written down is what it does not cover.
-- **Two implementations of "what is a liability" disagree.** `bookkeeping.listOpenItems` counts an
-  account typed `debt` as an open item (`runtime/src/connectors/firefly.ts:552`), while the type filter
-  behind `bookkeeping.listAccounts` reconciles only Firefly's `liabilit` prefix, so a caller asking for
-  `liability` never sees a `debt` account (`runtime/src/operations/implementations.ts:829`). It is
-  theoretical on this Firefly instance, which answers only `asset`, `expense`, `revenue` and
-  `liabilities`. It is recorded anyway, because one concept implemented twice — each half right about a
-  different side of Firefly's read and write vocabularies — is exactly the shape BUG-02 had: a list
-  that reported nothing outstanding while thousands were owed.
+- **Two implementations of "what is a liability" disagreed — closed by the move to stored source.**
+  `bookkeeping.listOpenItems` used to count an account typed `debt` as an open item (the compiled
+  `FireflyConnector`), while the type filter behind `bookkeeping.listAccounts` reconciled only
+  Firefly's `liabilit` prefix, so a caller asking for `liability` never saw a `debt` account. Since
+  ADR-0025 both are four lines of `Source` in `import/operations/bookkeeping/` and both match the
+  `liabilit` prefix, side by side where a reader can compare them. It was always theoretical on this
+  Firefly instance, which answers only `asset`, `expense`, `revenue` and `liabilities`; it stays
+  recorded because one concept implemented twice — each half right about a different side of
+  Firefly's read and write vocabularies — is exactly the shape BUG-02 had: a list that reported nothing
+  outstanding while thousands were owed.
 
 **Operational limits**
 

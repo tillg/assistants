@@ -92,12 +92,27 @@ it needs the store. The approval check is belt-and-braces with `mutating` and th
 can see that an Operation *shipped* wanting one, since `requiresApproval` is not on
 `OperationImplementation` and the door does not resolve against the catalogue.
 
+**Since ADR-0025 the three middle flags have two sources.** For a built-in Operation they come from
+code, as above. For a **dynamic** one there is no compiled author to ask, so `gate.ts` reads
+`clientReadable`, `mutating` and `requiresApproval` off the Operation Thing — `inbound/server.ts`
+fetches the Thing once (`findOperation`) and hands it to the still-pure `decide()`, using the same
+read for `Enabled`; a store failure reads as *no Thing* and fails closed. A dynamic key that is also
+registered in code is refused at the door as `ambiguous`, as the registry refuses it for Assistants.
+The deployment allowlist is therefore the strongest of the five: it lives in the compose file and not
+in the store, and it is what stands between a mis-edited `mutating: false` and a browser. The two
+Dashboard reads, `bookkeeping.listAccounts` and `bookkeeping.listTransactions`, keep working because
+their seed sets `clientReadable: true`; every other dynamic Operation defaults to not client-readable.
+One observable difference: a dynamic Operation whose External System fails answers `200` with an
+`error` *outcome*, where a compiled one threw and the door answered `502` — both plainly distinct from
+a `403` refusal.
+
 The server checks **its own allowlist and nothing else** before it forwards. That is the whole of the
 outer gate, and the arrangement is deliberate: `Enabled` was moved out of the server and into the
 Runtime, so the server narrows *which names* reach this door and the process that would do the
-executing decides everything else. `Mutating` is deliberately *not* read from the Thing — an editable
-flag may not carry a safety decision, which is the same refusal `registry.ts` already makes for crash
-recovery.
+executing decides everything else. For a built-in Operation `Mutating` is deliberately *not* read
+from the Thing — an editable flag may not carry a safety decision, which is the same refusal
+`registry.ts` already makes for crash recovery. For a dynamic one it has to be, and the trust anchor
+moves from code review to the store's write authority, which no Assistant holds (ADR-0025).
 
 Two directions in the `Enabled` read are uncomfortable and both are the right way round. **A store
 failure counts as not enabled**: this is a check that grants access, so *"I could not find out"* must
@@ -269,6 +284,9 @@ them platform seams, nothing forked and no engine replaced:
 |---|---|---|
 | **A custom screen element** | `formModelMap.CustomScreenElement`, dispatched on a `widget` annotation exactly as the markdown Control is. The form engine hands the component `config.renderOptions.state.data.document`, so the Transcript needs no data flow of its own for the document its form is already on. An optional `exposes: <groupId>` annotation is the ADR-0008 coverage claim that replaces the repeat, and `import/validate-models.mjs` both honours it and errors when it names a group the bound Document Model does not have | `client/src/components/CustomScreenElements.tsx` |
 | **A read by id** | `useThingById(model, thingId)` — one document, read through `dataservices-access`, no write, no activity, no dirty state, no polling. It fails soft: no id, a deleted Thing or a failed request renders a message line, never a broken form | `client/src/components/conversation/useThingById.ts` |
+| **A name for a Thing** | `ThingLink({ model, thingId, prefix? })` — the Thing Label as a link: `thingLabel(model, document, thingId)` is the per-Model title table read off the document `useThingById` returns, `modelLabel(model)` the closed, localized map of bracketed Model names (`MODEL_LABELS`, a client-side const in the spirit of `subject.ts`' whitelist), `shortId` the fallback both share. Fail-soft at every step: no document → short id, Model outside the map → no bracket, and it still renders a link. Clicking calls `useThingPopup()` — never `openForeignForm`; the `subjectDescriptor` whitelist still gates which subjects are offered as links at all | `client/src/components/ThingLink.tsx`, `client/src/components/conversation/thingLabel.ts` |
+| **A name for an Assistant** | `AssistantBadge({ assistantKey })` — `ICONS.assistant` (`aria-hidden`) + the Name `useAssistantName(key)` resolves with one A12 `QUERY` on `Assistant_DM` constrained on `/Assistant/Key`, the request-literal shape `useAssistants` documents, minus paging. Falls back to the key, never blanks; a module-level `Map` keeps a screen with two badges for one key to one query, and holds nothing across a reload | `client/src/components/AssistantBadge.tsx`, `client/src/components/conversation/useAssistantName.ts` |
+| **A Thing opened in place** | `ThingPopupHost` — mounted once around the app in `index.tsx` (and in the test harness `Frame`), holding the single *(model, thingId)* on show; `useThingPopup()` is the setter. The popup is a `ModalOverlay` (`closeOnEsc`, `closeOnOutsideClick`) showing a **read-only summary** — the Thing Label as heading, then the document's populated scalar fields as rows — built from the same `useThingById` read the label already made. No activity is created, so the region is never disturbed and the Conversation stays behind the overlay | `client/src/components/ThingPopup.tsx` |
 | **Cross-module navigation** | `openForeignForm` — cancel every top-level activity and honour the veto, push a master activity for `masterModule`, then push the detail with `initiatingActivityId`. A saga rather than a click handler, because the teardown is an asynchronous handshake whose answer may be *no*. The teardown is not optional: an activity leaves the map only on cancel, commit or `resetState`, and a leaked one breaks the master-detail layout and vetoes module removal at logout. `openModule` is the same recipe without the detail push, and it **owns** the shared teardown that both sagas use | `client/src/sagas/openModule.ts`, `client/src/sagas/openForeignForm.ts` |
 | **A region layout, chosen by name** | The Dashboard's scene clears `CONTENT` to `layout: { name: "Dashboard", settings: { rows: […] } }`. `DefaultLayoutProvider` resolves that name with **no registration** — it is a built-in beside `MasterDetail`, `Stack` and `Null` — and fills each leaf column with `views[i++]`, each inside its own error boundary. **Slot pairing is positional**: the order of the `VIEW_ADD` directives *is* the layout, so `dashboardViewMap.tsx` lists the six Tiles in exactly the order the directives declare them — positional **across rows as well as within one**, which is what the second row made worth stating. The Tiles are views with **no model at all** (`Directive.Add.models` is optional), so each is a plain React component that fetches its own numbers | `import/models/AssistantsAppModel_AM.json`, `client/src/components/dashboard/dashboardViewMap.tsx` |
 | **A count by query** | `useThingCounts(queries)` — N `QUERY` requests in **one** `Dispatcher.rpc` call, of which the only field read is `fullSize`; `entries` is discarded, so no count can become a second copy of a Thing (ADR-0022). Read-only, fails soft, never polls. `paging.pageSize: 0` is rejected by the store, so it asks for 1 and throws the document away. `useAssistants` is its sibling and the one hook that touches a document body — three fields lifted per Assistant, the rest discarded | `client/src/components/dashboard/useThingCounts.ts`, `useAssistants.ts` |
@@ -289,7 +307,34 @@ engine through `OpenQuestion_FM` and by nothing else — a second writer for one
 stayed on the question's own form rather than moving into the Transcript
 ([ADR-0021](../../docs/adr/0021-a-question-is-answered-in-its-conversation.md)).
 
-There is no custom client code beyond these three pieces. The User answers an Open Question by opening it in
+**A Thing named on screen is opened in place, not navigated to.** The Transcript header's *about* and
+*called by* used to be `openForeignForm` links — tear down the region, rebuild another module around
+the Thing, lose the list you were on. They are `ThingLink`s now, and a click is a reading:
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant TL as ThingLink
+    participant TB as useThingById
+    participant H as ThingPopupHost
+    TL->>TB: read Model/ThingID (fails soft)
+    TB-->>TL: document → thingLabel + modelLabel: "title (Model)"
+    U->>TL: click
+    TL->>H: useThingPopup()(model, thingId)
+    H-->>U: ModalOverlay — read-only summary, over the Conversation
+    U->>H: Esc / outside click
+    H-->>U: dismissed; Transcript exactly where it was
+```
+
+It is a summary, not the Thing's modelled form, and that was a decision forced by the platform: a
+FormEngine mounted on a detached activity needs the descriptor to carry a `module` so the scene's models
+load, but a top-level activity *with* a module is also rendered by the region — so the form appeared
+twice, the overlay copy empty. The A12 way to show a modelled form in a modal is a **modelled modal
+region** in the App Model, a larger separate piece of work; until then the popup answers *what is this?*
+from the document it already has, with raw field names for labels and the localized identity on top.
+
+The fourth piece is the [attachment preview](#the-attachment-preview), described with the attachments
+it renders. There is no custom client code beyond these four pieces. The User answers an Open Question by opening it in
 the ordinary A12 instance form and saving it (D-005) — reached now through its Conversation rather
 than from a menu, or through the Dashboard's conversations Tile, which counts the ones waiting.
 
@@ -303,10 +348,11 @@ footer were very nearly invisible. The house rule is `mutedText` in
 `opacity: 0.72`, which over white lands near `#6c6c6c` and about **5.3:1**. Opacity rather than a
 second hard-coded grey, deliberately: it blends toward whatever is actually behind the text, so the
 rule survives a dark theme without a second definition that has to be kept in step. The Dashboard
-was converted; **the transcript components were not**, and they still use `secondaryColor` as a text
-colour in nine places across five files — `TranscriptHeader.tsx:92` and `:99`,
-`PendingQuestion.tsx:72`, `Receipt.tsx:50` and `:61`, `Bubble.tsx:61` and `:92`,
-`QuestionContext.tsx:33` and `ConversationTranscript.tsx:49`. That is an open defect, recorded here
+was converted; the two header bands — `TranscriptHeader.tsx` and `QuestionContext.tsx` — were fixed
+to `theme.colors.text.secondaryColorDark` (about 5.2:1 on the white band, the token the platform's
+own typography uses); **the remaining transcript components were not**, and they still use
+`secondaryColor` as a text colour in six places across four files — `PendingQuestion.tsx`,
+`Receipt.tsx` (twice), `Bubble.tsx` (twice) and `ConversationTranscript.tsx`. That is an open defect, recorded here
 rather than left to be rediscovered by the next person who wonders why a Receipt's label is hard to
 read.
 
@@ -340,12 +386,13 @@ flowchart TB
         W["Trigger Watcher<br/>watcher.ts<br/>seven scans, every 2s"]
         MI["mail ingest<br/>watcher/mail.ts<br/>scan 0, every 60s"]
         L["Loop Driver<br/>advance.ts<br/>one Conversation, one Turn"]
-        TR["Operation registry<br/>registry.ts + implementations.ts<br/>20 Implementations, joined to<br/>the catalogue per Turn"]
+        TR["Operation registry<br/>registry.ts + implementations.ts<br/>13 built-in Implementations, joined to<br/>the catalogue per Turn"]
+        OH["Operation Host<br/>operations/dynamic/<br/>compiles + sandboxes stored source<br/>(the 7 bookkeeping.*)"]
         C["A12 client + Thing repository<br/>a12/client.ts, a12/things.ts,<br/>a12/content.ts"]
         P["LlmProvider<br/>openai | anthropic | scripted"]
         V["VisionReader<br/>llm/vision.ts — or none"]
         RD["text-layer reader<br/>readers/textLayer.ts"]
-        FFC["Firefly connector<br/>connectors/firefly.ts"]
+        FFC["Firefly connector<br/>connectors/firefly.ts<br/>demo loader only — no Operation calls it"]
         EMC["Email connector<br/>connectors/email.ts — IMAP"]
         H["health.ts<br/>heartbeat freshness"]
     end
@@ -357,7 +404,8 @@ flowchart TB
     L --> TR
     L --> P
     TR --> C
-    TR --> FFC
+    TR --> OH
+    OH -->|"bookkeeping egress<br/>credential attached by the host"| FF3[("Firefly III")]
     TR --> RD
     TR --> V
     W --> C
@@ -492,7 +540,11 @@ How the question reads is `describeCall` on the Operation, because this question
 user-facing surface of *"nothing is booked without an answer"*. The Runtime adds the **Approval
 needed.** framing; an Operation without a renderer falls back to a fenced JSON block, which exists so
 the check never blocks on a missing renderer and is not the intended experience — a JSON blob in the
-inbox is how a safety feature becomes a thing the User clicks yes on without reading.
+inbox is how a safety feature becomes a thing the User clicks yes on without reading. Since ADR-0025
+that fallback is what `bookkeeping.postTransaction` shows: a dynamic Operation's source runs
+asynchronously in a worker and `describeCall` is synchronous, so it has no renderer. The account names
+and the amount are still in the block, because they are the arguments; a synchronous `describe` for
+dynamic Operations is a recorded follow-up.
 
 #### The trigger watcher
 
@@ -904,6 +956,47 @@ URL or credential:
 Other bounds live beside it: `DYNAMIC_OPERATION_TIMEOUT_MS` (a ceiling a Thing's `timeoutMs` may lower,
 never raise), `DYNAMIC_OPERATION_MAX_BODY_BYTES`, and `DYNAMIC_OPERATION_MEMORY_MB`.
 
+One execution, end to end — everything inside the Runtime container, nothing sent anywhere:
+
+```mermaid
+sequenceDiagram
+    participant L as Loop Driver (advance.ts)
+    participant R as OperationRegistry
+    participant H as OperationHost (host.ts)
+    participant W as worker.ts (worker thread)
+    participant X as sandbox (vm context)
+    participant F as Firefly III
+
+    L->>R: grantedTo(assistant, catalogue)
+    R->>H: compile(source, language)
+    H-->>R: compiled module, cached by sha256(source)
+    Note over R: GrantedOperation.execute closes over it
+    L->>H: execute(args, context)
+    H->>W: spawn — code, args, idempotencyKey, egress, timeout
+    W->>X: vm.runInNewContext(code, curated globals)
+    X->>W: host.http.request({method: "GET", path: "/api/v1/accounts"})
+    W->>F: GET <egress url>/api/v1/accounts — Authorization: Bearer ***
+    F-->>W: 200 JSON
+    W-->>X: {status, ok, body}
+    X-->>W: return value | throw host.error(...) | return host.pending(...)
+    W-->>H: {ok, value} | {ok: false, message} | {pending}
+    H-->>L: outcome — value | error | pending
+```
+
+**How it is wired, and what it deliberately lacks.** `OperationRegistry` takes the `OperationHost` in
+its constructor (`services.ts`); a dynamic Thing met by a registry with no host is dropped as
+`unimplemented`. `advance.ts` gained nothing: it calls `resolved.execute(...)` and
+`resolved.reconcile(...)` on a `GrantedOperation` and cannot tell which kind is behind them. A worker
+is spawned per execution — roughly 15–30 ms against 50–300 ms of HTTP — and there is no pool, on
+purpose, because a pool means residual state between two Operations' runs; under vitest and `tsx` the
+worker is bootstrapped through `tsx/esm/api`, in the compiled image it is `worker.js` directly. Two
+things a dynamic Operation cannot carry: a `describeCall` renderer, because rendering is synchronous
+and stored source is not — so `bookkeeping.postTransaction`'s approval prompt is the fenced-JSON
+fallback — and a `reconcile` the host can *see*: a `mutating` dynamic Operation whose source declares
+no `reconcile` is reported by name at bootstrap and at resolution (a static scan of the compiled code,
+never an execution in the main thread), not refused, since the loop already escalates rather than
+guesses.
+
 #### The LLM provider
 
 ```ts
@@ -941,9 +1034,11 @@ token over Firefly's own web endpoints — no artisan command can do it — writ
 volume the Runtime reads.
 
 **Since ADR-0025 the translation is not a compiled Connector but the seven Operations' own source**,
-run by the Operation Host against the `bookkeeping` egress. `FireflyConnector` keeps `isReachable()`
-for the health check; its operation-serving role has moved into `import/operations/bookkeeping/`,
-where a reader can see the HTTP each Operation makes. The hard-won behaviour survived the move: the
+run by the Operation Host against the `bookkeeping` egress. No Operation calls `FireflyConnector` any
+more; the class is retained only because the demo loader (`runtime/src/demo/cli.ts`) seeds the
+household's books through it, and stripping it — rewriting the loader first — is a recorded follow-up.
+Its operation-serving role has moved into `import/operations/bookkeeping/` (seven Source files and a
+shared `prelude.ts`), where a reader can see the HTTP each Operation makes. The hard-won behaviour survived the move: the
 chart-of-accounts cache is now `host.cache`; `external_id` idempotency and `findByExternalId` are the
 `reconcile` in `postTransaction`'s source; the `liabilities`/`liability` spelling (BUG-02) is a line
 in `listAccounts`; and the 422 translation into the model's vocabulary is a table in the shared prelude.
@@ -1009,7 +1104,7 @@ forwarded invoice, and the server's `attachment.allowedMimeTypes` listed only `i
 `image/jpeg`, which is a rejection of every PDF — the whole point of the exercise.
 
 Two facts about the **download** side are recorded here because they were measured against the running
-stack and they constrain any future attempt to *preview* an attachment in the web application.
+stack and they shaped the [attachment preview](#the-attachment-preview) the web application now has.
 
 **The download route cannot be framed, and it is not the same origin.** `/cs/download/{id}` serves
 `Content-Disposition: attachment` unconditionally — `?disposition=inline&inline=true` is ignored, an
@@ -1018,8 +1113,9 @@ precise about *what* blocks it: there is **no `X-Frame-Options` and no CSP** on 
 framing is not the obstacle; the disposition header is. And the fetch-plus-blob workaround fails for a
 second, independent reason — `/cs` is a **different origin** from the frontend, because nginx proxies
 `/api` and `/api/actuator` and nothing else, so `fetch(location)` from `http://localhost:8081` answers
-*"No 'Access-Control-Allow-Origin' header is present"*. Both routes are therefore closed, and an
-inline preview needs either a same-origin authenticated route of our own or a proxied `/cs`.
+*"No 'Access-Control-Allow-Origin' header is present"*. Both routes were therefore closed, and an
+inline preview needed either a same-origin authenticated route of our own or a proxied `/cs`. The
+proxy was chosen (D-071) — see below.
 
 **The download URL is a single-use ticket, not a handle.** The durable handle is `attachment_id` on the
 Document's attachment group, which is reusable without limit; the URL is a one-shot redemption of it,
@@ -1031,6 +1127,70 @@ step, against the User's own token — and being single-use is the whole reason 
 unauthenticated URL for a household invoice would leak for ever, through browser history, a `Referer`
 header or a shared screenshot. The only rules that follow are *mint your own*, never reuse a ticket,
 and never spend the one the Download menu item is about to use.
+
+#### The attachment preview
+
+The Document form shows a PDF or plain-text attachment inline — the first page in the browser's own PDF
+viewer, the text HTML-escaped in a `<pre>` — beside the fields when the window is wide enough and
+wrapping beneath them when it is not, scrolling itself into view when it has wrapped below the fold.
+Images stay with A12's own file-picker preview; every other type keeps its icon-and-download. It is a
+reading affordance and nothing else: no Thing, Model, Operation or grant changed, and nothing is
+written. Three files carry it, all in `client/src/components/document/`:
+
+| Piece | What it does |
+|---|---|
+| `useAttachmentSource` | Byte delivery, **mime-agnostic**: mints a fresh ticket via `LOAD_ATTACHMENT_URL`, reduces the advertised location to its path so the `fetch` is same-origin, makes one object URL and revokes it on unmount and on `attachmentId` change (verified live: switching across five Documents left exactly one blob alive) |
+| `AttachmentPreview` | A **dispatcher on `mimeType`** over a small registry of renderers — `application/pdf` and `text/plain` today. A type with no renderer renders nothing at all, and `canPreview(mimeType)` lets the pane stay away entirely rather than draw an empty frame |
+| `DocumentAttachmentPane` | Placement. It wraps `EnginesViewMap.FormEngine` (`client/src/app/EnginesViewMap.tsx`) in a `flex-wrap` row and self-gates on the activity's model being `Document_DM`, reading the document from `ActivitySelectors.data` (CDD as fallback) — no `WidgetMap` entry, no `appsetup.ts` change. Every other form is the row's only child and stays full-width |
+
+```mermaid
+sequenceDiagram
+    participant P as AttachmentPreview
+    participant N as frontend nginx (:8081)
+    participant S as server (:8082)
+    P->>N: POST /api/v2/rpc LOAD_ATTACHMENT_URL {attachmentId, docRef} — the User's bearer token
+    N->>S: proxied
+    S-->>P: { location: "http://…:8082/cs/download/<ticket>?filename=…" }
+    P->>N: GET /cs/download/<ticket> — path only, same origin
+    N->>S: location /cs → NGINX_ASSISTANTS_SERVER_CONTENTSTORE_URL
+    S-->>P: 200 bytes, Content-Disposition: attachment
+    P->>P: new Blob([bytes], { type: mimeType }) → createObjectURL → <iframe src=blob:…> or <pre>
+```
+
+**The bytes come through a proxy line, not a server route (D-071).** `client/nginx.conf.template` has a
+`location /cs` that forwards to `NGINX_ASSISTANTS_SERVER_CONTENTSTORE_URL` (`http://server:8080/cs` in
+`compose/docker-compose.yml`), and `client/webpack.dev.js` proxies `/cs` the same way for the dev
+server. Same-origin dissolves the CORS obstacle; the blob URL sidesteps the disposition header. A
+same-origin inline route on the server was feasible and rejected: a fourth hand-written Java class, a
+tension with ADR-0023, and a rebuild of the shared server image, for what one configuration line
+achieves. The k8s nginx variant proxies nothing (the ingress does) and is untouched. One operational
+consequence: the frontend image's start command runs `envsubst` with a **fixed allowlist** of variables,
+generated by `client/build.gradle`'s `createDockerfile` task — a new `${VAR}` in `nginx.conf.template`
+must be added there too, or the built nginx dies on an unknown variable. The dev server never exercises
+this, so such an edit is verified only by a full `just build` + `just up`.
+
+**Security.** The bytes are untrusted — they arrived in an email from outside — and they are handed to
+the browser's PDF viewer, the same code that opens every PDF the User clicks on the web. The frame
+carries **no `sandbox` attribute, measured rather than overlooked**: Chrome refuses its internal PDF
+viewer inside any sandboxed frame (`sandbox=""`, `allow-same-origin` and `allow-scripts
+allow-same-origin` each rendered a broken-document icon). Two things make the un-sandboxed frame safe:
+its source is a blob URL, never a remote origin, and `useAttachmentSource` **re-types the blob to the
+attachment's declared MIME type** before handing it over, so a store response mislabelled `text/html`
+cannot be sniffed into scriptable markup — a mismatch renders as a broken PDF, never as HTML. The text
+renderer relies on React's child escaping and never `dangerouslySetInnerHTML`. Every renderer added to
+the registry later owns its own sanitisation, which is why markdown and Office formats are a separate
+change rather than a missing branch. The `text/plain` renderer is built and tested but **unreachable in
+this deployment**: the server's `attachment.allowedMimeTypes` is `image/png,image/jpeg,application/pdf`
+and the type is server-detected, so no plain-text attachment can exist until the allowlist is widened —
+a decision deliberately left to the User rather than taken by the change.
+
+**Two platform observations recorded here, neither ours to fix.** The attachment field's options
+button carries an `aria-labelledby` pointing at `a12-Attachment-f_attachment-content-visible-text`,
+which does not exist in the DOM — a dangling ARIA reference. And in a Playwright MCP session a real
+`page.click()` did not reach this application's React handlers at all (no network, no state change, no
+error) while a synthetic `dispatchEvent(new MouseEvent("click", {bubbles: true}))` did; the e2e harness
+itself, driving real user input, is unaffected. `appsetup.ts` sets `deepLinking.onlyWelcomePage: true`,
+so a form cannot be reached by URL either — navigation in any exploratory session goes through the UI.
 
 Extraction is described under [the Runtime](#reading-an-attachment): `document.extractText` on
 arrival and on demand, `document.readScan` where a `vision` profile is configured, and
@@ -1148,7 +1308,7 @@ localhost for debugging.
 
 | External system | Protocol | Reached by |
 |---|---|---|
-| Firefly III | REST + personal access token | Runtime, via the Firefly Connector |
+| Firefly III | REST + personal access token | Runtime, via the Operation Host over the `bookkeeping` egress (the seven dynamic `bookkeeping.*`); the demo loader still uses the Firefly Connector |
 | An LLM API | HTTPS (OpenAI-compatible or Anthropic Messages) | Runtime, via `LlmProvider` |
 | A vision-capable LLM API | HTTPS (Anthropic Messages, the PDF as a `document` block) | Runtime, via `VisionReader` — only where `llm.json` names a `vision` profile |
 | A Gmail mailbox | IMAPS on 993, with a Google App Password | Runtime, via the Email Connector, outbound only |
@@ -1188,8 +1348,10 @@ Two loaders, deliberately distinct:
   because the three have different owners. The Assistant seeds are re-applied on every run, so a
   prompt edited in the web application is overwritten. `RuntimeState` is left alone, because it is
   live state. An Operation gets both: the mechanical mirror of the code — `system`, `kind`,
-  `parameters`, `mutating` — is re-applied, while the prose, `requiresApproval`, `enabled` and
-  `notes` are created once and never touched again. The rule in one line is *re-apply what the code
+  `parameters`, `mutating`, `implementation` — is re-applied, while the prose, `requiresApproval`,
+  `enabled`, `notes` and, for a dynamic Operation, `source`, `language`, `egress`, `timeoutMs` and
+  `clientReadable` are created once and never touched again (the seven `bookkeeping.*` seeds read
+  their Source from `import/operations/bookkeeping/` at bootstrap time). The rule in one line is *re-apply what the code
   knows and never re-apply a decision*; a description improved in code therefore reaches only fresh
   installs, and bootstrap reports the divergence by name rather than leaving it to be discovered.
 - **`just demo-data`** loads what the household *has*: parties, processes, documents, invoices and
@@ -1205,10 +1367,10 @@ Two loaders, deliberately distinct:
 | Tier | Runner | Proves |
 |---|---|---|
 | **Model validation** | `import/validate-models.mjs` + Gradle `convertModels` | Every `_DM`/`_FM`/`_OM` is well-formed; **both directions** — an `elementRef` with no field fails, and a field no form model references warns, with an allow-list for the deliberately machine-owned ones. Also that every `indexed` field the watcher uses exists |
-| **Runtime unit** | vitest | The loop driver against `ScriptedProvider`: birth, one Turn, dispatching a call, grant resolution and the four ways it can drop one, suspension on `askUser`, continuation on answer, `wakeAt` timeout, lease recovery **without re-execution**, one Invoice → exactly one Accountant Conversation, `maxTurns` → Open Question, late child result, self-call rejection |
-| **Integration** | vitest against the live stack | The A12 client's CRUD and query, search-then-create idempotency, the Thing repository, every watcher query, the Firefly connector. Also the two refusals the ADR-0019 security argument rests on, asserted as **two identities running the same call**: the `runtime` identity answers `-32059` on `ADD_DOCUMENT` and `MODIFY_DOCUMENT` against `Operation_DM` where `human` succeeds, and the Runtime can still *read* the catalogue it may not write — which is the difference between the mitigation being designed and the mitigation being true. And **GreenMail** in a throwaway container as the IMAP rig, a real server rather than a mock, precisely so `imapflow` is exercised against a stateful protocol. Skipped rather than failed when the stack is down |
+| **Runtime unit** | vitest | The loop driver against `ScriptedProvider`: birth, one Turn, dispatching a call, grant resolution and the four ways it can drop one, suspension on `askUser`, continuation on answer, `wakeAt` timeout, lease recovery **without re-execution**, one Invoice → exactly one Accountant Conversation, `maxTurns` → Open Question, late child result, self-call rejection. The Operation Host on its own — compile (type-strip, refused `import`/`export`/`require`, sha256 cache), sandbox (no `process`, `require`, `fetch`; timeout and memory ceiling), the injected HTTP client (absolute URL refused, credential never in the sandbox, status never thrown), `host.cache` — and the seven dynamic `bookkeeping.*` against an in-process Firefly HTTP fixture, which is also how the approval and inbound-door machinery is exercised now that every approval-bearing and client-readable Operation is dynamic |
+| **Integration** | vitest against the live stack | The A12 client's CRUD and query, search-then-create idempotency, the Thing repository, every watcher query, the Firefly connector — and, in `dynamicBookkeeping.itest.ts`, the seven `bookkeeping.*` Operations as stored source run through the real Operation Host against the live Firefly: the same guarantees `firefly.itest.ts` asserts of the connector (never let Firefly invent an account, `external_id` idempotency, the `liabilities`/`liability` spelling, the mandatory budget period), one layer out. Also the two refusals the ADR-0019 security argument rests on, asserted as **two identities running the same call**: the `runtime` identity answers `-32059` on `ADD_DOCUMENT` and `MODIFY_DOCUMENT` against `Operation_DM` where `human` succeeds, and the Runtime can still *read* the catalogue it may not write — which is the difference between the mitigation being designed and the mitigation being true. And **GreenMail** in a throwaway container as the IMAP rig, a real server rather than a mock, precisely so `imapflow` is exercised against a stateful protocol. Skipped rather than failed when the stack is down |
 | **Client** | vitest | The markdown editor's suite and the client's own |
-| **End-to-end** | Playwright, the `scripted` profile | Login as four users, every module opened, Party CRUD, a prompt round-tripped through the markdown editor, localisation, the favicon, the whole invoice slice, and surviving a restart |
+| **End-to-end** | Playwright, the `scripted` profile | Login as four users, every module opened, Party CRUD, a prompt round-tripped through the markdown editor, localisation, the favicon, a PDF uploaded through `ThingStore.uploadAttachment` and previewed on its Document (`11-attachment-preview.spec.ts`), the whole invoice slice, and surviving a restart |
 | **Soak** | Playwright, its own project | A dozen Things made and unmade through the application, with the Dashboard asked to keep up: the counting Tiles read the store being written to and the money Tiles read Firefly through the Runtime, so both seams are exercised against a store genuinely moving underneath them. Its own project because running it beside seven other workers starves the application rather than testing it, and chained after **`base`** rather than after the flow tier — behind `flow-restart` it never ran at all here, since the flow specs drive the live Assistants and an Assistant cannot act when the configured model emits its tool calls as prose. A soak test that silently does not run is worse than one that fails. Nothing is asserted exactly: the Runtime is scanning throughout, so only monotonic and structural claims are made |
 | **Live LLM** (opt-in) | Playwright | The same specs against a real model. Refuses to run while `llm.json` is on `scripted` |
 
