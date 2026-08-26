@@ -1,6 +1,6 @@
 # Research index
 
-Four research papers live in [`specs/research/`](specs/research/). Each was written to settle
+Five research papers live in [`specs/research/`](specs/research/). Each was written to settle
 something the code could not decide on its own — what to build on, how the loop should work, what a
 field should be, what everyone else does — and each records what it settled, what it did not, and
 what has since gone stale.
@@ -15,6 +15,7 @@ and an ADR disagree, the ADR wins and the paper is the one that is out of date.
 | [AGENTIC_LOOP.md](specs/research/AGENTIC_LOOP.md) | How should the loop that runs an Assistant actually work? | **No workflow engine.** An append-only transcript plus a re-entrant loop |
 | [MARKDOWN_FIELDS.md](specs/research/MARKDOWN_FIELDS.md) | How does a Thing hold long-form prose? | **A String plus annotations.** Two of four questions still open |
 | [ASSISTANTS_VS_OPENCLAW.md](specs/research/ASSISTANTS_VS_OPENCLAW.md) | What does a mature personal agent do that we do not? | **Two gaps found, both ours.** ADR-0016 and ADR-0017 |
+| [BANKING.md](specs/research/BANKING.md) | Can the Assistant do the bank transactions itself? | **Read yes, pay no.** PSD2 SCA keeps a human tap per transfer; FinTS for reads |
 
 ---
 
@@ -145,3 +146,20 @@ A paper earns its place by recording **what it went to find out**, **what it set
 it did not** — the third being the part that makes it worth keeping once the code exists. Sources
 that are not ours (articles, downloads, figures) go in a subdirectory beside it, so a reader can
 tell our reasoning from someone else's.
+
+---
+
+## [BANKING.md](specs/research/BANKING.md) — can the Assistant do the bank transactions itself?
+
+**Executive summary.** Surveys FinTS/HBCI, PSD2 aggregators, EBICS, standing orders and the 2026
+agentic-payment schemes against one question: can `bank.sendMoney` stop being a Manual Connector.
+
+**What it settled.** Reading is automatable — FinTS (`lib-fints` in TypeScript, `python-fints`,
+`hbci4java`) with one human re-authentication every ~90 days, or Enable Banking as the only
+surviving own-account aggregator. Paying is not: every SEPA transfer needs the holder's SCA, no
+exemption is available to a third-party agent, EBICS is business-only, and PSD3 changes nothing
+here. The realistic Connector *drafts* the transfer and suspends for a one-tap approval in the
+banking app — ADR-0004's shape unchanged, ADR-0018 load-bearing.
+
+**Still live.** Cheapest next step is the community FinTS importer into Firefly, which is what the
+deferred `importStatement` and `markCleared` in ACCOUNTING.md were waiting for.
